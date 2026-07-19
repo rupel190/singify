@@ -1,0 +1,17 @@
+# dependencies
+node_modules/
+
+# build output
+dist/
+
+# bun
+.bun/
+
+# editor / OS
+.DS_Store
+*.log
+
+# local secrets / config
+config.json
+.env
+.env.*

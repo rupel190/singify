@@ -1,0 +1,18 @@
+{
+  "name": "spicetify-karaoke",
+  "version": "0.1.0",
+  "description": "UltraStar karaoke inside Spotify via Spicetify",
+  "type": "module",
+  "scripts": {
+    "test": "bun test",
+    "dev": "bun run dev/serve.ts",
+    "build": "bun build ./src/index.ts --outfile ./dist/karaoke.js --target browser"
+  },
+  "devDependencies": {
+    "@types/bun": "latest",
+    "@types/react": "^19.2.17",
+    "@types/react-dom": "^19.2.3",
+    "react": "^19.2.7",
+    "react-dom": "^19.2.7"
+  }
+}
