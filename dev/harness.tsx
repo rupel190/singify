@@ -19,7 +19,7 @@ import { createRoot } from "react-dom/client";
 import { parse } from "../src/ultrastar-parser";
 import { KaraokeView, type FrameDebug } from "../src/karaoke-view";
 import { SongPicker } from "../src/song-picker";
-import { startMicPitch, type MicPitch } from "../src/mic";
+import { startMicPitch, type MicPitch, type AppliedProcessing } from "../src/mic";
 import { sensitivityToThreshold } from "../src/pitch";
 
 const SENS_KEY = "singify:sensitivity";
@@ -158,13 +158,18 @@ function LevelMeter(props: { level: number; threshold: number }) {
  * frequent "no signal" means your level is dipping below the gate — raise
  * sensitivity or sing louder.
  */
+function onOff(b: boolean | undefined): string {
+  return b === undefined ? "?" : b ? "on" : "off";
+}
+
 function DebugPanel(props: {
   data: FrameDebug | null;
   micOn: boolean;
   level: number;
   threshold: number;
+  applied: AppliedProcessing | null;
 }) {
-  const { data, micOn, level, threshold } = props;
+  const { data, micOn, level, threshold, applied } = props;
   const cell: React.CSSProperties = { display: "flex", flexDirection: "column", gap: 2 };
   const label: React.CSSProperties = {
     fontSize: 10,
@@ -235,6 +240,21 @@ function DebugPanel(props: {
             }}
           >
             {hit ? "HIT" : "miss"}
+          </div>
+          <div style={cell}>
+            <span style={label}>Processing</span>
+            <span style={{ fontSize: 12, fontVariantNumeric: "tabular-nums" }}>
+              {/* AGC on is the prime suspect for a fading held note */}
+              <span style={{ color: applied?.autoGainControl ? "#ff6b6b" : "rgba(255,255,255,0.7)" }}>
+                AGC {onOff(applied?.autoGainControl)}
+              </span>
+              {" · "}
+              <span style={{ color: applied?.noiseSuppression ? "#e6b422" : "rgba(255,255,255,0.7)" }}>
+                NS {onOff(applied?.noiseSuppression)}
+              </span>
+              {" · "}
+              <span style={{ color: "rgba(255,255,255,0.7)" }}>AEC {onOff(applied?.echoCancellation)}</span>
+            </span>
           </div>
         </>
       )}
@@ -327,6 +347,21 @@ function App() {
     micRef.current?.setOptions({ rmsThreshold: sensitivityToThreshold(v) });
   };
 
+  // "Raw" = ask the browser to turn OFF noise-suppression / echo-cancel / AGC,
+  // to A/B whether those DSP stages are what's fading held notes.
+  const [rawMic, setRawMic] = React.useState(false);
+
+  const beginMic = async (raw: boolean) => {
+    setMicError(null);
+    micRef.current = await startMicPitch({
+      rmsThreshold: sensitivityToThreshold(sensitivity),
+      ...(raw
+        ? { noiseSuppression: false, echoCancellation: false, autoGainControl: false }
+        : {}),
+    });
+    setMicOn(true);
+  };
+
   const toggleMic = async () => {
     if (micRef.current) {
       micRef.current.stop();
@@ -335,14 +370,25 @@ function App() {
       return;
     }
     try {
-      setMicError(null);
-      micRef.current = await startMicPitch({
-        rmsThreshold: sensitivityToThreshold(sensitivity),
-      });
-      setMicOn(true);
+      await beginMic(rawMic);
     } catch (e) {
       setMicError(e instanceof Error ? e.message : "Mic access denied");
       setMicOn(false);
+    }
+  };
+
+  const toggleRaw = async () => {
+    const next = !rawMic;
+    setRawMic(next);
+    if (micRef.current) {
+      micRef.current.stop();
+      micRef.current = null;
+      try {
+        await beginMic(next); // restart with the new constraints
+      } catch (e) {
+        setMicError(e instanceof Error ? e.message : "Mic access denied");
+        setMicOn(false);
+      }
     }
   };
 
@@ -456,6 +502,21 @@ function App() {
           }}
         >
           🔬 Debug
+        </button>
+        <button
+          onClick={toggleRaw}
+          title="Disable noise-suppression / echo-cancel / AGC to A/B held-note fade"
+          style={{
+            background: rawMic ? "#e6b422" : "#2a2a33",
+            color: rawMic ? "#2a1e00" : "#fff",
+            border: 0,
+            borderRadius: 20,
+            padding: "8px 14px",
+            font: "700 13px system-ui",
+            cursor: "pointer",
+          }}
+        >
+          {rawMic ? "Raw mic ✓" : "Raw mic"}
         </button>
         {micError && (
           <span style={{ color: "#ff6b6b", fontSize: 12 }}>{micError}</span>
@@ -600,6 +661,7 @@ function App() {
             micOn={micOn}
             level={micOn ? micRef.current?.level() ?? 0 : 0}
             threshold={sensitivityToThreshold(sensitivity)}
+            applied={micRef.current?.applied ?? null}
           />
         )}
       </div>
