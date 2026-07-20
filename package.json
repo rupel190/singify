@@ -6,6 +6,7 @@
   "scripts": {
     "test": "bun test",
     "dev": "bun run dev/serve.ts",
+    "helper": "bun run server/helper.ts",
     "build": "bun build ./src/index.ts --outfile ./dist/karaoke.js --target browser"
   },
   "devDependencies": {

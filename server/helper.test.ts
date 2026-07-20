@@ -1,0 +1,136 @@
+import { describe, test, expect } from "bun:test";
+import { createHandler, type HandlerDeps } from "./helper";
+import { SessionExpiredError } from "../src/resolver";
+import type { ParsedSong } from "../src/ultrastar-parser";
+
+const FAKE_SONG = { headers: { title: "T" }, lines: [], durationMs: 0 } as unknown as ParsedSong;
+
+const baseDeps: HandlerDeps = {
+  hasCredentials: true,
+  login: async () => {},
+  relogin: async () => {},
+  resolveForTrack: async () => ({ status: "notFound" }),
+  confirmPick: async () => FAKE_SONG,
+};
+
+function req(method: string, path: string, body?: unknown): Request {
+  return new Request(`http://127.0.0.1:4455${path}`, {
+    method,
+    headers: body ? { "Content-Type": "application/json" } : undefined,
+    body: body ? JSON.stringify(body) : undefined,
+  });
+}
+
+describe("helper handler", () => {
+  test("OPTIONS preflight → 204 with CORS headers", async () => {
+    const res = await createHandler(baseDeps)(req("OPTIONS", "/pick"));
+    expect(res.status).toBe(204);
+    expect(res.headers.get("Access-Control-Allow-Origin")).toBe("*");
+  });
+
+  test("/health reports credential status without needing a session", async () => {
+    const res = await createHandler({ ...baseDeps, hasCredentials: false })(
+      req("GET", "/health")
+    );
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ ok: true, hasCredentials: false });
+  });
+
+  test("GET /resolve returns the resolver result + CORS header", async () => {
+    const deps: HandlerDeps = {
+      ...baseDeps,
+      resolveForTrack: async (trackId, artist, title) => {
+        expect(trackId).toBe("spotify:track:abc");
+        expect(artist).toBe("A");
+        expect(title).toBe("T");
+        return { status: "cached", song: FAKE_SONG };
+      },
+    };
+    const res = await createHandler(deps)(
+      req("GET", "/resolve?trackId=spotify:track:abc&artist=A&title=T")
+    );
+    expect(res.status).toBe(200);
+    expect(res.headers.get("Access-Control-Allow-Origin")).toBe("*");
+    expect((await res.json()).status).toBe("cached");
+  });
+
+  test("GET /resolve without a trackId → 400", async () => {
+    const res = await createHandler(baseDeps)(req("GET", "/resolve?artist=A"));
+    expect(res.status).toBe(400);
+  });
+
+  test("POST /pick downloads and returns the song", async () => {
+    let picked = -1;
+    const deps: HandlerDeps = {
+      ...baseDeps,
+      confirmPick: async (_trackId, candidate) => {
+        picked = candidate.id;
+        return FAKE_SONG;
+      },
+    };
+    const res = await createHandler(deps)(
+      req("POST", "/pick", { trackId: "t1", candidate: { id: 42, title: "x" } })
+    );
+    expect(res.status).toBe(200);
+    expect(picked).toBe(42);
+    expect((await res.json()).song.headers.title).toBe("T");
+  });
+
+  test("POST /pick without a body → 400", async () => {
+    const res = await createHandler(baseDeps)(req("POST", "/pick", { trackId: "t1" }));
+    expect(res.status).toBe(400);
+  });
+
+  test("no credentials → /resolve is 503 and never calls the resolver", async () => {
+    let called = false;
+    const deps: HandlerDeps = {
+      ...baseDeps,
+      hasCredentials: false,
+      resolveForTrack: async () => {
+        called = true;
+        return { status: "notFound" };
+      },
+    };
+    const res = await createHandler(deps)(req("GET", "/resolve?trackId=t1"));
+    expect(res.status).toBe(503);
+    expect((await res.json()).error).toBe("no-credentials");
+    expect(called).toBe(false);
+  });
+
+  test("a session-expiry triggers exactly one re-login + retry", async () => {
+    let calls = 0;
+    let reloginCalls = 0;
+    const deps: HandlerDeps = {
+      ...baseDeps,
+      relogin: async () => {
+        reloginCalls++;
+      },
+      resolveForTrack: async () => {
+        calls++;
+        if (calls === 1) throw new SessionExpiredError();
+        return { status: "notFound" };
+      },
+    };
+    const res = await createHandler(deps)(req("GET", "/resolve?trackId=t1"));
+    expect(res.status).toBe(200);
+    expect(calls).toBe(2);
+    expect(reloginCalls).toBe(1);
+  });
+
+  test("a non-session error surfaces as 502", async () => {
+    const deps: HandlerDeps = {
+      ...baseDeps,
+      resolveForTrack: async () => {
+        throw new Error("USDB search failed: HTTP 500");
+      },
+    };
+    const res = await createHandler(deps)(req("GET", "/resolve?trackId=t1"));
+    expect(res.status).toBe(502);
+    expect((await res.json()).message).toContain("HTTP 500");
+  });
+
+  test("unknown route → 404", async () => {
+    const res = await createHandler(baseDeps)(req("GET", "/nope"));
+    expect(res.status).toBe(404);
+  });
+});
