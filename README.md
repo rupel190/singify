@@ -95,6 +95,15 @@ singing is detected (home alone, fewer dropouts); lower = rejects room/crowd
 noise (party). Persisted in both hosts. The harness's 🔬 Debug overlay shows a
 live input-level meter with the gate marked, so you can dial it in visually.
 
+**Mic capture is raw by default** — `noiseSuppression`, `echoCancellation` and
+`autoGainControl` are all off. Browser noise-suppression treats a sustained sung
+note as stationary "noise" and ducks it (held notes fade after ~1–2 s); AGC pumps
+the level and smears pitch. `getUserMedia` constraints are advisory, so `mic.ts`
+reads back `track.getSettings()` and exposes it as `MicPitch.applied` (shown in
+the Debug overlay). The harness "Raw mic" toggle flips the DSP back on to A/B it.
+Open question for the Spotify phase: enabling echo-cancel to reduce backing-track
+bleed on speakers.
+
 ## Cache layout
 
 ```

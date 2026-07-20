@@ -347,17 +347,17 @@ function App() {
     micRef.current?.setOptions({ rmsThreshold: sensitivityToThreshold(v) });
   };
 
-  // "Raw" = ask the browser to turn OFF noise-suppression / echo-cancel / AGC,
-  // to A/B whether those DSP stages are what's fading held notes.
-  const [rawMic, setRawMic] = React.useState(false);
+  // Raw (no NS/AEC) is the default — it's what karaoke needs. Toggling this OFF
+  // turns noise-suppression + echo-cancel back on, to A/B the held-note fade.
+  const [rawMic, setRawMic] = React.useState(true);
 
   const beginMic = async (raw: boolean) => {
     setMicError(null);
     micRef.current = await startMicPitch({
       rmsThreshold: sensitivityToThreshold(sensitivity),
-      ...(raw
-        ? { noiseSuppression: false, echoCancellation: false, autoGainControl: false }
-        : {}),
+      noiseSuppression: !raw,
+      echoCancellation: !raw,
+      autoGainControl: false, // never — it smears pitch regardless
     });
     setMicOn(true);
   };

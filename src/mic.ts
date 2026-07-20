@@ -44,19 +44,29 @@ export interface MicPitch {
 export interface MicPitchOptions extends Omit<DetectOptions, "sampleRate"> {
   /** AnalyserNode window size (power of two). Larger = steadier, more latency. */
   fftSize?: number;
-  /** Cancel speaker echo (default true). */
+  /**
+   * Cancel speaker echo (default false). Off because karaoke wants the raw
+   * voice; may be worth enabling later to reduce backing-track bleed when the
+   * user is on speakers rather than headphones (a Spotify-phase question).
+   */
   echoCancellation?: boolean;
-  /** Suppress background noise (default true) — but can also duck held notes. */
+  /**
+   * Suppress background noise (default FALSE). Noise suppressors treat a
+   * sustained, stationary tone as noise and duck it — they fade held notes,
+   * which is exactly what pitch tracking must not lose. Off for singing.
+   */
   noiseSuppression?: boolean;
   /** Auto gain control (default false) — pumps the level, smears pitch. */
   autoGainControl?: boolean;
 }
 
 export async function startMicPitch(opts: MicPitchOptions = {}): Promise<MicPitch> {
+  // Raw capture by default: every browser "enhancement" is tuned for speech and
+  // harms singing (see the field docs). Callers can opt back in per constraint.
   const {
     fftSize = 2048,
-    echoCancellation = true,
-    noiseSuppression = true,
+    echoCancellation = false,
+    noiseSuppression = false,
     autoGainControl = false,
     ...detectOpts
   } = opts;
