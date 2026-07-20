@@ -10,6 +10,9 @@ dist/
 # nix / direnv (local cache)
 .direnv/
 
+# local test charts (CC-licensed .txt files for harness testing — not redistributed)
+charts/
+
 # editor / OS
 .DS_Store
 *.log
