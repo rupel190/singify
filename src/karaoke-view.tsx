@@ -464,6 +464,9 @@ function SyllableSpan(props: {
   const React = Spicetify.React;
   const { syllable: s, positionMs, active } = props;
   const end = s.startMs + s.durationMs;
+  // Some charts write held/melisma syllables with "~" (e.g. "co~ffee"); it's a
+  // note-continuation marker, not text — strip it for display.
+  const text = s.text.replace(/~/g, "");
 
   let color = COLORS.lyricUpcoming;
   let backgroundImage: string | undefined;
@@ -495,7 +498,7 @@ function SyllableSpan(props: {
         transition: "transform 90ms ease",
       }}
     >
-      {s.text}
+      {text}
     </span>
   );
 }

@@ -17,7 +17,7 @@ import { SongPicker } from "./song-picker";
 import { startMicPitch, type MicPitch } from "./mic";
 import { resolveForTrack, confirmPick } from "./resolver-client";
 import { sensitivityToThreshold } from "./pitch";
-import type { ParsedSong } from "./ultrastar-parser";
+import { parse, type ParsedSong } from "./ultrastar-parser";
 import type { USDBSong } from "./usdb";
 
 // ── Playback clock (interpolated) ────────────────────────────────────────────
@@ -182,12 +182,49 @@ function setSensitivity(next: number): void {
   Spicetify.showNotification?.(`🎤 Sensitivity ${sensitivity}%`);
 }
 
+// ── Load a local chart (no USDB) ─────────────────────────────────────────────
+//
+// Opens a file picker for an UltraStar .txt so you can sing along in Spotify
+// without a USDB account: play the matching track, press L, pick the file.
+function loadLocalChart(): void {
+  const input = document.createElement("input");
+  input.type = "file";
+  input.accept = ".txt,text/plain";
+  input.onchange = async () => {
+    const file = input.files?.[0];
+    if (!file) return;
+    try {
+      const song = parse(await file.text());
+      if (song.lines.length === 0) throw new Error("no singable notes found");
+      currentSong = song;
+      manualChart = true;
+      pickerCandidates = null;
+      pickError = null;
+      if (!visible) setVisible(true);
+      else renderOverlay();
+      Spicetify.showNotification?.(
+        `🎤 ${song.headers.artist} – ${song.headers.title} loaded`
+      );
+    } catch (err) {
+      Spicetify.showNotification?.(
+        `Chart parse failed: ${err instanceof Error ? err.message : String(err)}`,
+        true
+      );
+    }
+  };
+  input.click();
+}
+
 // ── Overlay + render ─────────────────────────────────────────────────────────
 
 let overlay: HTMLDivElement | null = null;
 let root: { render(el: unknown): void; unmount(): void } | null = null;
 let currentSong: ParsedSong | null = null;
 let visible = false;
+// Set when a chart is loaded manually (L hotkey) instead of resolved from USDB —
+// lets you sing along in Spotify without a USDB account. While set, songchange
+// won't overwrite the chart (reload the client to go back to auto-resolve).
+let manualChart = false;
 
 // Picker state — set when resolveForTrack returns candidates to choose from.
 let currentTrackId: string | null = null;
@@ -316,6 +353,9 @@ function onCancel(): void {
 }
 
 async function onSongChange(): Promise<void> {
+  // A manually-loaded chart (L) wins — don't let a songchange event wipe it.
+  if (manualChart) return;
+
   const item = Spicetify.Player.data?.item ?? Spicetify.Player.data?.track;
   if (!item?.uri) return;
   const title = item.name ?? "";
@@ -394,6 +434,8 @@ async function main(): Promise<void> {
       setOffset(0); // reset sync
     } else if (e.key === "m" || e.key === "M") {
       void toggleMic();
+    } else if (e.key === "l" || e.key === "L") {
+      loadLocalChart(); // pick an UltraStar .txt (no USDB needed)
     } else if (e.key === "-") {
       setSensitivity(sensitivity - 5); // less sensitive (noisy room)
     } else if (e.key === "=") {
