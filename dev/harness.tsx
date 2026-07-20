@@ -17,9 +17,21 @@ import { createRoot } from "react-dom/client";
 };
 
 import { parse } from "../src/ultrastar-parser";
-import { KaraokeView } from "../src/karaoke-view";
+import { KaraokeView, type FrameDebug } from "../src/karaoke-view";
 import { SongPicker } from "../src/song-picker";
 import { startMicPitch, type MicPitch } from "../src/mic";
+
+// Note-name helpers for the diagnostic overlay.
+const NOTE_LETTERS = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"];
+function noteName(midi: number | null): string {
+  if (midi == null) return "—";
+  const r = Math.round(midi);
+  return `${NOTE_LETTERS[((r % 12) + 12) % 12]}${Math.floor(r / 12) - 1}`;
+}
+function pcLetter(midi: number | null): string {
+  if (midi == null) return "—";
+  return NOTE_LETTERS[((Math.round(midi) % 12) + 12) % 12];
+}
 import type { USDBSong } from "../src/usdb";
 import { FIXTURE_TXT } from "./fixture";
 
@@ -95,6 +107,87 @@ if (initialT > 0) seek(initialT);
 const autoplay = params.get("play") === "1";
 if (autoplay) play();
 
+/**
+ * Live pitch diagnostics. Watch the raw detector value flicker while "Off by"
+ * (the smoothed, target-folded distance) stays steady — that's the smoothing
+ * working. If the detector shows "no signal" a lot, it's dropping out; if "Off
+ * by" is large while you're on pitch, it's a detection/octave problem.
+ */
+function DebugPanel(props: { data: FrameDebug | null; micOn: boolean }) {
+  const { data, micOn } = props;
+  const cell: React.CSSProperties = { display: "flex", flexDirection: "column", gap: 2 };
+  const label: React.CSSProperties = {
+    fontSize: 10,
+    letterSpacing: 1,
+    color: "rgba(255,255,255,0.45)",
+    textTransform: "uppercase",
+  };
+  const value: React.CSSProperties = { fontSize: 16, fontWeight: 700, fontVariantNumeric: "tabular-nums" };
+
+  const raw = data?.rawMidi ?? null;
+  const target = data?.targetPitch ?? null;
+  const marker = data?.markerPitch ?? null;
+  const hit = !!data?.markerHit;
+  const off = marker != null && target != null ? marker - target : null;
+
+  return (
+    <div
+      style={{
+        position: "absolute",
+        top: 10,
+        left: 10,
+        zIndex: 5,
+        display: "flex",
+        gap: 18,
+        alignItems: "center",
+        padding: "10px 14px",
+        borderRadius: 10,
+        background: "rgba(8,8,12,0.82)",
+        border: "1px solid #2a2a33",
+        color: "#fff",
+        fontFamily: "ui-monospace, SFMono-Regular, monospace",
+        pointerEvents: "none",
+      }}
+    >
+      {!micOn ? (
+        <span style={{ fontSize: 13, color: "rgba(255,255,255,0.6)" }}>
+          🔬 enable 🎤 Mic to see live pitch
+        </span>
+      ) : (
+        <>
+          <div style={cell}>
+            <span style={label}>Detector</span>
+            <span style={{ ...value, color: raw != null ? "#1ed760" : "#6d6d6d" }}>
+              {raw != null ? `${noteName(raw)} ${raw.toFixed(1)}` : "— no signal"}
+            </span>
+          </div>
+          <div style={cell}>
+            <span style={label}>Target</span>
+            <span style={value}>{pcLetter(target)}</span>
+          </div>
+          <div style={cell}>
+            <span style={label}>Off by</span>
+            <span style={value}>
+              {off == null ? "—" : `${off > 0 ? "+" : ""}${off.toFixed(1)} st`}
+            </span>
+          </div>
+          <div
+            style={{
+              ...value,
+              padding: "4px 10px",
+              borderRadius: 6,
+              background: hit ? "rgba(30,215,96,0.2)" : "rgba(255,94,168,0.15)",
+              color: hit ? "#1ed760" : "#ff5ea8",
+            }}
+          >
+            {hit ? "HIT" : "miss"}
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
 function App() {
   const [song, setSong] = React.useState(() => parse(FIXTURE_TXT));
   const [songLabel, setSongLabel] = React.useState("built-in fixture");
@@ -163,6 +256,14 @@ function App() {
   const micRef = React.useRef<MicPitch | null>(null);
   const [micOn, setMicOn] = React.useState(false);
   const [micError, setMicError] = React.useState<string | null>(null);
+
+  // Diagnostic overlay: KaraokeView reports raw/target/marker each frame into a
+  // ref; the transport's per-frame repaint shows it live (no extra re-render).
+  const [showDebug, setShowDebug] = React.useState(false);
+  const debugRef = React.useRef<FrameDebug | null>(null);
+  const onDebug = React.useCallback((d: FrameDebug) => {
+    debugRef.current = d;
+  }, []);
 
   const toggleMic = async () => {
     if (micRef.current) {
@@ -278,6 +379,20 @@ function App() {
         >
           {micOn ? "🎤 Mic on" : "🎤 Mic"}
         </button>
+        <button
+          onClick={() => setShowDebug((v) => !v)}
+          style={{
+            background: showDebug ? "#3a86ff" : "#2a2a33",
+            color: "#fff",
+            border: 0,
+            borderRadius: 20,
+            padding: "8px 14px",
+            font: "700 13px system-ui",
+            cursor: "pointer",
+          }}
+        >
+          🔬 Debug
+        </button>
         {micError && (
           <span style={{ color: "#ff6b6b", fontSize: 12 }}>{micError}</span>
         )}
@@ -367,6 +482,7 @@ function App() {
           void onFile(e.dataTransfer.files?.[0]);
         }}
         style={{
+          position: "relative",
           height: 520,
           borderRadius: 14,
           overflow: "hidden",
@@ -384,7 +500,9 @@ function App() {
             play();
             setIsPlaying(true);
           }}
+          onDebug={showDebug ? onDebug : undefined}
         />
+        {showDebug && <DebugPanel data={debugRef.current} micOn={micOn} />}
       </div>
         </div>
       ) : (

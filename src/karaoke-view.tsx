@@ -50,7 +50,20 @@ export interface KaraokeViewProps {
    * track; the view resets its own score when playback jumps back to the start.
    */
   onReplay?: () => void;
+  /**
+   * Optional per-frame diagnostics (dev harness overlay). Fires once per frame
+   * with the raw detected pitch, the current target, and the smoothed marker —
+   * so you can watch raw jitter vs the steadied marker on a real mic.
+   */
+  onDebug?: (d: FrameDebug) => void;
   fullscreen?: boolean;
+}
+
+export interface FrameDebug {
+  rawMidi: number | null;
+  targetPitch: number | null;
+  markerPitch: number | null;
+  markerHit: boolean;
 }
 
 // Horizontal scale of the pitch lane: pixels per millisecond of song time.
@@ -140,6 +153,10 @@ export function KaraokeView(props: KaraokeViewProps) {
   const smoother = useMemo(() => createPitchSmoother(), [song]);
   const showScoreRef = useRef(!!showScore);
   const lastMsRef = useRef(0);
+  // onDebug read via a ref so a changing callback identity never rebuilds the
+  // frame loop (which would restart the rAF each render).
+  const onDebugRef = useRef(props.onDebug);
+  onDebugRef.current = props.onDebug;
   useEffect(() => {
     showScoreRef.current = !!showScore;
     if (showScore) {
@@ -166,6 +183,7 @@ export function KaraokeView(props: KaraokeViewProps) {
 
       const target = targetPitchAt(song, ms);
       const { pitch, hit } = foldSmoothHit(smoother, rawMidi, target, HIT_TOLERANCE);
+      onDebugRef.current?.({ rawMidi, targetPitch: target, markerPitch: pitch, markerHit: hit });
       return { ms, markerPitch: pitch, markerHit: hit, score };
     },
     [keeper, smoother, song]
