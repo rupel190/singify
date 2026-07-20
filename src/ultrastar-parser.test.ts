@@ -1,5 +1,5 @@
 import { describe, test, expect } from "bun:test";
-import { parse, getPosition, getPitchRange } from "./ultrastar-parser";
+import { parse, getPosition, getPitchRange, targetPitchAt } from "./ultrastar-parser";
 
 // ── Fixtures ───────────────────────────────────────────────────────────────
 
@@ -14,6 +14,21 @@ const MINIMAL_SONG = `
 : 16 4 60 World
 E
 `.trim();
+
+describe("targetPitchAt", () => {
+  const song = parse(MINIMAL_SONG); // notes: 1000–1500ms @55, 1500–2000 @55, 3000–3500 @60
+  test("returns the active note's pitch", () => {
+    expect(targetPitchAt(song, 1200)).toBe(55);
+    expect(targetPitchAt(song, 3100)).toBe(60);
+  });
+  test("falls back to the nearest note during a gap", () => {
+    expect(targetPitchAt(song, 2100)).toBe(55); // just after note 2 ends
+  });
+  test("null when there are no pitched notes", () => {
+    const freestyleOnly = parse("#TITLE:x\n#ARTIST:y\n#BPM:120\n#GAP:0\nF 0 4 0 la\nE");
+    expect(targetPitchAt(freestyleOnly, 100)).toBeNull();
+  });
+});
 
 // BPM=120, so msPerBeat = 60000 / (120*4) = 125ms
 // beat 0  → GAP + 0   = 1000ms

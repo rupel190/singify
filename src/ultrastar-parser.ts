@@ -280,3 +280,28 @@ export function getPitchRange(song: ParsedSong): [number, number] {
   }
   return [min === Infinity ? 0 : min, max === -Infinity ? 0 : max];
 }
+
+/**
+ * The chart pitch the singer should be hitting at `positionMs`: the active
+ * (non-freestyle) note if one is playing, otherwise the nearest note in time —
+ * so the live pitch marker keeps a sensible octave reference across gaps.
+ * Returns null if the song has no pitched notes.
+ */
+export function targetPitchAt(song: ParsedSong, positionMs: number): number | null {
+  let nearest: number | null = null;
+  let nearestDist = Infinity;
+  for (const line of song.lines) {
+    for (const s of line.syllables) {
+      if (s.type === "freestyle") continue;
+      const start = s.startMs;
+      const end = start + s.durationMs;
+      if (positionMs >= start && positionMs < end) return s.pitch;
+      const dist = positionMs < start ? start - positionMs : positionMs - end;
+      if (dist < nearestDist) {
+        nearestDist = dist;
+        nearest = s.pitch;
+      }
+    }
+  }
+  return nearest;
+}

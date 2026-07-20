@@ -13,18 +13,31 @@
  */
 
 import { KaraokeView } from "./karaoke-view";
-import { resolveForTrack } from "./resolver";
+import { SongPicker } from "./song-picker";
+import { startMicPitch, type MicPitch } from "./mic";
+import { resolveForTrack, confirmPick } from "./resolver-client";
 import type { ParsedSong } from "./ultrastar-parser";
+import type { USDBSong } from "./usdb";
 
 // ── Playback clock (interpolated) ────────────────────────────────────────────
+//
+// getBaseMs() is Spotify's reported position, interpolated between onprogress
+// events with performance.now(). getCurrentMs() adds the user's lyric offset on
+// top — that's what <KaraokeView> reads. The offset is applied ONLY at this
+// outer read, never folded back into the anchor (lastKnownMs), or every
+// re-anchor on play/pause would compound it.
 
 let lastKnownMs = 0;
 let lastKnownAt = 0;
 let paused = false;
 
-function getCurrentMs(): number {
+function getBaseMs(): number {
   if (paused) return lastKnownMs;
   return lastKnownMs + (performance.now() - lastKnownAt);
+}
+
+function getCurrentMs(): number {
+  return getBaseMs() + offsetMs;
 }
 
 function onProgress(e: SpicetifyPlayerEvent): void {
@@ -33,10 +46,111 @@ function onProgress(e: SpicetifyPlayerEvent): void {
 }
 
 function onPlayPause(): void {
-  // Re-anchor so the interpolation doesn't jump on resume.
-  lastKnownMs = getCurrentMs();
+  // Re-anchor off the *base* clock (never the offset-adjusted one) so resume
+  // doesn't jump.
+  lastKnownMs = getBaseMs();
   lastKnownAt = performance.now();
   paused = !!Spicetify.Player.data?.isPaused;
+}
+
+// ── Lyric offset (audio-sync knob) ───────────────────────────────────────────
+//
+// Spotify's reported position and the real audio drift (output latency), and
+// UltraStar GAP values are often slightly off — so the user needs to nudge the
+// whole karaoke timeline against what they hear. Positive = lyrics/notes fire
+// earlier. Adjust live with [ and ] (±20 ms); \ resets. Persisted across
+// restarts. This lives in the adapter, not <KaraokeView>: the offset is a
+// property of the clock port, so the shared view never has to know about it.
+
+const OFFSET_KEY = "singify:offsetMs";
+const OFFSET_STEP = 20; // ms per nudge
+
+function loadOffset(): number {
+  const raw = Number(localStorage.getItem(OFFSET_KEY));
+  return Number.isFinite(raw) ? raw : 0;
+}
+
+let offsetMs = loadOffset();
+
+function setOffset(next: number): void {
+  offsetMs = Math.round(next);
+  try {
+    localStorage.setItem(OFFSET_KEY, String(offsetMs));
+  } catch {
+    /* storage blocked — keep the in-memory value */
+  }
+  showOffset();
+}
+
+// Transient on-screen readout. Its own fixed DOM node, deliberately outside the
+// React overlay, so <KaraokeView> stays untouched.
+let offsetReadout: HTMLDivElement | null = null;
+let offsetHideTimer = 0;
+
+function showOffset(): void {
+  if (!offsetReadout) {
+    offsetReadout = document.createElement("div");
+    offsetReadout.id = "singify-offset-readout";
+    Object.assign(offsetReadout.style, {
+      position: "fixed",
+      bottom: "84px",
+      left: "50%",
+      transform: "translateX(-50%)",
+      zIndex: "1000",
+      padding: "8px 16px",
+      borderRadius: "18px",
+      background: "rgba(10, 10, 14, 0.92)",
+      color: "#fff",
+      font: "600 13px 'Spotify Circular', system-ui, sans-serif",
+      pointerEvents: "none",
+      opacity: "0",
+      transition: "opacity 180ms ease",
+    } as CSSStyleDeclaration);
+    document.body.appendChild(offsetReadout);
+  }
+  const sign = offsetMs > 0 ? "+" : "";
+  offsetReadout.textContent = `Lyric offset ${sign}${offsetMs} ms`;
+  offsetReadout.style.opacity = "1";
+  clearTimeout(offsetHideTimer);
+  offsetHideTimer = window.setTimeout(() => {
+    if (offsetReadout) offsetReadout.style.opacity = "0";
+  }, 1200);
+}
+
+// ── Mic pitch ────────────────────────────────────────────────────────────────
+//
+// M toggles the mic. read() is polled by <KaraokeView> each frame via
+// getLivePitchMidi; all the analysis is the pure detectPitch().
+
+async function toggleMic(): Promise<void> {
+  if (micPitch) {
+    micPitch.stop();
+    micPitch = null;
+    Spicetify.showNotification?.("Mic off");
+    if (visible) renderOverlay(); // drop scoring/HUD
+    return;
+  }
+  try {
+    micPitch = await startMicPitch();
+    Spicetify.showNotification?.("🎤 Mic on");
+    if (visible) renderOverlay(); // start a fresh scored attempt
+  } catch (err) {
+    Spicetify.showNotification?.("Mic access denied", true);
+    console.error("[singify] mic failed:", err);
+  }
+}
+
+function getLivePitchMidi(): number | null {
+  return micPitch?.read()?.midi ?? null;
+}
+
+/** "Sing again" from the result screen — restart the track from the top. */
+function onReplay(): void {
+  try {
+    (Spicetify.Player as { seek?: (ms: number) => void }).seek?.(0);
+  } catch (err) {
+    console.error("[singify] replay seek failed:", err);
+  }
 }
 
 // ── Overlay + render ─────────────────────────────────────────────────────────
@@ -45,6 +159,15 @@ let overlay: HTMLDivElement | null = null;
 let root: { render(el: unknown): void; unmount(): void } | null = null;
 let currentSong: ParsedSong | null = null;
 let visible = false;
+
+// Picker state — set when resolveForTrack returns candidates to choose from.
+let currentTrackId: string | null = null;
+let pickerQuery: { artist?: string; title?: string } | null = null;
+let pickerCandidates: USDBSong[] | null = null;
+let pickPending: number | null = null;
+let pickError: string | null = null;
+
+let micPitch: MicPitch | null = null;
 
 function ensureOverlay(): HTMLDivElement {
   if (overlay) return overlay;
@@ -76,31 +199,50 @@ function ensureOverlay(): HTMLDivElement {
 function renderOverlay(): void {
   if (!root) return;
   const React = Spicetify.React;
-  if (!currentSong) {
+
+  if (currentSong) {
     root.render(
-      React.createElement(
-        "div",
-        {
-          style: {
-            display: "flex",
-            height: "100vh",
-            alignItems: "center",
-            justifyContent: "center",
-            color: "#c8c8c8",
-            fontSize: 20,
-          },
-        },
-        "No karaoke chart for this track."
-      )
+      React.createElement(KaraokeView, {
+        song: currentSong,
+        getPositionMs: getCurrentMs,
+        getLivePitchMidi,
+        showScore: micPitch != null, // score while the mic is live
+        onReplay,
+        fullscreen: true,
+      })
     );
     return;
   }
+
+  if (pickerCandidates) {
+    root.render(
+      React.createElement(SongPicker, {
+        candidates: pickerCandidates,
+        query: pickerQuery ?? undefined,
+        pendingId: pickPending,
+        error: pickError,
+        onPick,
+        onCancel,
+      })
+    );
+    return;
+  }
+
   root.render(
-    React.createElement(KaraokeView, {
-      song: currentSong,
-      getPositionMs: getCurrentMs,
-      fullscreen: true,
-    })
+    React.createElement(
+      "div",
+      {
+        style: {
+          display: "flex",
+          height: "100vh",
+          alignItems: "center",
+          justifyContent: "center",
+          color: "#c8c8c8",
+          fontSize: 20,
+        },
+      },
+      "No karaoke chart for this track."
+    )
   );
 }
 
@@ -113,13 +255,49 @@ function setVisible(next: boolean): void {
 
 // ── Song resolution ──────────────────────────────────────────────────────────
 
+/** User chose a candidate from the picker — download, cache, and show it. */
+async function onPick(candidate: USDBSong): Promise<void> {
+  if (!currentTrackId) return;
+  pickPending = candidate.id;
+  pickError = null;
+  if (visible) renderOverlay();
+
+  try {
+    const song = await confirmPick(currentTrackId, candidate);
+    pickerCandidates = null; // success — drop the picker, show the chart
+    pickPending = null;
+    currentSong = song;
+  } catch (err) {
+    // TODO(stage 2): on SessionExpiredError, re-login with stored credentials
+    // and retry once before surfacing this.
+    pickPending = null;
+    pickError =
+      err instanceof Error ? err.message : "Download failed — try another match.";
+    console.error("[singify] pick failed:", err);
+  }
+
+  if (visible) renderOverlay();
+}
+
+function onCancel(): void {
+  pickerCandidates = null;
+  pickPending = null;
+  pickError = null;
+  if (visible) renderOverlay();
+}
+
 async function onSongChange(): Promise<void> {
   const item = Spicetify.Player.data?.item ?? Spicetify.Player.data?.track;
   if (!item?.uri) return;
   const title = item.name ?? "";
   const artist = item.artists?.[0]?.name ?? "";
 
+  // Reset per-track state.
   currentSong = null;
+  currentTrackId = item.uri;
+  pickerCandidates = null;
+  pickPending = null;
+  pickError = null;
   if (visible) renderOverlay();
 
   try {
@@ -127,17 +305,26 @@ async function onSongChange(): Promise<void> {
     if (res.status === "cached" || res.status === "downloaded") {
       currentSong = res.song;
     } else if (res.status === "needsPicker") {
-      // TODO(stage 2): render picker UI from res.candidates → confirmPick().
-      Spicetify.showNotification?.(
-        `Karaoke: ${res.candidates.length} matches — picker not wired yet`
-      );
+      pickerQuery = { artist, title };
+      pickerCandidates = res.candidates;
+      if (!visible) {
+        Spicetify.showNotification?.(
+          `Karaoke: ${res.candidates.length} matches for “${title}” — press K to choose`
+        );
+      }
     } else {
-      Spicetify.showNotification?.(`No karaoke chart for "${title}"`);
+      Spicetify.showNotification?.(`No karaoke chart for “${title}”`);
     }
   } catch (err) {
-    // TODO(stage 2): on SessionExpiredError, re-login with stored credentials
-    // and retry once.
     console.error("[singify] resolve failed:", err);
+    // A TypeError from fetch means the helper isn't reachable (connection
+    // refused) — the most likely first-run cause. Anything else is a real
+    // lookup error from the helper, so show its message.
+    const msg =
+      err instanceof TypeError
+        ? "Karaoke helper not running — start it with `bun run helper`"
+        : `Karaoke lookup failed: ${err instanceof Error ? err.message : String(err)}`;
+    Spicetify.showNotification?.(msg, true);
   }
 
   if (visible) renderOverlay();
@@ -159,15 +346,25 @@ async function main(): Promise<void> {
   Spicetify.Player.addEventListener("songchange", () => void onSongChange());
 
   document.addEventListener("keydown", (e) => {
-    // `K` toggles the karaoke overlay (avoid when typing in a field).
+    // Hotkeys, but never while typing in a field.
     const target = e.target as HTMLElement | null;
     const typing =
       target &&
       (target.tagName === "INPUT" ||
         target.tagName === "TEXTAREA" ||
         target.isContentEditable);
-    if (!typing && (e.key === "k" || e.key === "K")) {
-      setVisible(!visible);
+    if (typing) return;
+
+    if (e.key === "k" || e.key === "K") {
+      setVisible(!visible); // toggle the karaoke overlay
+    } else if (e.key === "[") {
+      setOffset(offsetMs - OFFSET_STEP); // lyrics 20 ms later
+    } else if (e.key === "]") {
+      setOffset(offsetMs + OFFSET_STEP); // lyrics 20 ms earlier
+    } else if (e.key === "\\") {
+      setOffset(0); // reset sync
+    } else if (e.key === "m" || e.key === "M") {
+      void toggleMic();
     }
   });
 
