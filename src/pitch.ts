@@ -116,6 +116,35 @@ export function createPitchSmoother(
   };
 }
 
+/**
+ * Turn a raw detected pitch into the marker to plot against a target note.
+ *
+ * ORDER MATTERS: fold the raw pitch into the target's octave FIRST, then smooth.
+ * If you smooth the absolute pitch first, a detector that flickers between a
+ * note and its octave (57↔45) gets averaged into a meaningless in-between value
+ * (~51) that then folds wrong — the smoother manufactures jitter. Folding first
+ * collapses the octave flicker to one value, so the smoother sees a steady
+ * signal. On a hit (within `tolerance` semitones) the marker snaps to the target.
+ *
+ * `smoother` is advanced exactly once per call — call this once per frame.
+ */
+export function foldSmoothHit(
+  smoother: PitchSmoother,
+  rawMidi: number | null,
+  targetPitch: number | null,
+  tolerance: number
+): { pitch: number | null; hit: boolean } {
+  let smoothed: number | null;
+  if (rawMidi == null || targetPitch == null) {
+    smoothed = smoother.push(null); // brief dropout → held value (or null)
+  } else {
+    smoothed = smoother.push(foldToOctaveOf(rawMidi, targetPitch, targetPitch));
+  }
+  if (smoothed == null || targetPitch == null) return { pitch: smoothed, hit: false };
+  const hit = Math.abs(smoothed - targetPitch) <= tolerance;
+  return { pitch: hit ? targetPitch : smoothed, hit };
+}
+
 export interface DetectOptions {
   sampleRate: number;
   /** Lowest frequency to consider (default 70 Hz, ~C#2). */

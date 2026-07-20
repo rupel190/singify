@@ -24,7 +24,7 @@ import {
   type ParsedSong,
   type Syllable,
 } from "./ultrastar-parser";
-import { foldToOctaveOf, createPitchSmoother } from "./pitch";
+import { foldSmoothHit, createPitchSmoother } from "./pitch";
 import { createScoreKeeper, gradeForScore, type ScoreState } from "./scoring";
 import { ResultScreen } from "./result-screen";
 
@@ -59,6 +59,7 @@ const PX_PER_MS = 0.18;
 const NOW_FRACTION = 0.25;
 const NOTE_HEIGHT = 14; // px
 const LANE_VPAD = 24; // px of vertical padding inside the lane
+const HIT_TOLERANCE = 2; // semitones — Easy (Medium=1, Hard=0 later)
 
 const COLORS = {
   laneBg: "rgba(0, 0, 0, 0.28)",
@@ -89,37 +90,42 @@ function useSize(ref: { current: HTMLElement | null }): { w: number; h: number }
   return size;
 }
 
+interface FrameState {
+  ms: number;
+  markerPitch: number | null; // folded + smoothed, ready to plot (target on a hit)
+  markerHit: boolean;
+  score: ScoreState | null;
+}
+
 /**
- * Single rAF loop driving the view: returns the playback position (ms) and the
- * live sung pitch (MIDI or null) as one state object, so there's one re-render
- * per frame rather than two.
+ * Single rAF loop driving the view. Everything that must advance exactly once
+ * per frame — scoring, the marker's fold+smooth — happens inside `computeFrame`
+ * (never in render, which React may run multiple times per commit). The result
+ * is one state object, so there's one re-render per frame.
  */
 function useFrame(
   getPositionMs: () => number,
-  getLivePitchMidi?: () => number | null,
-  sample?: (ms: number, midi: number | null) => ScoreState | null,
-  smooth?: (midi: number | null) => number | null
-): { ms: number; midi: number | null; score: ScoreState | null } {
+  getLivePitchMidi: (() => number | null) | undefined,
+  computeFrame: (ms: number, rawMidi: number | null) => FrameState
+): FrameState {
   const { useState, useEffect, useRef } = Spicetify.React;
-  const [frame, setFrame] = useState<{
-    ms: number;
-    midi: number | null;
-    score: ScoreState | null;
-  }>({ ms: 0, midi: null, score: null });
+  const [frame, setFrame] = useState<FrameState>({
+    ms: 0,
+    markerPitch: null,
+    markerHit: false,
+    score: null,
+  });
   const raf = useRef(0);
   useEffect(() => {
     const tick = () => {
       const ms = getPositionMs();
       const raw = getLivePitchMidi ? getLivePitchMidi() : null;
-      // Scoring sees the RAW pitch; only the displayed marker is smoothed.
-      const score = sample ? sample(ms, raw) : null;
-      const midi = smooth ? smooth(raw) : raw;
-      setFrame({ ms, midi, score });
+      setFrame(computeFrame(ms, raw));
       raf.current = requestAnimationFrame(tick);
     };
     raf.current = requestAnimationFrame(tick);
     return () => cancelAnimationFrame(raf.current);
-  }, [getPositionMs, getLivePitchMidi, sample, smooth]);
+  }, [getPositionMs, getLivePitchMidi, computeFrame]);
   return frame;
 }
 
@@ -129,10 +135,9 @@ export function KaraokeView(props: KaraokeViewProps) {
   const { song, getPositionMs, getLivePitchMidi, showScore, onReplay, fullscreen } =
     props;
 
-  // Scoring: one keeper per song. A stable `sample` closure (so useFrame's
-  // effect isn't rebuilt every render) feeds it frames only while scoring is
-  // active, and returns the running score for the HUD.
+  // One score keeper + one marker smoother per song.
   const keeper = useMemo(() => createScoreKeeper(song), [song]);
+  const smoother = useMemo(() => createPitchSmoother(), [song]);
   const showScoreRef = useRef(!!showScore);
   const lastMsRef = useRef(0);
   useEffect(() => {
@@ -142,31 +147,34 @@ export function KaraokeView(props: KaraokeViewProps) {
       lastMsRef.current = 0;
     }
   }, [showScore, keeper]);
-  const sample = useCallback(
-    (ms: number, midi: number | null): ScoreState | null => {
-      if (!showScoreRef.current) return null;
-      // A big backward jump (restart / "Sing again" / seek-back) starts over.
-      if (ms < lastMsRef.current - 750) keeper.reset();
+
+  // The one per-frame computation. Scoring samples the RAW pitch; the marker
+  // folds the raw pitch to the target note FIRST, then smooths (foldSmoothHit —
+  // order matters so octave flicker doesn't average into garbage).
+  const computeFrame = useCallback(
+    (ms: number, rawMidi: number | null): FrameState => {
+      const jumpedBack = ms < lastMsRef.current - 750; // restart / seek-back
       lastMsRef.current = ms;
-      keeper.sample(ms, midi);
-      return keeper.read();
+      if (jumpedBack) smoother.reset();
+
+      let score: ScoreState | null = null;
+      if (showScoreRef.current) {
+        if (jumpedBack) keeper.reset();
+        keeper.sample(ms, rawMidi);
+        score = keeper.read();
+      }
+
+      const target = targetPitchAt(song, ms);
+      const { pitch, hit } = foldSmoothHit(smoother, rawMidi, target, HIT_TOLERANCE);
+      return { ms, markerPitch: pitch, markerHit: hit, score };
     },
-    [keeper]
+    [keeper, smoother, song]
   );
 
-  // Marker smoothing (display only — never the score). One smoother instance,
-  // fed the raw pitch each frame via a stable closure.
-  const smoother = useMemo(() => createPitchSmoother(), []);
-  const smooth = useCallback(
-    (midi: number | null): number | null => smoother.push(midi),
-    [smoother]
-  );
-
-  const { ms: positionMs, midi: liveMidi, score } = useFrame(
+  const { ms: positionMs, markerPitch, markerHit, score } = useFrame(
     getPositionMs,
     getLivePitchMidi,
-    sample,
-    smooth
+    computeFrame
   );
   const laneRef = useRef<HTMLDivElement | null>(null);
   const lane = useSize(laneRef);
@@ -212,20 +220,10 @@ export function KaraokeView(props: KaraokeViewProps) {
   const nowX = lane.w * NOW_FRACTION;
   const trackTranslate = nowX - positionMs * PX_PER_MS;
 
-  // Live sung-pitch marker, placed the way real karaoke engines do it
-  // (USDX UNote.pas:548-571): fold the sung pitch into the CURRENT TARGET note's
-  // octave — not a global range — so a rising interval reads as rising instead
-  // of collapsing by pitch class. On a hit, snap onto the target and colour it
-  // like the "now" line for feedback.
-  const HIT_TOLERANCE = 2; // semitones — Easy; later Medium=1, Hard=0
-  const targetPitch = targetPitchAt(song, positionMs);
-  let markerPitch: number | null = null;
-  let markerHit = false;
-  if (liveMidi != null && targetPitch != null) {
-    const folded = foldToOctaveOf(liveMidi, targetPitch, targetPitch);
-    markerHit = Math.abs(folded - targetPitch) <= HIT_TOLERANCE;
-    markerPitch = markerHit ? targetPitch : folded;
-  }
+  // Live sung-pitch marker. The fold-to-target + smooth + hit test already ran
+  // once in computeFrame (USDX UNote.pas:548-571 style — fold into the target
+  // note's octave so a rising interval reads as rising, then snap on a hit);
+  // here we just map the resulting pitch to a Y and colour it.
   const markerColor = markerHit ? COLORS.nowLine : COLORS.livePitch;
   const liveY =
     markerPitch == null
