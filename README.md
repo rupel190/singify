@@ -80,12 +80,20 @@ USDB account needed. Free CC-licensed charts: [UltraStar-Deluxe/songs](https://g
 | Reset sync | `\` | ⟲ reset |
 | Choose among matches | picker overlay (press `K`) | "Picker demo →" toggle |
 | Toggle mic (live pitch) | `M` | 🎤 Mic button |
+| Mic sensitivity − / + | `-` / `=` (±5%) | sensitivity slider |
+| Pitch diagnostics overlay | — | 🔬 Debug toggle |
 
 The **offset** shifts the whole karaoke timeline against the audio (positive =
 lyrics fire earlier), to compensate for output latency and slightly-off UltraStar
 `GAP` values. It's a property of the *clock*, so it lives entirely in the two
 adapters — `karaoke-view.tsx` never changed to add it. In Spotify the value is
 persisted (`localStorage`); in the harness it's ephemeral.
+
+**Mic sensitivity** (0–100%) is the mirror image: it's a property of the *mic*
+port (the detector's RMS gate), so the view is again untouched. Higher = quieter
+singing is detected (home alone, fewer dropouts); lower = rejects room/crowd
+noise (party). Persisted in both hosts. The harness's 🔬 Debug overlay shows a
+live input-level meter with the gate marked, so you can dial it in visually.
 
 ## Cache layout
 

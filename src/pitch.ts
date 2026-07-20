@@ -145,6 +145,27 @@ export function foldSmoothHit(
   return { pitch: hit ? targetPitch : smoothed, hit };
 }
 
+/** Root-mean-square level of a sample window (0..~1). The mic's loudness. */
+export function rms(samples: Float32Array): number {
+  if (samples.length === 0) return 0;
+  let sum = 0;
+  for (let i = 0; i < samples.length; i++) sum += samples[i] * samples[i];
+  return Math.sqrt(sum / samples.length);
+}
+
+/**
+ * Map a mic "sensitivity" (0..100, higher = more sensitive) to an RMS gate.
+ * Log-spaced so the control feels even across the useful range; ~60 lands near
+ * the default 0.01 gate. Higher sensitivity → lower gate → quieter input passes
+ * (home alone); lower sensitivity → higher gate → rejects room/crowd noise.
+ */
+export function sensitivityToThreshold(sensitivity: number): number {
+  const s = Math.min(100, Math.max(0, sensitivity));
+  const MIN = 0.003; // most sensitive (s=100)
+  const MAX = 0.05; // least sensitive (s=0)
+  return MAX * (MIN / MAX) ** (s / 100);
+}
+
 export interface DetectOptions {
   sampleRate: number;
   /** Lowest frequency to consider (default 70 Hz, ~C#2). */
@@ -177,10 +198,7 @@ export function detectPitch(
   if (n < 2) return null;
 
   // 1. Energy gate — skip silence before doing any work.
-  let rms = 0;
-  for (let i = 0; i < n; i++) rms += samples[i] * samples[i];
-  rms = Math.sqrt(rms / n);
-  if (rms < rmsThreshold) return null;
+  if (rms(samples) < rmsThreshold) return null;
 
   // 2. Autocorrelation c[lag] = Σ samples[i]·samples[i+lag].
   const c = new Float32Array(n);

@@ -16,6 +16,7 @@ import { KaraokeView } from "./karaoke-view";
 import { SongPicker } from "./song-picker";
 import { startMicPitch, type MicPitch } from "./mic";
 import { resolveForTrack, confirmPick } from "./resolver-client";
+import { sensitivityToThreshold } from "./pitch";
 import type { ParsedSong } from "./ultrastar-parser";
 import type { USDBSong } from "./usdb";
 
@@ -131,7 +132,9 @@ async function toggleMic(): Promise<void> {
     return;
   }
   try {
-    micPitch = await startMicPitch();
+    micPitch = await startMicPitch({
+      rmsThreshold: sensitivityToThreshold(sensitivity),
+    });
     Spicetify.showNotification?.("🎤 Mic on");
     if (visible) renderOverlay(); // start a fresh scored attempt
   } catch (err) {
@@ -151,6 +154,32 @@ function onReplay(): void {
   } catch (err) {
     console.error("[singify] replay seek failed:", err);
   }
+}
+
+// ── Mic sensitivity ──────────────────────────────────────────────────────────
+//
+// The detector's RMS gate, as a 0..100 "sensitivity" (higher = quieter input
+// passes). Adjust live with - and = ; persisted like the lyric offset. Applies
+// immediately to a running mic. A property of the mic port — the view is untouched.
+
+const SENS_KEY = "singify:sensitivity";
+
+function loadSensitivity(): number {
+  const v = Number(localStorage.getItem(SENS_KEY));
+  return Number.isFinite(v) && v >= 0 && v <= 100 ? v : 60;
+}
+
+let sensitivity = loadSensitivity();
+
+function setSensitivity(next: number): void {
+  sensitivity = Math.min(100, Math.max(0, Math.round(next)));
+  try {
+    localStorage.setItem(SENS_KEY, String(sensitivity));
+  } catch {
+    /* storage blocked — keep the in-memory value */
+  }
+  micPitch?.setOptions({ rmsThreshold: sensitivityToThreshold(sensitivity) });
+  Spicetify.showNotification?.(`🎤 Sensitivity ${sensitivity}%`);
 }
 
 // ── Overlay + render ─────────────────────────────────────────────────────────
@@ -365,6 +394,10 @@ async function main(): Promise<void> {
       setOffset(0); // reset sync
     } else if (e.key === "m" || e.key === "M") {
       void toggleMic();
+    } else if (e.key === "-") {
+      setSensitivity(sensitivity - 5); // less sensitive (noisy room)
+    } else if (e.key === "=") {
+      setSensitivity(sensitivity + 5); // more sensitive (quiet room)
     }
   });
 

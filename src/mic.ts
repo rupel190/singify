@@ -10,11 +10,18 @@
  * startMicPitch() from a click / keypress handler, never on load.
  */
 
-import { detectPitch, type PitchReading, type DetectOptions } from "./pitch";
+import { detectPitch, rms, type PitchReading, type DetectOptions } from "./pitch";
+
+/** Detection options adjustable live (everything except the fixed FFT size). */
+export type LiveDetectOptions = Partial<Omit<DetectOptions, "sampleRate">>;
 
 export interface MicPitch {
   /** Current pitch reading, or null (silence / no confident pitch). */
   read(): PitchReading | null;
+  /** Current RMS input level (0..~1) — for a live meter, independent of the gate. */
+  level(): number;
+  /** Live-adjust detection thresholds (e.g. rmsThreshold for mic sensitivity). */
+  setOptions(opts: LiveDetectOptions): void;
   /** Release the mic and close the audio graph. */
   stop(): void;
   /** The AudioContext sample rate (usually 44100 or 48000). */
@@ -47,13 +54,23 @@ export async function startMicPitch(opts: MicPitchOptions = {}): Promise<MicPitc
 
   const buf = new Float32Array(analyser.fftSize);
   let stopped = false;
+  // Detection options that can be tuned live (mic sensitivity = rmsThreshold).
+  let liveOpts: LiveDetectOptions = { ...detectOpts };
 
   return {
     sampleRate: ctx.sampleRate,
     read() {
       if (stopped) return null;
       analyser.getFloatTimeDomainData(buf);
-      return detectPitch(buf, { sampleRate: ctx.sampleRate, ...detectOpts });
+      return detectPitch(buf, { sampleRate: ctx.sampleRate, ...liveOpts });
+    },
+    level() {
+      if (stopped) return 0;
+      analyser.getFloatTimeDomainData(buf);
+      return rms(buf);
+    },
+    setOptions(opts: LiveDetectOptions) {
+      liveOpts = { ...liveOpts, ...opts };
     },
     stop() {
       if (stopped) return;

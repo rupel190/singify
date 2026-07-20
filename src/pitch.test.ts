@@ -7,6 +7,8 @@ import {
   foldToOctaveOf,
   createPitchSmoother,
   foldSmoothHit,
+  rms,
+  sensitivityToThreshold,
 } from "./pitch";
 
 const SR = 44100;
@@ -49,6 +51,37 @@ describe("Hz / MIDI / pitch-class conversion", () => {
     // The core of octave-agnostic scoring — same note, different octave.
     expect(pitchClass(62)).toBe(pitchClass(74));
     expect(pitchClass(62)).toBe(2); // D
+  });
+});
+
+describe("rms + mic sensitivity", () => {
+  test("rms is 0 for silence and matches a sine's amplitude/√2", () => {
+    expect(rms(new Float32Array(2048))).toBe(0);
+    // A sine of amplitude A has RMS A/√2.
+    expect(rms(sine(440, 4096, 0.5))).toBeCloseTo(0.5 / Math.SQRT2, 2);
+  });
+
+  test("sensitivity maps monotonically to an RMS gate (higher = lower gate)", () => {
+    expect(sensitivityToThreshold(0)).toBeCloseTo(0.05, 5); // least sensitive
+    expect(sensitivityToThreshold(100)).toBeCloseTo(0.003, 5); // most sensitive
+    expect(sensitivityToThreshold(20)).toBeGreaterThan(sensitivityToThreshold(80));
+    expect(sensitivityToThreshold(60)).toBeLessThan(0.011); // ~ the old default gate
+    expect(sensitivityToThreshold(60)).toBeGreaterThan(0.008);
+  });
+
+  test("sensitivity clamps out-of-range input", () => {
+    expect(sensitivityToThreshold(-50)).toBeCloseTo(0.05, 5);
+    expect(sensitivityToThreshold(999)).toBeCloseTo(0.003, 5);
+  });
+
+  test("raising sensitivity rescues a quiet tone the default gate rejects", () => {
+    const quiet = sine(220, 2048, 0.008); // RMS ~0.0057 — below the 0.01 default
+    // Low sensitivity (default-ish gate) drops it...
+    expect(detectPitch(quiet, { sampleRate: SR, rmsThreshold: sensitivityToThreshold(50) })).toBeNull();
+    // ...cranking sensitivity up lets it through, correctly.
+    const r = detectPitch(quiet, { sampleRate: SR, rmsThreshold: sensitivityToThreshold(100) });
+    expect(r).not.toBeNull();
+    expect(Math.round(r!.midi)).toBe(Math.round(hzToMidi(220)));
   });
 });
 

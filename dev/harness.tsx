@@ -20,6 +20,13 @@ import { parse } from "../src/ultrastar-parser";
 import { KaraokeView, type FrameDebug } from "../src/karaoke-view";
 import { SongPicker } from "../src/song-picker";
 import { startMicPitch, type MicPitch } from "../src/mic";
+import { sensitivityToThreshold } from "../src/pitch";
+
+const SENS_KEY = "singify:sensitivity";
+function loadSensitivity(): number {
+  const v = Number(localStorage.getItem(SENS_KEY));
+  return Number.isFinite(v) && v >= 0 && v <= 100 ? v : 60;
+}
 
 // Note-name helpers for the diagnostic overlay.
 const NOTE_LETTERS = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"];
@@ -107,14 +114,57 @@ if (initialT > 0) seek(initialT);
 const autoplay = params.get("play") === "1";
 if (autoplay) play();
 
+/** Input level bar with the sensitivity gate marked (pink). Green past the gate. */
+function LevelMeter(props: { level: number; threshold: number }) {
+  const METER_MAX = 0.06; // top of the scale (a loud-ish room)
+  const W = 90;
+  const H = 12;
+  const fill = Math.min(1, props.level / METER_MAX);
+  const mark = Math.min(1, props.threshold / METER_MAX);
+  const over = props.level >= props.threshold;
+  return (
+    <div
+      style={{
+        position: "relative",
+        width: W,
+        height: H,
+        borderRadius: 3,
+        background: "#20202a",
+        overflow: "hidden",
+      }}
+    >
+      <div
+        style={{
+          position: "absolute",
+          left: 0,
+          top: 0,
+          bottom: 0,
+          width: fill * W,
+          background: over ? "#1ed760" : "#5a5a66",
+          transition: "width 60ms linear",
+        }}
+      />
+      <div
+        style={{ position: "absolute", left: mark * W, top: -2, bottom: -2, width: 2, background: "#ff5ea8" }}
+      />
+    </div>
+  );
+}
+
 /**
  * Live pitch diagnostics. Watch the raw detector value flicker while "Off by"
  * (the smoothed, target-folded distance) stays steady — that's the smoothing
- * working. If the detector shows "no signal" a lot, it's dropping out; if "Off
- * by" is large while you're on pitch, it's a detection/octave problem.
+ * working. The Level meter shows your input against the sensitivity gate (pink):
+ * frequent "no signal" means your level is dipping below the gate — raise
+ * sensitivity or sing louder.
  */
-function DebugPanel(props: { data: FrameDebug | null; micOn: boolean }) {
-  const { data, micOn } = props;
+function DebugPanel(props: {
+  data: FrameDebug | null;
+  micOn: boolean;
+  level: number;
+  threshold: number;
+}) {
+  const { data, micOn, level, threshold } = props;
   const cell: React.CSSProperties = { display: "flex", flexDirection: "column", gap: 2 };
   const label: React.CSSProperties = {
     fontSize: 10,
@@ -155,6 +205,10 @@ function DebugPanel(props: { data: FrameDebug | null; micOn: boolean }) {
         </span>
       ) : (
         <>
+          <div style={cell}>
+            <span style={label}>Level</span>
+            <LevelMeter level={level} threshold={threshold} />
+          </div>
           <div style={cell}>
             <span style={label}>Detector</span>
             <span style={{ ...value, color: raw != null ? "#1ed760" : "#6d6d6d" }}>
@@ -265,6 +319,14 @@ function App() {
     debugRef.current = d;
   }, []);
 
+  // Mic sensitivity → the detector's RMS gate. Persisted; applied live.
+  const [sensitivity, setSensitivity] = React.useState(loadSensitivity);
+  const applySensitivity = (v: number) => {
+    setSensitivity(v);
+    localStorage.setItem(SENS_KEY, String(v));
+    micRef.current?.setOptions({ rmsThreshold: sensitivityToThreshold(v) });
+  };
+
   const toggleMic = async () => {
     if (micRef.current) {
       micRef.current.stop();
@@ -274,7 +336,9 @@ function App() {
     }
     try {
       setMicError(null);
-      micRef.current = await startMicPitch();
+      micRef.current = await startMicPitch({
+        rmsThreshold: sensitivityToThreshold(sensitivity),
+      });
       setMicOn(true);
     } catch (e) {
       setMicError(e instanceof Error ? e.message : "Mic access denied");
@@ -441,6 +505,34 @@ function App() {
         </span>
       </div>
 
+      {/* Mic sensitivity — the detector's loudness gate. */}
+      <div
+        style={{
+          display: "flex",
+          alignItems: "center",
+          gap: 10,
+          marginBottom: 14,
+          color: "#c8c8c8",
+          font: "500 13px system-ui",
+        }}
+      >
+        <span style={{ opacity: 0.7 }}>Mic sensitivity</span>
+        <input
+          type="range"
+          min={0}
+          max={100}
+          value={sensitivity}
+          onChange={(e) => applySensitivity(Number(e.target.value))}
+          style={{ width: 160 }}
+        />
+        <span style={{ minWidth: 38, textAlign: "center", fontVariantNumeric: "tabular-nums" }}>
+          {sensitivity}%
+        </span>
+        <span style={{ opacity: 0.5, fontSize: 12 }}>
+          higher = quiet singing detected (home) · lower = reject noise (party)
+        </span>
+      </div>
+
       {/* Chart loader — drop a real UltraStar .txt or pick one. */}
       <div
         style={{
@@ -502,7 +594,14 @@ function App() {
           }}
           onDebug={showDebug ? onDebug : undefined}
         />
-        {showDebug && <DebugPanel data={debugRef.current} micOn={micOn} />}
+        {showDebug && (
+          <DebugPanel
+            data={debugRef.current}
+            micOn={micOn}
+            level={micOn ? micRef.current?.level() ?? 0 : 0}
+            threshold={sensitivityToThreshold(sensitivity)}
+          />
+        )}
       </div>
         </div>
       ) : (
