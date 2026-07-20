@@ -21,3 +21,6 @@ charts/
 config.json
 .env
 .env.*
+
+# nix build output
+result
