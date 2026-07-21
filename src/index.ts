@@ -83,16 +83,19 @@ function setOffset(next: number): void {
   showOffset();
 }
 
-// Transient on-screen readout. Its own fixed DOM node, deliberately outside the
-// React overlay, so <KaraokeView> stays untouched.
-let offsetReadout: HTMLDivElement | null = null;
-let offsetHideTimer = 0;
+// Transient on-screen readout — ONE reused DOM node (outside the React overlay,
+// so <KaraokeView> stays untouched) shared by every live-adjust control. It just
+// updates its text and resets a fade timer, so it stays instant no matter how
+// fast you tap. Spicetify.showNotification queues a fresh toast per call and
+// lags behind rapid presses — this doesn't, which is why the knobs use it.
+let readoutEl: HTMLDivElement | null = null;
+let readoutTimer = 0;
 
-function showOffset(): void {
-  if (!offsetReadout) {
-    offsetReadout = document.createElement("div");
-    offsetReadout.id = "singify-offset-readout";
-    Object.assign(offsetReadout.style, {
+function showReadout(text: string): void {
+  if (!readoutEl) {
+    readoutEl = document.createElement("div");
+    readoutEl.id = "singify-readout";
+    Object.assign(readoutEl.style, {
       position: "fixed",
       bottom: "84px",
       left: "50%",
@@ -107,15 +110,19 @@ function showOffset(): void {
       opacity: "0",
       transition: "opacity 180ms ease",
     } as CSSStyleDeclaration);
-    document.body.appendChild(offsetReadout);
+    document.body.appendChild(readoutEl);
   }
-  const sign = offsetMs > 0 ? "+" : "";
-  offsetReadout.textContent = `Lyric offset ${sign}${offsetMs} ms`;
-  offsetReadout.style.opacity = "1";
-  clearTimeout(offsetHideTimer);
-  offsetHideTimer = window.setTimeout(() => {
-    if (offsetReadout) offsetReadout.style.opacity = "0";
+  readoutEl.textContent = text;
+  readoutEl.style.opacity = "1";
+  clearTimeout(readoutTimer);
+  readoutTimer = window.setTimeout(() => {
+    if (readoutEl) readoutEl.style.opacity = "0";
   }, 1200);
+}
+
+function showOffset(): void {
+  const sign = offsetMs > 0 ? "+" : "";
+  showReadout(`Lyric offset ${sign}${offsetMs} ms`);
 }
 
 // ── Mic pitch ────────────────────────────────────────────────────────────────
@@ -179,7 +186,7 @@ function setSensitivity(next: number): void {
     /* storage blocked — keep the in-memory value */
   }
   micPitch?.setOptions({ rmsThreshold: sensitivityToThreshold(sensitivity) });
-  Spicetify.showNotification?.(`🎤 Sensitivity ${sensitivity}%`);
+  showReadout(`🎤 Sensitivity ${sensitivity}%`);
 }
 
 // ── Load a local chart (no USDB) ─────────────────────────────────────────────
