@@ -73,6 +73,9 @@ const NOW_FRACTION = 0.25;
 const NOTE_HEIGHT = 14; // px
 const LANE_VPAD = 24; // px of vertical padding inside the lane
 const HIT_TOLERANCE = 2; // semitones — Easy (Medium=1, Hard=0 later)
+const GUTTER = 42; // px — left axis reserved for pitch-name labels (Performous-style)
+const TRAIL_MS = 850; // how far back (ms) the sung-pitch trail reaches
+const TRAIL_MAX = 96; // ring-buffer cap (frames) — a safety bound on dot count
 
 const COLORS = {
   laneBg: "rgba(0, 0, 0, 0.28)",
@@ -85,7 +88,15 @@ const COLORS = {
   lyricActive: "#ffffff",
   lyricWipe: "#1ed760",
   livePitch: "#ff5ea8",
+  axisLabel: "rgba(255, 255, 255, 0.42)",
 };
+
+// MIDI note number → name (60 = C4). Drives the left pitch axis.
+const NOTE_NAMES = ["C", "C♯", "D", "D♯", "E", "F", "F♯", "G", "G♯", "A", "A♯", "B"];
+function midiToName(midi: number): string {
+  const r = Math.round(midi);
+  return NOTE_NAMES[((r % 12) + 12) % 12] + (Math.floor(r / 12) - 1);
+}
 
 /** Measure a ref's pixel size, updating on resize. */
 function useSize(ref: { current: HTMLElement | null }): { w: number; h: number } {
@@ -153,6 +164,9 @@ export function KaraokeView(props: KaraokeViewProps) {
   const smoother = useMemo(() => createPitchSmoother(), [song]);
   const showScoreRef = useRef(!!showScore);
   const lastMsRef = useRef(0);
+  // Ring buffer of recent sung-pitch samples, drawn as a fading trail leading
+  // into the now-line. Mutated once per frame in computeFrame; read in render.
+  const trailRef = useRef<{ ms: number; pitch: number; hit: boolean }[]>([]);
   // onDebug read via a ref so a changing callback identity never rebuilds the
   // frame loop (which would restart the rAF each render).
   const onDebugRef = useRef(props.onDebug);
@@ -172,7 +186,10 @@ export function KaraokeView(props: KaraokeViewProps) {
     (ms: number, rawMidi: number | null): FrameState => {
       const jumpedBack = ms < lastMsRef.current - 750; // restart / seek-back
       lastMsRef.current = ms;
-      if (jumpedBack) smoother.reset();
+      if (jumpedBack) {
+        smoother.reset();
+        trailRef.current = [];
+      }
 
       let score: ScoreState | null = null;
       if (showScoreRef.current) {
@@ -183,6 +200,14 @@ export function KaraokeView(props: KaraokeViewProps) {
 
       const target = targetPitchAt(song, ms);
       const { pitch, hit } = foldSmoothHit(smoother, rawMidi, target, HIT_TOLERANCE);
+      // Record the sample for the trail, then drop anything older than the window.
+      if (pitch != null) {
+        const buf = trailRef.current;
+        buf.push({ ms, pitch, hit });
+        const cutoff = ms - TRAIL_MS;
+        while (buf.length && buf[0].ms < cutoff) buf.shift();
+        if (buf.length > TRAIL_MAX) buf.splice(0, buf.length - TRAIL_MAX);
+      }
       onDebugRef.current?.({ rawMidi, targetPitch: target, markerPitch: pitch, markerHit: hit });
       return { ms, markerPitch: pitch, markerHit: hit, score };
     },
@@ -205,6 +230,19 @@ export function KaraokeView(props: KaraokeViewProps) {
     const t = (pitch - minPitch) / pitchSpan; // 0..1, low..high
     return LANE_VPAD + (1 - t) * (innerH - NOTE_HEIGHT);
   };
+  // Vertical centre of a note row (grid lines + axis labels align to this).
+  const yCenterForPitch = (pitch: number): number => yForPitch(pitch) + NOTE_HEIGHT / 2;
+
+  // Labelled pitch rows for the left axis. Snap to whole semitones and cap at
+  // ~7 rows so a wide-range song doesn't crowd the gutter.
+  const pitchRows = useMemo(() => {
+    const lo = Math.floor(minPitch);
+    const hi = Math.ceil(maxPitch);
+    const step = Math.max(1, Math.ceil((hi - lo) / 6));
+    const rows: number[] = [];
+    for (let m = lo; m <= hi; m += step) rows.push(m);
+    return rows;
+  }, [minPitch, maxPitch]);
 
   // Notes are positioned once by absolute time; only the track transform moves.
   const noteEls = useMemo(() => {
@@ -291,27 +329,58 @@ export function KaraokeView(props: KaraokeViewProps) {
         ref={laneRef}
         style={{
           position: "relative",
-          flex: fullscreen ? "1 1 auto" : "0 0 46%",
+          flex: "1 1 auto", // the note highway is the hero — it fills the stage
           minHeight: 160,
           overflow: "hidden",
           borderRadius: 10,
           background: COLORS.laneBg,
         }}
       >
-        {/* pitch grid lines */}
-        {Array.from({ length: 5 }).map((_, i) => (
-          <div
-            key={`g${i}`}
-            style={{
-              position: "absolute",
-              left: 0,
-              right: 0,
-              top: LANE_VPAD + (i / 4) * (innerH - NOTE_HEIGHT),
-              height: 1,
-              background: COLORS.gridLine,
-            }}
-          />
-        ))}
+        {/* pitch-name axis: a grid line + note label per row (Performous-style) */}
+        {pitchRows.map((m) => {
+          const y = yCenterForPitch(m);
+          return (
+            <div key={`row${m}`}>
+              <div
+                style={{
+                  position: "absolute",
+                  left: GUTTER,
+                  right: 0,
+                  top: y,
+                  height: 1,
+                  background: COLORS.gridLine,
+                }}
+              />
+              <div
+                style={{
+                  position: "absolute",
+                  left: 8,
+                  top: y - 7,
+                  fontSize: 11,
+                  fontWeight: 600,
+                  lineHeight: 1,
+                  color: COLORS.axisLabel,
+                  fontVariantNumeric: "tabular-nums",
+                  pointerEvents: "none",
+                }}
+              >
+                {midiToName(m)}
+              </div>
+            </div>
+          );
+        })}
+        {/* soft fade on the left so labels stay legible over scrolling notes/art */}
+        <div
+          style={{
+            position: "absolute",
+            left: 0,
+            top: 0,
+            bottom: 0,
+            width: GUTTER + 20,
+            background: `linear-gradient(to right, ${COLORS.laneBg}, transparent)`,
+            pointerEvents: "none",
+          }}
+        />
 
         {/* moving note track */}
         <div
@@ -338,20 +407,56 @@ export function KaraokeView(props: KaraokeViewProps) {
           }}
         />
 
-        {/* live sung-pitch marker (only when a mic pitch is available) */}
+        {/* sung-pitch trail: recent samples pinned to the notes they were sung
+            against (x = now-line offset by age), fading + shrinking with age. */}
+        {trailRef.current.map((p, i) => {
+          const x = nowX + (p.ms - positionMs) * PX_PER_MS;
+          if (x < GUTTER + 4) return null; // don't paint under the label gutter
+          const ty =
+            LANE_VPAD +
+            (1 - Math.min(1, Math.max(0, (p.pitch - minPitch) / pitchSpan))) *
+              (innerH - NOTE_HEIGHT) +
+            NOTE_HEIGHT / 2;
+          const o = Math.max(0, 1 - (positionMs - p.ms) / TRAIL_MS);
+          const size = 3 + o * 3;
+          return (
+            <div
+              key={i}
+              style={{
+                position: "absolute",
+                left: x - size / 2,
+                top: ty - size / 2,
+                width: size,
+                height: size,
+                borderRadius: "50%",
+                background: p.hit ? COLORS.nowLine : COLORS.livePitch,
+                opacity: o * 0.75,
+                pointerEvents: "none",
+              }}
+            />
+          );
+        })}
+
+        {/* live sung-pitch marker (only when a mic pitch is available). On a hit
+            it pops bigger + glows brighter — the "you nailed it" feedback. */}
         {liveY != null && (
           <div
             style={{
               position: "absolute",
-              left: nowX - 8,
-              top: liveY - 8,
-              width: 16,
-              height: 16,
+              left: nowX - 9,
+              top: liveY - 9,
+              width: 18,
+              height: 18,
               borderRadius: "50%",
               background: markerColor,
-              boxShadow: `0 0 12px ${markerColor}`,
-              transition: "top 60ms linear, background 90ms ease",
+              boxShadow: markerHit
+                ? `0 0 22px ${markerColor}, 0 0 9px ${markerColor}`
+                : `0 0 12px ${markerColor}`,
+              transform: markerHit ? "scale(1.3)" : "scale(1)",
+              transition:
+                "top 60ms linear, transform 110ms ease, box-shadow 110ms ease, background 90ms ease",
               pointerEvents: "none",
+              zIndex: 3,
             }}
           />
         )}
@@ -393,17 +498,20 @@ export function KaraokeView(props: KaraokeViewProps) {
         )}
       </div>
 
-      {/* ── Lyric scroll ── */}
+      {/* ── Lyric band (anchored at the bottom, like SingStar/UltraStar) ── */}
       <div
         style={{
-          flex: "1 1 auto",
+          flex: "0 0 auto",
           display: "flex",
           flexDirection: "column",
-          justifyContent: "center",
+          justifyContent: "flex-end",
           alignItems: "center",
-          gap: fullscreen ? 18 : 10,
+          gap: fullscreen ? 14 : 8,
           textAlign: "center",
           overflow: "hidden",
+          paddingTop: fullscreen ? 28 : 16,
+          paddingBottom: fullscreen ? 28 : 12,
+          background: "linear-gradient(to bottom, transparent, rgba(0,0,0,0.30))",
         }}
       >
         {[-1, 0, 1, 2].map((offset) => {
