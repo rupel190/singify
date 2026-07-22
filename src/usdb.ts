@@ -155,59 +155,52 @@ export async function search(opts: SearchOptions): Promise<SearchResult> {
 /**
  * Parses the HTML table from /?link=list into structured song data.
  *
- * Row structure (non-header .row1 table rows):
- *   td[0] → artist  (onclick="ShowDetail(ID)")
- *   td[1] → title
- *   td[2] → edition
- *   td[3] → "Ja"/"Nein" for golden notes
- *   td[4] → language
- *   td[5] → star images (star.png / half_star.png)
- *   td[6] → view count
+ * Each result row is `<tr ... data-songid="N" ...>` with these <td> columns
+ * (confirmed against the live site 2026-07): 0 Artist, 1 Title, 2 Genre,
+ * 3 Year, 4 Edition, 5 Golden Notes ("Yes"/"No"), 6 Language, 7 Creator,
+ * 8 Rating (star.png / half_star.png / star2.png images), 9 Views. The id is
+ * taken from the row's `data-songid` attribute (the old `ShowDetail(id)`
+ * onclick is gone — rows now call `show_detail(id)`).
  *
  * Uses lightweight regex scraping — no DOM parser needed in Bun/Node context.
+ * Exported for unit testing against captured markup (this is what rots).
  */
-function parseSearchHtml(html: string, currentPage: number): SearchResult {
+export function parseSearchHtml(html: string, currentPage: number): SearchResult {
   const songs: USDBSong[] = [];
 
-  // ── Pagination ──
-  // Last page number appears in links like (30) at the end of pagination
+  // ── Pagination ── "There are  N  results on  M page(s)"
   let totalPages = currentPage;
-  const pageLinks = [...html.matchAll(/\((\d+)\)/g)];
-  if (pageLinks.length > 0) {
-    const last = pageLinks[pageLinks.length - 1];
-    const parsed = parseInt(last[1], 10);
+  const pageMatch = html.match(/on\s+(\d+)\s+page\(s\)/i);
+  if (pageMatch) {
+    const parsed = parseInt(pageMatch[1], 10);
     if (!isNaN(parsed)) totalPages = Math.max(totalPages, parsed);
   }
 
-  // ── Row extraction ──
-  // Each data row opens with an onclick on the first td
-  const rowPattern =
-    /onclick="ShowDetail\((\d+)\)"[^>]*>(.*?)<\/td>(.*?)<\/tr>/gs;
+  // ── Row extraction ── anchor on data-songid, then read the <td> cells in order
+  const rowPattern = /<tr[^>]*\bdata-songid="(\d+)"[^>]*>([\s\S]*?)<\/tr>/gi;
 
   for (const rowMatch of html.matchAll(rowPattern)) {
     const id = parseInt(rowMatch[1], 10);
-    const firstTd = rowMatch[2];
-    const rest = rowMatch[3];
+    const cells = [...rowMatch[2].matchAll(/<td[^>]*>([\s\S]*?)<\/td>/gi)];
+    const text = (i: number): string =>
+      stripTags(cells[i]?.[1] ?? "").replace(/\s+/g, " ").trim();
 
-    const tds = [...rest.matchAll(/<td[^>]*>([\s\S]*?)<\/td>/g)].map((m) =>
-      stripTags(m[1]).trim()
-    );
+    const artist = text(0);
+    const title = text(1);
+    if (!artist && !title) continue; // action-only / malformed row
 
-    if (tds.length < 6) continue;  // malformed row, skip
+    const edition = text(4);
+    const golden = /^(yes|ja)$/i.test(text(5));
+    const language = text(6);
 
-    const artist = stripTags(firstTd).trim();
-    const title = tds[0];
-    const edition = tds[1];
-    const golden = tds[2].toLowerCase() === "ja";
-    const language = tds[3];
-
-    // Rating: count star.png and half_star.png images in td[4]
-    const ratingBlock = [...rest.matchAll(/<td[^>]*>([\s\S]*?)<\/td>/g)][4]?.[0] ?? "";
-    const fullStars = (ratingBlock.match(/star\.png/g) ?? []).length;
-    const halfStars = (ratingBlock.match(/half_star\.png/g) ?? []).length;
+    // Rating: full = images/star.png, half = images/half_star.png. Match the
+    // full path so "star.png" doesn't also count "half_star.png" / "star2.png".
+    const ratingCell = cells[8]?.[1] ?? "";
+    const fullStars = (ratingCell.match(/images\/star\.png/g) ?? []).length;
+    const halfStars = (ratingCell.match(/images\/half_star\.png/g) ?? []).length;
     const rating = fullStars + halfStars * 0.5;
 
-    const views = parseInt(tds[5].replace(/\D/g, ""), 10) || 0;
+    const views = parseInt(text(9).replace(/\D/g, ""), 10) || 0;
 
     songs.push({ id, artist, title, edition, golden, language, rating, views });
   }
@@ -225,10 +218,12 @@ function stripTags(html: string): string {
 // ── Download ───────────────────────────────────────────────────────────────
 
 /**
- * Downloads the raw UltraStar .txt content for a given USDB song ID.
+ * Downloads the UltraStar .txt content for a given USDB song ID.
  * Requires an active session (call login() first).
  *
- * USDB returns the .txt file as the raw POST response body.
+ * The gettxt endpoint needs `wd=1` ("with download") — without it USDB returns
+ * a confirmation page, not the chart. The chart comes back embedded in an
+ * HTML <textarea> (HTML-escaped), so we extract and unescape it.
  */
 export async function downloadTxt(id: number): Promise<string> {
   const res = await fetch(`${BASE}/index.php?link=gettxt&id=${id}`, {
@@ -237,22 +232,41 @@ export async function downloadTxt(id: number): Promise<string> {
       "Content-Type": "application/x-www-form-urlencoded",
       ...cookieHeader(),
     },
-    body: `id=${id}`,
+    body: `wd=1&id=${id}`,
   });
 
   if (!res.ok) {
     throw new Error(`USDB download failed for id=${id}: HTTP ${res.status}`);
   }
 
-  const text = await res.text();
+  const html = await res.text();
 
-  // USDB sometimes returns an error page instead of a .txt
-  if (text.includes("You are not logged in")) {
+  // An expired session yields the "not logged in" page instead of the chart.
+  if (/not logged in/i.test(html)) {
     throw new Error("USDB session expired — please re-login");
   }
-  if (!text.includes("#TITLE:") && !text.includes("#ARTIST:")) {
+
+  const txt = extractTextarea(html);
+  if (!txt || (!txt.includes("#TITLE:") && !txt.includes("#ARTIST:"))) {
     throw new Error(`USDB returned unexpected content for id=${id}`);
   }
+  return txt;
+}
 
-  return text;
+/** Pull the chart out of USDB's `<textarea>` wrapper and unescape HTML entities. */
+export function extractTextarea(html: string): string | null {
+  const m = html.match(/<textarea[^>]*>([\s\S]*?)<\/textarea>/i);
+  if (!m) return null;
+  // A <textarea>'s leading newline is a rendering artifact — strip it so the
+  // parser sees #TITLE on line 1 (parseHeaders stops at the first non-# line).
+  return unescapeHtml(m[1]).replace(/^\s+/, "");
+}
+
+function unescapeHtml(s: string): string {
+  return s
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/&quot;/g, '"')
+    .replace(/&#0?39;|&#x27;/gi, "'")
+    .replace(/&amp;/g, "&"); // ampersand last, or "&amp;lt;" would double-unescape
 }
