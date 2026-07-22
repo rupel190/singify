@@ -14,6 +14,7 @@
 
 import { KaraokeView } from "./karaoke-view";
 import { SongPicker } from "./song-picker";
+import { HomeMenu } from "./home-menu";
 import { startMicPitch, type MicPitch } from "./mic";
 import { resolveForTrack, confirmPick } from "./resolver-client";
 import { sensitivityToThreshold } from "./pitch";
@@ -284,6 +285,10 @@ let overlay: HTMLDivElement | null = null;
 let root: { render(el: unknown): void; unmount(): void } | null = null;
 let currentSong: ParsedSong | null = null;
 let visible = false;
+// Which screen the overlay shows. "sing" is the karaoke surface (K / Quick Sing,
+// today's behaviour); "home" is the session menu (opened from the Topbar button).
+type Screen = "home" | "sing";
+let screen: Screen = "sing";
 // Set when a chart is loaded manually (L hotkey) instead of resolved from USDB —
 // lets you sing along in Spotify without a USDB account. While set, songchange
 // won't overwrite the chart (reload the client to go back to auto-resolve).
@@ -328,6 +333,27 @@ function ensureOverlay(): HTMLDivElement {
 function renderOverlay(): void {
   if (!root) return;
   const React = Spicetify.React;
+
+  if (screen === "home") {
+    const item = Spicetify.Player.data?.item ?? Spicetify.Player.data?.track;
+    const track = item
+      ? { artist: item.artists?.[0]?.name ?? "", title: item.name ?? "" }
+      : null;
+    root.render(
+      React.createElement(HomeMenu, {
+        track,
+        onQuickSing: () => {
+          screen = "sing";
+          renderOverlay();
+        },
+        onStartSession: () => {
+          // Milestone 2 wires the real session flow here.
+          Spicetify.showNotification?.("Sessions land in the next build 🎶");
+        },
+      })
+    );
+    return;
+  }
 
   if (currentSong) {
     root.render(
@@ -380,6 +406,26 @@ function setVisible(next: boolean): void {
   const el = ensureOverlay();
   el.style.display = visible ? "block" : "none";
   if (visible) renderOverlay();
+}
+
+// K → the karaoke surface (Quick Sing); toggles closed if already there.
+function openSing(): void {
+  if (visible && screen === "sing") {
+    setVisible(false);
+    return;
+  }
+  screen = "sing";
+  setVisible(true);
+}
+
+// Topbar button → the session menu; toggles closed if already there.
+function openHome(): void {
+  if (visible && screen === "home") {
+    setVisible(false);
+    return;
+  }
+  screen = "home";
+  setVisible(true);
 }
 
 // ── Song resolution ──────────────────────────────────────────────────────────
@@ -522,6 +568,22 @@ async function main(): Promise<void> {
   Spicetify.Player.addEventListener("onplaypause", onPlayPause);
   Spicetify.Player.addEventListener("songchange", () => void onSongChange());
 
+  // Topbar entry point for sessions (K still goes straight to Quick Sing). Typed
+  // loosely — Spicetify.Topbar isn't in our .d.ts and may be absent on old builds.
+  const S = Spicetify as unknown as {
+    Topbar?: {
+      Button: new (
+        label: string,
+        icon: string,
+        onClick: () => void,
+        disabled?: boolean
+      ) => unknown;
+    };
+  };
+  if (S.Topbar?.Button) {
+    new S.Topbar.Button("Singify sessions", "gamepad", () => openHome());
+  }
+
   document.addEventListener("keydown", (e) => {
     // Hotkeys, but never while typing in a field.
     const target = e.target as HTMLElement | null;
@@ -533,7 +595,9 @@ async function main(): Promise<void> {
     if (typing) return;
 
     if (e.key === "k" || e.key === "K") {
-      setVisible(!visible); // toggle the karaoke overlay
+      openSing(); // Quick Sing the current track
+    } else if (e.key === "Escape") {
+      if (visible) setVisible(false); // close the overlay
     } else if (e.key === "[") {
       setOffset(offsetMs - OFFSET_STEP); // lyrics 20 ms later
     } else if (e.key === "]") {
