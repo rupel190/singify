@@ -16,8 +16,13 @@ mock.module("./usdb", () => ({
   downloadTxt: (id: number) => downloadImpl(id),
 }));
 
-const { resolveForTrack, confirmPick, SessionExpiredError, MATCH_THRESHOLD } =
-  await import("./resolver");
+const {
+  resolveForTrack,
+  searchForTrack,
+  confirmPick,
+  SessionExpiredError,
+  MATCH_THRESHOLD,
+} = await import("./resolver");
 
 const TXT = `#TITLE:Hello
 #ARTIST:Adele
@@ -49,6 +54,35 @@ beforeEach(() => {
   setCacheDir(mkdtempSync(join(tmpdir(), "sk-resolver-")));
   searchImpl = async () => result([]);
   downloadImpl = async () => TXT;
+});
+
+describe("searchForTrack (re-choose)", () => {
+  test("always returns the ranked picker — even a lone high-confidence match", async () => {
+    // resolveForTrack would auto-download this; searchForTrack must NOT.
+    let downloaded = false;
+    downloadImpl = async () => {
+      downloaded = true;
+      return TXT;
+    };
+    searchImpl = async () => result([song({ id: 7 })]);
+    const r = await searchForTrack("Adele", "Hello");
+    expect(r.status).toBe("needsPicker");
+    if (r.status === "needsPicker") expect(r.candidates.map((c) => c.id)).toEqual([7]);
+    expect(downloaded).toBe(false);
+  });
+
+  test("ranks multiple candidates best-first", async () => {
+    searchImpl = async () =>
+      result([song({ id: 1, title: "Hello (Live)" }), song({ id: 2, title: "Hello" })]);
+    const r = await searchForTrack("Adele", "Hello");
+    expect(r.status).toBe("needsPicker");
+    if (r.status === "needsPicker") expect(r.candidates[0].id).toBe(2);
+  });
+
+  test("notFound when USDB has nothing", async () => {
+    searchImpl = async () => result([]);
+    expect((await searchForTrack("x", "y")).status).toBe("notFound");
+  });
 });
 
 describe("resolveForTrack", () => {

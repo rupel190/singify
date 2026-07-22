@@ -39,6 +39,8 @@ export interface HandlerDeps {
     artist: string,
     title: string
   ) => Promise<ResolveResult>;
+  /** Force a fresh USDB search (skips local + cache) for the re-choose flow. */
+  searchForTrack: (artist: string, title: string) => Promise<ResolveResult>;
   confirmPick: (trackId: string, candidate: USDBSong) => Promise<ParsedSong>;
 }
 
@@ -90,7 +92,17 @@ export function createHandler(
         const trackId = url.searchParams.get("trackId") ?? "";
         const artist = url.searchParams.get("artist") ?? "";
         const title = url.searchParams.get("title") ?? "";
+        const force = url.searchParams.get("force") === "1";
         if (!trackId) return json({ error: "missing trackId" }, 400);
+
+        // Re-choose: skip local + cache, search USDB fresh, return every match.
+        if (force) {
+          if (!deps.hasCredentials) return json({ status: "notFound" });
+          const result = await withSession(() =>
+            deps.searchForTrack(artist, title)
+          );
+          return json(result);
+        }
 
         // Local charts win — no account, no network. Drop a .txt in the folder
         // and it autoloads here before we ever consider USDB.
@@ -152,7 +164,9 @@ async function startHelper(): Promise<void> {
   // doesn't pull the disk-cache / config modules.
   const { loadConfig, configPath } = await import("./config");
   const usdb = await import("../src/usdb");
-  const { resolveForTrack, confirmPick } = await import("../src/resolver");
+  const { resolveForTrack, confirmPick, searchForTrack } = await import(
+    "../src/resolver"
+  );
   const { setCacheDir, getCacheDir } = await import("../src/cache");
   const { createLocalCharts } = await import("./local-charts");
 
@@ -179,6 +193,7 @@ async function startHelper(): Promise<void> {
     relogin,
     resolveLocal: (artist, title) => localCharts.resolve(artist, title),
     resolveForTrack,
+    searchForTrack,
     confirmPick,
   });
 

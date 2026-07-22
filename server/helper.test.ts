@@ -11,6 +11,7 @@ const baseDeps: HandlerDeps = {
   relogin: async () => {},
   resolveLocal: () => null,
   resolveForTrack: async () => ({ status: "notFound" }),
+  searchForTrack: async () => ({ status: "notFound" }),
   confirmPick: async () => FAKE_SONG,
 };
 
@@ -104,6 +105,53 @@ describe("helper handler", () => {
     expect(body.status).toBe("local");
     expect(body.song.headers.title).toBe("T");
     expect(called).toBe(false);
+  });
+
+  test("force=1 re-search: hits USDB search, skips local + cache resolve", async () => {
+    let searched = false;
+    let localCalled = false;
+    let resolveCalled = false;
+    const deps: HandlerDeps = {
+      ...baseDeps,
+      resolveLocal: () => {
+        localCalled = true;
+        return { song: FAKE_SONG, path: "/x.txt", score: 1 };
+      },
+      resolveForTrack: async () => {
+        resolveCalled = true;
+        return { status: "notFound" };
+      },
+      searchForTrack: async (artist, title) => {
+        searched = true;
+        expect(artist).toBe("A");
+        expect(title).toBe("T");
+        return { status: "needsPicker", candidates: [{ id: 1 } as never] };
+      },
+    };
+    const res = await createHandler(deps)(
+      req("GET", "/resolve?trackId=t1&artist=A&title=T&force=1")
+    );
+    expect(res.status).toBe(200);
+    expect((await res.json()).status).toBe("needsPicker");
+    expect(searched).toBe(true);
+    expect(localCalled).toBe(false); // force bypasses the local folder
+    expect(resolveCalled).toBe(false); // …and the cache/auto-select path
+  });
+
+  test("force=1 with no credentials → notFound, never searches", async () => {
+    let searched = false;
+    const deps: HandlerDeps = {
+      ...baseDeps,
+      hasCredentials: false,
+      searchForTrack: async () => {
+        searched = true;
+        return { status: "notFound" };
+      },
+    };
+    const res = await createHandler(deps)(req("GET", "/resolve?trackId=t1&force=1"));
+    expect(res.status).toBe(200);
+    expect((await res.json()).status).toBe("notFound");
+    expect(searched).toBe(false);
   });
 
   test("no credentials + no local chart → notFound (200), not a 503 nag", async () => {

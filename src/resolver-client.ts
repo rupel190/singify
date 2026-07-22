@@ -30,9 +30,11 @@ async function errorMessage(res: Response): Promise<string> {
 export async function resolveForTrack(
   spotifyTrackId: string,
   artist: string,
-  title: string
+  title: string,
+  force = false
 ): Promise<ResolveResult> {
   const q = new URLSearchParams({ trackId: spotifyTrackId, artist, title });
+  if (force) q.set("force", "1"); // re-choose: skip local + cache, search USDB
   const res = await fetch(`${HELPER_BASE}/resolve?${q}`);
   if (!res.ok) throw new Error(await errorMessage(res));
   return (await res.json()) as ResolveResult;

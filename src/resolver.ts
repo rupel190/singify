@@ -89,6 +89,28 @@ export async function resolveForTrack(
 }
 
 /**
+ * Force a fresh USDB search for a track and ALWAYS return the ranked candidates
+ * (never the cache, never an auto-select). This backs the "re-choose" flow — the
+ * user asking to pick a different chart, retry a song USDB has now, or recover a
+ * dismissed picker.
+ */
+export async function searchForTrack(
+  artist: string,
+  title: string
+): Promise<ResolveResult> {
+  const cleaned = sanitizeQuery(title, artist);
+  const { songs } = await usdb.search({
+    artist: cleaned.artist,
+    title: cleaned.title,
+  });
+  if (songs.length === 0) return { status: "notFound" };
+  const ranked = songs
+    .map((s) => ({ song: s, score: scoreCandidate(s, cleaned) }))
+    .sort((a, b) => b.score - a.score);
+  return { status: "needsPicker", candidates: ranked.map((r) => r.song) };
+}
+
+/**
  * Download + cache a user-picked (or auto-selected) candidate and return the
  * parsed song. Called by the picker UI.
  */

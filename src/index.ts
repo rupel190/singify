@@ -151,6 +151,36 @@ function showOffset(): void {
   showReadout(`Lyric offset ${sign}${offsetMs} ms · ${scope}`);
 }
 
+// ── Punch-to-sync ────────────────────────────────────────────────────────────
+//
+// When a chart's #GAP is seconds off Spotify's master, nudging [ / ] 20 ms at a
+// time is hopeless. Instead: press P the instant you hear the first sung word.
+// We know the chart's first note time, so we snap it to "now" in one tap —
+// offset = firstNoteMs − current position — then you fine-tune from there. Saved
+// per track like any offset, so each song is punched once.
+function firstNoteMs(song: ParsedSong): number | null {
+  for (const line of song.lines) {
+    const s = line.syllables[0];
+    if (s) return s.startMs;
+  }
+  return null;
+}
+
+function punchSync(): void {
+  if (!currentSong) {
+    Spicetify.showNotification?.("Punch-sync: no chart loaded");
+    return;
+  }
+  const firstMs = firstNoteMs(currentSong);
+  if (firstMs == null) {
+    Spicetify.showNotification?.("Punch-sync: chart has no notes");
+    return;
+  }
+  setOffset(firstMs - getBaseMs()); // snap the first line to this moment
+  const sign = offsetMs > 0 ? "+" : "";
+  showReadout(`⏱ Punched — first line synced · offset ${sign}${offsetMs} ms`);
+}
+
 // ── Mic pitch ────────────────────────────────────────────────────────────────
 //
 // M toggles the mic. read() is polled by <KaraokeView> each frame via
@@ -437,6 +467,46 @@ async function onSongChange(): Promise<void> {
   if (visible) renderOverlay();
 }
 
+// ── Re-choose (force a fresh USDB search) ────────────────────────────────────
+//
+// "L, but remote": ignore the local chart AND the cache, search USDB fresh, and
+// reopen the picker with every match — to pick a different chart, retry a song
+// USDB has now (but didn't before), or recover a picker you dismissed.
+async function reSearch(): Promise<void> {
+  const item = Spicetify.Player.data?.item ?? Spicetify.Player.data?.track;
+  if (!item?.uri) return;
+  const title = item.name ?? "";
+  const artist = item.artists?.[0]?.name ?? "";
+
+  manualChart = false; // re-enable auto-resolve on later songchanges too
+  currentSong = null;
+  currentTrackId = item.uri;
+  pickerCandidates = null;
+  pickPending = null;
+  pickError = null;
+  Spicetify.showNotification?.(`🔎 Searching USDB for “${title}”…`);
+  if (!visible) setVisible(true);
+  else renderOverlay();
+
+  try {
+    const res = await resolveForTrack(item.uri, artist, title, true);
+    if (res.status === "needsPicker") {
+      pickerQuery = { artist, title };
+      pickerCandidates = res.candidates;
+    } else {
+      Spicetify.showNotification?.(`No USDB matches for “${title}”`);
+    }
+  } catch (err) {
+    const msg =
+      err instanceof TypeError
+        ? "Karaoke helper not running — start it with `bun run helper`"
+        : `Search failed: ${err instanceof Error ? err.message : String(err)}`;
+    Spicetify.showNotification?.(msg, true);
+  }
+
+  if (visible) renderOverlay();
+}
+
 // ── Bootstrap ────────────────────────────────────────────────────────────────
 
 async function main(): Promise<void> {
@@ -474,6 +544,10 @@ async function main(): Promise<void> {
       void toggleMic();
     } else if (e.key === "l" || e.key === "L") {
       loadLocalChart(); // pick an UltraStar .txt (no USDB needed)
+    } else if (e.key === "p" || e.key === "P") {
+      punchSync(); // tap on the first sung word to snap the offset
+    } else if (e.key === "r" || e.key === "R") {
+      void reSearch(); // force a fresh USDB search + picker for this track
     } else if (e.key === "-") {
       setSensitivity(sensitivity - 5); // less sensitive (noisy room)
     } else if (e.key === "=") {
