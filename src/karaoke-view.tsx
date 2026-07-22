@@ -73,7 +73,7 @@ const NOW_FRACTION = 0.25;
 const NOTE_HEIGHT = 14; // px
 const LANE_VPAD = 24; // px of vertical padding inside the lane
 const HIT_TOLERANCE = 2; // semitones — Easy (Medium=1, Hard=0 later)
-const GUTTER = 42; // px — left axis reserved for pitch-name labels (Performous-style)
+const GUTTER = 120; // px — left axis reserved for pitch-name labels (Performous-style)
 const TRAIL_MS = 850; // how far back (ms) the sung-pitch trail reaches
 const TRAIL_MAX = 96; // ring-buffer cap (frames) — a safety bound on dot count
 
@@ -88,7 +88,7 @@ const COLORS = {
   lyricActive: "#ffffff",
   lyricWipe: "#1ed760",
   livePitch: "#ff5ea8",
-  axisLabel: "rgba(255, 255, 255, 0.42)",
+  axisLabel: "rgba(255, 255, 255, 0.58)",
 };
 
 // MIDI note number → name (60 = C4). Drives the left pitch axis.
@@ -233,16 +233,22 @@ export function KaraokeView(props: KaraokeViewProps) {
   // Vertical centre of a note row (grid lines + axis labels align to this).
   const yCenterForPitch = (pitch: number): number => yForPitch(pitch) + NOTE_HEIGHT / 2;
 
-  // Labelled pitch rows for the left axis. Snap to whole semitones and cap at
-  // ~7 rows so a wide-range song doesn't crowd the gutter.
+  // Pitch-name axis labels — big, matched toward the lyric size.
+  const axisLabelSize = 60;
+
+  // Labelled pitch rows for the left axis. Cap the row count to what the lane
+  // height can hold without the (now large) labels colliding — so the vertical
+  // spacing stays comfortable on any screen size.
   const pitchRows = useMemo(() => {
     const lo = Math.floor(minPitch);
     const hi = Math.ceil(maxPitch);
-    const step = Math.max(1, Math.ceil((hi - lo) / 6));
+    const span = Math.max(1, hi - lo);
+    const maxRows = Math.max(2, Math.min(7, Math.floor(innerH / (axisLabelSize * 1.8))));
+    const step = Math.max(1, Math.ceil(span / (maxRows - 1)));
     const rows: number[] = [];
     for (let m = lo; m <= hi; m += step) rows.push(m);
     return rows;
-  }, [minPitch, maxPitch]);
+  }, [minPitch, maxPitch, innerH, axisLabelSize]);
 
   // Notes are positioned once by absolute time; only the track transform moves.
   const noteEls = useMemo(() => {
@@ -354,9 +360,9 @@ export function KaraokeView(props: KaraokeViewProps) {
               <div
                 style={{
                   position: "absolute",
-                  left: 8,
-                  top: y - 7,
-                  fontSize: 11,
+                  left: 10,
+                  top: y - axisLabelSize / 2,
+                  fontSize: axisLabelSize,
                   fontWeight: 600,
                   lineHeight: 1,
                   color: COLORS.axisLabel,
@@ -475,7 +481,7 @@ export function KaraokeView(props: KaraokeViewProps) {
           >
             <div
               style={{
-                fontSize: fullscreen ? 40 : 28,
+                fontSize: 80,
                 fontWeight: 800,
                 lineHeight: 1,
                 color: COLORS.nowLine,
@@ -486,8 +492,8 @@ export function KaraokeView(props: KaraokeViewProps) {
             </div>
             <div
               style={{
-                marginTop: 2,
-                fontSize: 11,
+                marginTop: 6,
+                fontSize: 24,
                 fontWeight: 600,
                 color: "rgba(255,255,255,0.55)",
               }}
@@ -525,7 +531,6 @@ export function KaraokeView(props: KaraokeViewProps) {
               line={line}
               isCurrent={isCurrent}
               positionMs={positionMs}
-              fullscreen={!!fullscreen}
             />
           );
         })}
@@ -538,13 +543,12 @@ function LyricLine(props: {
   line: import("./ultrastar-parser").Line;
   isCurrent: boolean;
   positionMs: number;
-  fullscreen: boolean;
 }) {
   const React = Spicetify.React;
-  const { line, isCurrent, positionMs, fullscreen } = props;
+  const { line, isCurrent, positionMs } = props;
 
-  const baseSize = fullscreen ? 34 : 22;
-  const size = isCurrent ? baseSize : baseSize * 0.62;
+  const baseSize = 84;
+  const size = isCurrent ? baseSize : baseSize * 0.6;
 
   return (
     <div
