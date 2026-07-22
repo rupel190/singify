@@ -45,8 +45,10 @@ export function configPath(): string {
 
 /** Absolute default chart folders, in scan order: stable home first, repo dir second. */
 function defaultChartsDirs(): string[] {
+  // Curated charts are precious user data → XDG_DATA_HOME (~/.local/share).
+  const dataHome = process.env.XDG_DATA_HOME || join(homedir(), ".local", "share");
   return [
-    join(homedir(), ".config", "spicetify-karaoke", "charts"),
+    join(dataHome, "spicetify-karaoke", "charts"),
     join(process.cwd(), "charts"),
   ];
 }

@@ -27,7 +27,14 @@ import { parse, type ParsedSong } from "./ultrastar-parser";
 
 // ── Paths (overridable for tests) ────────────────────────────────────────────
 
-let baseDir = join(homedir(), "spicetify-karaoke");
+// The download cache is regenerable, so it belongs under XDG_CACHE_HOME
+// (~/.cache) rather than a bare ~/spicetify-karaoke dir.
+function defaultCacheDir(): string {
+  const xdg = process.env.XDG_CACHE_HOME || join(homedir(), ".cache");
+  return join(xdg, "spicetify-karaoke");
+}
+
+let baseDir = defaultCacheDir();
 
 /** Override the cache root (used by tests / custom install locations). */
 export function setCacheDir(dir: string): void {
