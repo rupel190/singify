@@ -36,6 +36,7 @@ export class SessionExpiredError extends Error {
 export type ResolveResult =
   | { status: "cached"; song: ParsedSong }
   | { status: "downloaded"; song: ParsedSong; usdbId: number }
+  | { status: "local"; song: ParsedSong } // matched a chart in the local folder
   | { status: "needsPicker"; candidates: USDBSong[] }
   | { status: "notFound" };
 

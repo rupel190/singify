@@ -9,6 +9,7 @@ const baseDeps: HandlerDeps = {
   hasCredentials: true,
   login: async () => {},
   relogin: async () => {},
+  resolveLocal: () => null,
   resolveForTrack: async () => ({ status: "notFound" }),
   confirmPick: async () => FAKE_SONG,
 };
@@ -81,19 +82,44 @@ describe("helper handler", () => {
     expect(res.status).toBe(400);
   });
 
-  test("no credentials → /resolve is 503 and never calls the resolver", async () => {
+  test("local chart wins: returns status 'local' and never calls USDB", async () => {
+    let called = false;
+    const deps: HandlerDeps = {
+      ...baseDeps,
+      resolveLocal: (artist, title) => {
+        expect(artist).toBe("A");
+        expect(title).toBe("T");
+        return { song: FAKE_SONG, path: "/charts/x.txt", score: 0.99 };
+      },
+      resolveForTrack: async () => {
+        called = true;
+        return { status: "notFound" };
+      },
+    };
+    const res = await createHandler(deps)(
+      req("GET", "/resolve?trackId=t1&artist=A&title=T")
+    );
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.status).toBe("local");
+    expect(body.song.headers.title).toBe("T");
+    expect(called).toBe(false);
+  });
+
+  test("no credentials + no local chart → notFound (200), not a 503 nag", async () => {
     let called = false;
     const deps: HandlerDeps = {
       ...baseDeps,
       hasCredentials: false,
+      resolveLocal: () => null,
       resolveForTrack: async () => {
         called = true;
         return { status: "notFound" };
       },
     };
     const res = await createHandler(deps)(req("GET", "/resolve?trackId=t1"));
-    expect(res.status).toBe(503);
-    expect((await res.json()).error).toBe("no-credentials");
+    expect(res.status).toBe(200);
+    expect((await res.json()).status).toBe("notFound");
     expect(called).toBe(false);
   });
 

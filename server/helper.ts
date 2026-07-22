@@ -22,6 +22,7 @@
 import { SessionExpiredError, type ResolveResult } from "../src/resolver";
 import type { USDBSong } from "../src/usdb";
 import type { ParsedSong } from "../src/ultrastar-parser";
+import type { LocalMatch } from "./local-charts";
 
 class NoCredentialsError extends Error {}
 
@@ -31,6 +32,8 @@ export interface HandlerDeps {
   login: () => Promise<void>;
   /** Drop the session and log in fresh. */
   relogin: () => Promise<void>;
+  /** Match against the on-disk charts folder — no account, no network. */
+  resolveLocal: (artist: string, title: string) => LocalMatch | null;
   resolveForTrack: (
     trackId: string,
     artist: string,
@@ -88,6 +91,17 @@ export function createHandler(
         const artist = url.searchParams.get("artist") ?? "";
         const title = url.searchParams.get("title") ?? "";
         if (!trackId) return json({ error: "missing trackId" }, 400);
+
+        // Local charts win — no account, no network. Drop a .txt in the folder
+        // and it autoloads here before we ever consider USDB.
+        const local = deps.resolveLocal(artist, title);
+        if (local) return json({ status: "local", song: local.song });
+
+        // No local chart. Without credentials there's nothing else to try — that
+        // is a plain "not found", NOT an error: don't nag about USDB creds for a
+        // track you simply don't have a chart for.
+        if (!deps.hasCredentials) return json({ status: "notFound" });
+
         const result = await withSession(() =>
           deps.resolveForTrack(trackId, artist, title)
         );
@@ -140,10 +154,12 @@ async function startHelper(): Promise<void> {
   const usdb = await import("../src/usdb");
   const { resolveForTrack, confirmPick } = await import("../src/resolver");
   const { setCacheDir, getCacheDir } = await import("../src/cache");
+  const { createLocalCharts } = await import("./local-charts");
 
   const cfg = loadConfig();
   if (cfg.cacheDir) setCacheDir(cfg.cacheDir);
   const hasCredentials = !!(cfg.usdbUser && cfg.usdbPass);
+  const localCharts = createLocalCharts(cfg.chartsDirs);
 
   let loggedIn = false;
   const login = async (): Promise<void> => {
@@ -161,19 +177,24 @@ async function startHelper(): Promise<void> {
     hasCredentials,
     login,
     relogin,
+    resolveLocal: (artist, title) => localCharts.resolve(artist, title),
     resolveForTrack,
     confirmPick,
   });
 
   const server = Bun.serve({ port: cfg.port, fetch: handler });
   console.log(`[singify helper] listening on http://127.0.0.1:${server.port}`);
+  console.log(
+    `[singify helper] charts: ${localCharts.count()} loaded from ` +
+      `[${localCharts.dirs().join(", ")}]`
+  );
   if (hasCredentials) {
     console.log(`[singify helper] cache: ${getCacheDir()}`);
   } else {
     console.log(
-      `[singify helper] ⚠ no USDB credentials. Create ${configPath()} ` +
-        `(or set SINGIFY_USDB_USER / SINGIFY_USDB_PASS). ` +
-        `/health works; /resolve returns 503 until configured.`
+      `[singify helper] no USDB credentials — local charts only. ` +
+        `Add ${configPath()} (or SINGIFY_USDB_USER / SINGIFY_USDB_PASS) ` +
+        `to also auto-download from USDB when a track has no local chart.`
     );
   }
 }

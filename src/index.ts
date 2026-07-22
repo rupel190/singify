@@ -54,29 +54,53 @@ function onPlayPause(): void {
   paused = !!Spicetify.Player.data?.isPaused;
 }
 
-// ── Lyric offset (audio-sync knob) ───────────────────────────────────────────
+// ── Lyric offset (audio-sync knob, per track) ────────────────────────────────
 //
 // Spotify's reported position and the real audio drift (output latency), and
-// UltraStar GAP values are often slightly off — so the user needs to nudge the
-// whole karaoke timeline against what they hear. Positive = lyrics/notes fire
-// earlier. Adjust live with [ and ] (±20 ms); \ resets. Persisted across
-// restarts. This lives in the adapter, not <KaraokeView>: the offset is a
-// property of the clock port, so the shared view never has to know about it.
+// UltraStar GAP values are often off against Spotify's specific master — so the
+// user nudges the whole karaoke timeline against what they hear. Positive =
+// lyrics/notes fire earlier. Adjust live with [ and ] (±20 ms); \ resets.
+//
+// The offset is PER TRACK: each nudge is saved under the Spotify track's URI, so
+// a song you've tuned once loads pre-aligned every time after. A track you've
+// never tuned starts from `defaultOffset` (the legacy global value — a device
+// latency baseline). This lives in the adapter, not <KaraokeView>: the offset is
+// a property of the clock port, so the shared view never has to know about it.
 
-const OFFSET_KEY = "singify:offsetMs";
+const OFFSET_PREFIX = "singify:offset:"; // per track: singify:offset:<uri>
+const DEFAULT_OFFSET_KEY = "singify:offsetMs"; // baseline for untuned tracks (+ legacy global)
 const OFFSET_STEP = 20; // ms per nudge
 
-function loadOffset(): number {
-  const raw = Number(localStorage.getItem(OFFSET_KEY));
-  return Number.isFinite(raw) ? raw : 0;
+function readNum(key: string): number | null {
+  const raw = localStorage.getItem(key);
+  if (raw == null) return null;
+  const n = Number(raw);
+  return Number.isFinite(n) ? n : null;
 }
 
-let offsetMs = loadOffset();
+// Baseline for any track not yet individually tuned. Seeded from the legacy
+// global key so existing setups keep their value.
+let defaultOffset = readNum(DEFAULT_OFFSET_KEY) ?? 0;
+
+function loadOffsetForTrack(trackId: string | null): number {
+  if (!trackId) return defaultOffset;
+  return readNum(OFFSET_PREFIX + trackId) ?? defaultOffset;
+}
+
+let offsetMs = defaultOffset; // updated per track on songchange
 
 function setOffset(next: number): void {
   offsetMs = Math.round(next);
+  // Persist against the current track so its tuning is remembered independently.
+  // With no active track (e.g. a chart loaded via L before any songchange), fall
+  // back to moving the global baseline instead.
   try {
-    localStorage.setItem(OFFSET_KEY, String(offsetMs));
+    if (currentTrackId) {
+      localStorage.setItem(OFFSET_PREFIX + currentTrackId, String(offsetMs));
+    } else {
+      defaultOffset = offsetMs;
+      localStorage.setItem(DEFAULT_OFFSET_KEY, String(offsetMs));
+    }
   } catch {
     /* storage blocked — keep the in-memory value */
   }
@@ -122,7 +146,9 @@ function showReadout(text: string): void {
 
 function showOffset(): void {
   const sign = offsetMs > 0 ? "+" : "";
-  showReadout(`Lyric offset ${sign}${offsetMs} ms`);
+  // Signal the scope so the user knows the tuning sticks to this song.
+  const scope = currentTrackId ? "this track" : "default";
+  showReadout(`Lyric offset ${sign}${offsetMs} ms · ${scope}`);
 }
 
 // ── Mic pitch ────────────────────────────────────────────────────────────────
@@ -371,6 +397,7 @@ async function onSongChange(): Promise<void> {
   // Reset per-track state.
   currentSong = null;
   currentTrackId = item.uri;
+  offsetMs = loadOffsetForTrack(currentTrackId); // this song's remembered tuning
   pickerCandidates = null;
   pickPending = null;
   pickError = null;
@@ -378,7 +405,11 @@ async function onSongChange(): Promise<void> {
 
   try {
     const res = await resolveForTrack(item.uri, artist, title);
-    if (res.status === "cached" || res.status === "downloaded") {
+    if (
+      res.status === "cached" ||
+      res.status === "downloaded" ||
+      res.status === "local"
+    ) {
       currentSong = res.song;
     } else if (res.status === "needsPicker") {
       pickerQuery = { artist, title };
