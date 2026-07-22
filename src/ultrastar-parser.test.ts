@@ -131,6 +131,18 @@ describe("parse() lines", () => {
     expect(song.lines[0].syllables[0].text).toBe("Hel-");
     expect(song.lines[0].syllables[1].text).toBe("lo");
   });
+
+  test("preserves trailing spaces (USDB word-boundary convention)", () => {
+    // Space at the END of a syllable ("Code " + "Mon") — a full line.trim()
+    // would delete it and run the words together. Only the left is trimmed.
+    const song = parse(
+      "#TITLE:T\n#ARTIST:A\n#BPM:200\n#GAP:0\n" +
+        ": 0 6 20 Code \n: 8 3 20 Mon\n: 12 2 18 key \nE\n"
+    );
+    const text = song.lines[0].syllables.map((s) => s.text).join("");
+    expect(text).toBe("Code Monkey ");
+    expect(song.lines[0].syllables[0].text).toBe("Code ");
+  });
 });
 
 // ── Timing ─────────────────────────────────────────────────────────────────

@@ -94,7 +94,11 @@ export function parse(raw: string): ParsedSong {
   let absoluteBeatOffset = 0;  // used for RELATIVE mode
 
   for (const raw of lines) {
-    const line = raw.trim();
+    // Left-trim ONLY. Trailing spaces are significant: many charts (most USDB
+    // downloads) put the word-boundary space at the END of a syllable
+    // ("Code " + "Mon"). A full .trim() would delete those and run every word
+    // together. Leading whitespace is just indentation and safe to drop.
+    const line = raw.replace(/^\s+/, "");
     if (!line || line.startsWith("#")) continue;
 
     const token = line[0];
