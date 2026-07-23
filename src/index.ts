@@ -15,6 +15,23 @@
 import { KaraokeView } from "./karaoke-view";
 import { SongPicker } from "./song-picker";
 import { HomeMenu } from "./home-menu";
+import {
+  SessionSetup,
+  SessionHud,
+  RoundEnd,
+  SessionResultScreen,
+  type MicInfo,
+} from "./session-view";
+import {
+  createSession,
+  recordRound,
+  roundFromScore,
+  isComplete,
+  summarize,
+  type Session,
+  type RoundResult,
+} from "./session";
+import type { ScoreState } from "./scoring";
 import { startMicPitch, type MicPitch } from "./mic";
 import { resolveForTrack, confirmPick } from "./resolver-client";
 import { sensitivityToThreshold } from "./pitch";
@@ -286,9 +303,16 @@ let root: { render(el: unknown): void; unmount(): void } | null = null;
 let currentSong: ParsedSong | null = null;
 let visible = false;
 // Which screen the overlay shows. "sing" is the karaoke surface (K / Quick Sing,
-// today's behaviour); "home" is the session menu (opened from the Topbar button).
-type Screen = "home" | "sing";
+// today's behaviour); the rest are the session flow.
+type Screen = "home" | "sing" | "session-setup" | "round-end" | "session-result";
 let screen: Screen = "sing";
+
+// Active multi-round session (null = just Quick Sing). setupRounds is the pending
+// choice on the setup screen; lastRound + scoredTrackIds track round bookkeeping.
+let session: Session | null = null;
+let setupRounds = 5;
+let lastRound: RoundResult | null = null;
+let scoredTrackIds = new Set<string>(); // one round per distinct track per session
 // Set when a chart is loaded manually (L hotkey) instead of resolved from USDB —
 // lets you sing along in Spotify without a USDB account. While set, songchange
 // won't overwrite the chart (reload the client to go back to auto-resolve).
@@ -347,58 +371,119 @@ function renderOverlay(): void {
           renderOverlay();
         },
         onStartSession: () => {
-          // Milestone 2 wires the real session flow here.
-          Spicetify.showNotification?.("Sessions land in the next build 🎶");
+          screen = "session-setup";
+          renderOverlay();
         },
       })
     );
     return;
   }
 
-  if (currentSong) {
+  if (screen === "session-setup") {
     root.render(
-      React.createElement(KaraokeView, {
+      React.createElement(SessionSetup, {
+        rounds: setupRounds,
+        onRounds: (n: number) => {
+          setupRounds = n;
+          renderOverlay();
+        },
+        onStart: startSession,
+        onCancel: () => {
+          screen = "home";
+          renderOverlay();
+        },
+        micOn: micPitch != null,
+      })
+    );
+    return;
+  }
+
+  if (screen === "round-end" && session && lastRound) {
+    root.render(
+      React.createElement(RoundEnd, {
+        justFinished: lastRound,
+        roundNumber: session.rounds.length,
+        target: session.targetRounds,
+        sessionTotal: sessionTotal(),
+        onContinue: continueSession,
+      })
+    );
+    return;
+  }
+
+  if (screen === "session-result" && session) {
+    root.render(
+      React.createElement(SessionResultScreen, {
+        summary: summarize(session),
+        onDone: finishSession,
+        onSave: () =>
+          Spicetify.showNotification?.("Saving sessions as playlists is coming next 💾"),
+      })
+    );
+    return;
+  }
+
+  // screen === "sing": the karaoke surface (chart / picker / no-chart), wrapped
+  // in the session HUD when a session is running.
+  const singContent = currentSong
+    ? React.createElement(KaraokeView, {
         song: currentSong,
         getPositionMs: getCurrentMs,
         getLivePitchMidi,
         showScore: micPitch != null, // score while the mic is live
         onReplay,
+        onComplete: session ? onRoundComplete : undefined, // sessions record + advance
         fullscreen: true,
       })
-    );
-    return;
-  }
+    : pickerCandidates
+      ? React.createElement(SongPicker, {
+          candidates: pickerCandidates,
+          query: pickerQuery ?? undefined,
+          pendingId: pickPending,
+          error: pickError,
+          onPick,
+          onCancel,
+        })
+      : React.createElement(
+          "div",
+          {
+            style: {
+              display: "flex",
+              height: "100vh",
+              alignItems: "center",
+              justifyContent: "center",
+              color: "#c8c8c8",
+              fontSize: 20,
+            },
+          },
+          session
+            ? "No chart for this track — play a charted song to score this round."
+            : "No karaoke chart for this track."
+        );
 
-  if (pickerCandidates) {
+  if (session) {
+    const mics: MicInfo[] = [
+      { label: "🎤", sensitivity, active: micPitch != null },
+    ];
     root.render(
-      React.createElement(SongPicker, {
-        candidates: pickerCandidates,
-        query: pickerQuery ?? undefined,
-        pendingId: pickPending,
-        error: pickError,
-        onPick,
-        onCancel,
-      })
+      React.createElement(
+        "div",
+        { style: { position: "relative", height: "100vh" } },
+        React.createElement(SessionHud, {
+          round: Math.min(session.rounds.length + 1, session.targetRounds),
+          target: session.targetRounds,
+          sessionTotal: sessionTotal(),
+          mics,
+          onSkip: skipRound,
+          onEnd: endSession,
+        }),
+        singContent
+      )
     );
     return;
   }
 
-  root.render(
-    React.createElement(
-      "div",
-      {
-        style: {
-          display: "flex",
-          height: "100vh",
-          alignItems: "center",
-          justifyContent: "center",
-          color: "#c8c8c8",
-          fontSize: 20,
-        },
-      },
-      "No karaoke chart for this track."
-    )
-  );
+  root.render(singContent);
 }
 
 function setVisible(next: boolean): void {
@@ -426,6 +511,79 @@ function openHome(): void {
   }
   screen = "home";
   setVisible(true);
+}
+
+// ── Sessions (multi-round) ───────────────────────────────────────────────────
+
+/** Running score across the rounds completed so far (headline player). */
+function sessionTotal(): number {
+  return session
+    ? session.rounds.reduce((sum, r) => sum + (r.scores[0]?.total ?? 0), 0)
+    : 0;
+}
+
+/** Start a fresh session: reset bookkeeping, ensure the mic is live, go sing. */
+function startSession(): void {
+  session = createSession(setupRounds);
+  scoredTrackIds = new Set();
+  lastRound = null;
+  if (!micPitch) void toggleMic(); // a scored session needs the mic
+  screen = "sing";
+  renderOverlay();
+}
+
+/** Fired by KaraokeView when a song finishes while scoring — records the round. */
+function onRoundComplete(score: ScoreState): void {
+  if (!session || !currentSong || !currentTrackId) return;
+  if (scoredTrackIds.has(currentTrackId)) return; // one round per song
+  scoredTrackIds.add(currentTrackId);
+  const r = roundFromScore(
+    currentSong.headers.title,
+    currentSong.headers.artist,
+    score
+  );
+  session = recordRound(session, r);
+  lastRound = r;
+  screen = isComplete(session) ? "session-result" : "round-end";
+  renderOverlay();
+}
+
+/** From RoundEnd — nudge Spotify to the next track; songchange returns to sing. */
+function continueSession(): void {
+  try {
+    (Spicetify.Player as { next?: () => void }).next?.();
+  } catch (err) {
+    console.error("[singify] session next failed:", err);
+  }
+}
+
+/** From the HUD "Skip" — don't count this song; play another. Slot stays open. */
+function skipRound(): void {
+  try {
+    (Spicetify.Player as { next?: () => void }).next?.();
+  } catch (err) {
+    console.error("[singify] skip failed:", err);
+  }
+}
+
+/** From the HUD "End" — finish early: show results if any rounds ran, else bail. */
+function endSession(): void {
+  if (session && session.rounds.length > 0) {
+    screen = "session-result";
+  } else {
+    session = null;
+    screen = "home";
+  }
+  renderOverlay();
+}
+
+/** Close out a finished session and return to the menu. */
+function finishSession(): void {
+  session = null;
+  lastRound = null;
+  scoredTrackIds = new Set();
+  screen = "home";
+  renderOverlay();
 }
 
 // ── Song resolution ──────────────────────────────────────────────────────────
@@ -509,6 +667,10 @@ async function onSongChange(): Promise<void> {
         : `Karaoke lookup failed: ${err instanceof Error ? err.message : String(err)}`;
     Spicetify.showNotification?.(msg, true);
   }
+
+  // In a session, playing a new song advances from the between-rounds screen
+  // back to singing (the follow model — you queued up the next song).
+  if (session && screen === "round-end") screen = "sing";
 
   if (visible) renderOverlay();
 }

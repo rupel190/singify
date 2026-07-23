@@ -56,6 +56,13 @@ export interface KaraokeViewProps {
    * so you can watch raw jitter vs the steadied marker on a real mic.
    */
   onDebug?: (d: FrameDebug) => void;
+  /**
+   * Fired once when the song reaches its end while scoring, carrying the final
+   * score. When provided, the view hands off (renders nothing at the end) so a
+   * session host can record the round and advance; when absent, the view shows
+   * its own per-song ResultScreen (Quick Sing).
+   */
+  onComplete?: (score: ScoreState) => void;
   fullscreen?: boolean;
 }
 
@@ -171,6 +178,8 @@ export function KaraokeView(props: KaraokeViewProps) {
   // frame loop (which would restart the rAF each render).
   const onDebugRef = useRef(props.onDebug);
   onDebugRef.current = props.onDebug;
+  // Guards onComplete so it fires exactly once per attempt (reset on jump-back).
+  const completedRef = useRef(false);
   useEffect(() => {
     showScoreRef.current = !!showScore;
     if (showScore) {
@@ -178,6 +187,12 @@ export function KaraokeView(props: KaraokeViewProps) {
       lastMsRef.current = 0;
     }
   }, [showScore, keeper]);
+
+  // A new song is a fresh attempt — clear the one-shot completion guard so the
+  // next song in a session can fire onComplete (seek-back alone isn't enough).
+  useEffect(() => {
+    completedRef.current = false;
+  }, [song]);
 
   // The one per-frame computation. Scoring samples the RAW pitch; the marker
   // folds the raw pitch to the target note FIRST, then smooths (foldSmoothHit —
@@ -189,6 +204,7 @@ export function KaraokeView(props: KaraokeViewProps) {
       if (jumpedBack) {
         smoother.reset();
         trailRef.current = [];
+        completedRef.current = false; // a restart begins a fresh attempt
       }
 
       let score: ScoreState | null = null;
@@ -295,10 +311,21 @@ export function KaraokeView(props: KaraokeViewProps) {
           (innerH - NOTE_HEIGHT) +
         NOTE_HEIGHT / 2;
 
-  // Once playback passes the song's end (and we were scoring), freeze the run
-  // and show the result. In the harness this appears in the tail before the
-  // loop restarts; the backward-jump reset above then starts the next attempt.
-  if (showScore && score && song.durationMs > 0 && positionMs >= song.durationMs) {
+  // Once playback passes the song's end (and we were scoring), the attempt is
+  // done. Fire onComplete once (session hook), then either hand off to the host
+  // (session) or show the per-song result (Quick Sing).
+  const atEnd =
+    showScore && score != null && song.durationMs > 0 && positionMs >= song.durationMs;
+
+  useEffect(() => {
+    if (atEnd && score && !completedRef.current) {
+      completedRef.current = true;
+      props.onComplete?.(score);
+    }
+  }, [atEnd, score]);
+
+  if (atEnd && score) {
+    if (props.onComplete) return null; // a session host takes over from here
     return (
       <ResultScreen
         score={score}
