@@ -718,13 +718,25 @@ async function reSearch(): Promise<void> {
 // ── Bootstrap ────────────────────────────────────────────────────────────────
 
 async function main(): Promise<void> {
-  while (
-    !Spicetify?.Player?.addEventListener ||
-    !Spicetify?.React ||
-    !Spicetify?.ReactDOM
-  ) {
+  // Wait until Spotify's app is FULLY mounted before singify touches anything.
+  // Gating only on React/ReactDOM/Player (all ready mid-mount) made singify act
+  // during the initial render, which tipped other extensions' components into
+  // rendering before their React providers existed and white-screened the whole
+  // client (their hooks threw "must be used within <Provider>"). Well-behaved
+  // extensions (adblock, playNext) wait for Spicetify.Platform — the app-ready
+  // signal — so we do the same, plus the shell DOM, then settle a beat.
+  const ready = (): boolean =>
+    !!Spicetify?.Player?.addEventListener &&
+    !!Spicetify?.React &&
+    !!Spicetify?.ReactDOM &&
+    !!(Spicetify as unknown as { Platform?: unknown }).Platform &&
+    !!document.querySelector(
+      ".Root__nav-bar, .main-topBar-container, .Root__main-view"
+    );
+  while (!ready()) {
     await new Promise((r) => setTimeout(r, 100));
   }
+  await new Promise((r) => setTimeout(r, 500));
 
   Spicetify.Player.addEventListener("onprogress", onProgress);
   Spicetify.Player.addEventListener("onplaypause", onPlayPause);
