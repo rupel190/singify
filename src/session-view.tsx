@@ -252,6 +252,46 @@ export function SessionHud(props: {
   );
 }
 
+// ── No chart for the current track (during a session) ────────────────────────
+//
+// A playlist is full of songs USDB won't have. Rather than dead-end, give the
+// singer a way forward right on the stage: skip to the next track, or force a
+// fresh USDB search (maybe it's there under a different title). The HUD's Skip
+// does the same, but surfacing it here keeps a hands-on session flowing.
+
+export function NoChartInSession(props: {
+  title: string;
+  artist: string;
+  onSkip: () => void;
+  onReChoose: () => void;
+  /** True once we've searched and found nothing (vs still looking). */
+  searched: boolean;
+}) {
+  const React = Spicetify.React;
+  const { title, artist, onSkip, onReChoose, searched } = props;
+  return (
+    <Center>
+      <div style={{ fontSize: 40 }}>🎤</div>
+      <div style={{ fontSize: 26, fontWeight: 800 }}>
+        {searched ? "No karaoke chart for this track" : "Looking for a chart…"}
+      </div>
+      <div style={{ fontSize: 17, color: "rgba(255,255,255,0.6)" }}>
+        {artist} — {title}
+      </div>
+      {searched && (
+        <div style={{ display: "flex", gap: 12, marginTop: 18 }}>
+          <button style={primaryBtn(React)} onClick={onSkip}>
+            ⏭ Skip to next song
+          </button>
+          <button style={ghostBtn(React)} onClick={onReChoose}>
+            🔎 Re-choose (R)
+          </button>
+        </div>
+      )}
+    </Center>
+  );
+}
+
 // ── Between rounds ───────────────────────────────────────────────────────────
 
 export function RoundEnd(props: {

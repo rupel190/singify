@@ -20,6 +20,7 @@ import {
   SessionHud,
   RoundEnd,
   SessionResultScreen,
+  NoChartInSession,
   type MicInfo,
 } from "./session-view";
 import {
@@ -331,6 +332,9 @@ let manualChart = false;
 
 // Picker state — set when resolveForTrack returns candidates to choose from.
 let currentTrackId: string | null = null;
+// True while a chart lookup for the current track is in flight — lets the
+// session no-chart card distinguish "still looking" from "searched, none found".
+let resolving = false;
 let pickerQuery: { artist?: string; title?: string } | null = null;
 let pickerCandidates: USDBSong[] | null = null;
 let pickPending: number | null = null;
@@ -456,22 +460,28 @@ function renderOverlay(): void {
           onPick,
           onCancel,
         })
-      : React.createElement(
-          "div",
-          {
-            style: {
-              display: "flex",
-              height: "100vh",
-              alignItems: "center",
-              justifyContent: "center",
-              color: "#c8c8c8",
-              fontSize: 20,
+      : session
+        ? React.createElement(NoChartInSession, {
+            title: currentTitle(),
+            artist: currentArtist(),
+            onSkip: skipRound,
+            onReChoose: () => void reSearch(),
+            searched: !resolving,
+          })
+        : React.createElement(
+            "div",
+            {
+              style: {
+                display: "flex",
+                height: "100vh",
+                alignItems: "center",
+                justifyContent: "center",
+                color: "#c8c8c8",
+                fontSize: 20,
+              },
             },
-          },
-          session
-            ? "No chart for this track — play a charted song to score this round."
-            : "No karaoke chart for this track."
-        );
+            "No karaoke chart for this track."
+          );
 
   if (session) {
     const mics: MicInfo[] = [
@@ -648,6 +658,17 @@ function finishSession(): void {
 
 // ── Song resolution ──────────────────────────────────────────────────────────
 
+/** The track Spotify is currently on (item / track alias), or null. */
+function currentItem(): SpicetifyTrackItem | null {
+  return Spicetify.Player.data?.item ?? Spicetify.Player.data?.track ?? null;
+}
+function currentTitle(): string {
+  return currentItem()?.name ?? "";
+}
+function currentArtist(): string {
+  return currentItem()?.artists?.[0]?.name ?? "";
+}
+
 /** User chose a candidate from the picker — download, cache, and show it. */
 async function onPick(candidate: USDBSong): Promise<void> {
   if (!currentTrackId) return;
@@ -695,6 +716,7 @@ async function onSongChange(): Promise<void> {
   pickerCandidates = null;
   pickPending = null;
   pickError = null;
+  resolving = true; // chart lookup in flight
   if (visible) renderOverlay();
 
   try {
@@ -726,6 +748,8 @@ async function onSongChange(): Promise<void> {
         ? "Karaoke helper not running — start it with `bun run helper`"
         : `Karaoke lookup failed: ${err instanceof Error ? err.message : String(err)}`;
     Spicetify.showNotification?.(msg, true);
+  } finally {
+    resolving = false; // lookup settled (found, picker, or nothing)
   }
 
   // In a session, playing a new song advances from the between-rounds screen
@@ -752,6 +776,7 @@ async function reSearch(): Promise<void> {
   pickerCandidates = null;
   pickPending = null;
   pickError = null;
+  resolving = true;
   Spicetify.showNotification?.(`🔎 Searching USDB for “${title}”…`);
   if (!visible) setVisible(true);
   else renderOverlay();
@@ -770,6 +795,8 @@ async function reSearch(): Promise<void> {
         ? "Karaoke helper not running — start it with `bun run helper`"
         : `Search failed: ${err instanceof Error ? err.message : String(err)}`;
     Spicetify.showNotification?.(msg, true);
+  } finally {
+    resolving = false;
   }
 
   if (visible) renderOverlay();
