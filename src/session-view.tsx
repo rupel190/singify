@@ -9,7 +9,8 @@
  * All multiplayer-shaped: mics and per-round scores are lists (length 1 today).
  */
 
-import type { RoundResult, SessionSummary } from "./session";
+import type { RoundResult, SessionSummary, SessionTrack } from "./session";
+import type { PlaylistRef } from "./playlist-source";
 
 const ACCENT = "#1ed760";
 const GOLD = "#e6b422";
@@ -28,6 +29,11 @@ function stars(n: number): string {
 // ── Setup ────────────────────────────────────────────────────────────────────
 
 export function SessionSetup(props: {
+  // Playlist mode — the primary path: sing straight through a Spotify playlist.
+  playlists: PlaylistRef[];
+  loadingPlaylists: boolean;
+  onStartPlaylist: (ref: PlaylistRef) => void;
+  // Free-play mode — sing N songs off whatever's queued.
   rounds: number;
   onRounds: (n: number) => void;
   onStart: () => void;
@@ -35,11 +41,21 @@ export function SessionSetup(props: {
   micOn: boolean;
 }) {
   const React = Spicetify.React;
-  const { rounds, onRounds, onStart, onCancel, micOn } = props;
+  const {
+    playlists,
+    loadingPlaylists,
+    onStartPlaylist,
+    rounds,
+    onRounds,
+    onStart,
+    onCancel,
+    micOn,
+  } = props;
+
   const chip = (n: number): React.CSSProperties => ({
-    padding: "10px 20px",
+    padding: "8px 16px",
     borderRadius: 12,
-    fontSize: 22,
+    fontSize: 20,
     fontWeight: 800,
     cursor: "pointer",
     border: `1px solid ${rounds === n ? ACCENT : "rgba(255,255,255,0.12)"}`,
@@ -47,38 +63,119 @@ export function SessionSetup(props: {
     color: rounds === n ? ACCENT : "#fff",
   });
 
+  const sectionLabel: React.CSSProperties = {
+    alignSelf: "flex-start",
+    fontSize: 13,
+    fontWeight: 700,
+    letterSpacing: 1,
+    textTransform: "uppercase",
+    color: "rgba(255,255,255,0.45)",
+  };
+
   return (
     <Center>
       <div style={{ fontSize: 34, fontWeight: 800 }}>New Session</div>
-      <div style={{ color: "rgba(255,255,255,0.6)", fontSize: 17 }}>
-        How many rounds? Sing that many songs — scores add up to a big finish.
-      </div>
-      <div style={{ display: "flex", gap: 12, marginTop: 8 }}>
-        {[3, 5, 10].map((n) => (
-          <button key={n} style={chip(n)} onClick={() => onRounds(n)}>
-            {n}
-          </button>
-        ))}
-      </div>
       <div
         style={{
-          marginTop: 12,
           fontSize: 15,
           color: micOn ? ACCENT : "#ff9e6b",
           fontWeight: 600,
         }}
       >
-        {micOn ? "🎤 Mic on — you'll be scored" : "🎤 Mic is off — Start will turn it on"}
+        {micOn ? "🎤 Mic on — you'll be scored" : "🎤 Mic is off — starting turns it on"}
       </div>
-      <div style={{ display: "flex", gap: 12, marginTop: 18 }}>
-        <button style={primaryBtn(React)} onClick={onStart}>
-          ▶ Start {rounds} rounds
-        </button>
-        <button style={ghostBtn(React)} onClick={onCancel}>
-          Cancel
-        </button>
+
+      {/* Panel keeps the two modes tidy in one column. */}
+      <div
+        style={{
+          display: "flex",
+          flexDirection: "column",
+          gap: 12,
+          width: "min(560px, 84vw)",
+          marginTop: 10,
+        }}
+      >
+        <div style={sectionLabel}>Sing a playlist</div>
+        <div
+          style={{
+            display: "flex",
+            flexDirection: "column",
+            gap: 6,
+            maxHeight: 320,
+            overflowY: "auto",
+            borderRadius: 12,
+            border: "1px solid rgba(255,255,255,0.08)",
+            background: "rgba(255,255,255,0.03)",
+            padding: 6,
+          }}
+        >
+          {loadingPlaylists ? (
+            <PlaceholderRow text="Loading your playlists…" />
+          ) : playlists.length === 0 ? (
+            <PlaceholderRow text="No playlists found — use free play below." />
+          ) : (
+            playlists.map((p) => (
+              <button
+                key={p.uri}
+                onClick={() => onStartPlaylist(p)}
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "space-between",
+                  gap: 12,
+                  padding: "10px 14px",
+                  borderRadius: 10,
+                  border: "1px solid transparent",
+                  background: "rgba(255,255,255,0.04)",
+                  color: "#fff",
+                  cursor: "pointer",
+                  textAlign: "left",
+                }}
+                onMouseEnter={(e) => {
+                  (e.currentTarget as HTMLElement).style.borderColor = `${ACCENT}66`;
+                  (e.currentTarget as HTMLElement).style.background = `${ACCENT}14`;
+                }}
+                onMouseLeave={(e) => {
+                  (e.currentTarget as HTMLElement).style.borderColor = "transparent";
+                  (e.currentTarget as HTMLElement).style.background = "rgba(255,255,255,0.04)";
+                }}
+              >
+                <span style={{ fontSize: 17, fontWeight: 700, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                  {p.name}
+                </span>
+                <span style={{ fontSize: 14, color: "rgba(255,255,255,0.5)", flexShrink: 0 }}>
+                  {p.count != null ? `${p.count} songs · ▶` : "▶"}
+                </span>
+              </button>
+            ))
+          )}
+        </div>
+
+        <div style={{ ...sectionLabel, marginTop: 8 }}>Or free play</div>
+        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+          {[3, 5, 10].map((n) => (
+            <button key={n} style={chip(n)} onClick={() => onRounds(n)}>
+              {n}
+            </button>
+          ))}
+          <button style={{ ...primaryBtn(React), marginLeft: "auto" }} onClick={onStart}>
+            ▶ {rounds} rounds
+          </button>
+        </div>
       </div>
+
+      <button style={{ ...ghostBtn(React), marginTop: 16 }} onClick={onCancel}>
+        Cancel
+      </button>
     </Center>
+  );
+}
+
+function PlaceholderRow(props: { text: string }) {
+  return (
+    <div style={{ padding: "16px 14px", fontSize: 15, color: "rgba(255,255,255,0.5)", textAlign: "center" }}>
+      {props.text}
+    </div>
   );
 }
 
@@ -163,9 +260,11 @@ export function RoundEnd(props: {
   target: number;
   sessionTotal: number;
   onContinue: () => void;
+  /** Next track in a playlist session, shown as "Up next" (null = free play). */
+  upNext?: SessionTrack | null;
 }) {
   const React = Spicetify.React;
-  const { justFinished, roundNumber, target, sessionTotal, onContinue } = props;
+  const { justFinished, roundNumber, target, sessionTotal, onContinue, upNext } = props;
   const s = justFinished.scores[0];
   const last = roundNumber >= target;
   return (
@@ -183,8 +282,13 @@ export function RoundEnd(props: {
       <div style={{ fontSize: 16, color: "rgba(255,255,255,0.6)" }}>
         Session total {sessionTotal.toLocaleString()}
       </div>
+      {!last && upNext && (
+        <div style={{ fontSize: 15, color: "rgba(255,255,255,0.5)", marginTop: 4 }}>
+          Up next: <span style={{ color: "#fff", fontWeight: 600 }}>{upNext.artist} — {upNext.title}</span>
+        </div>
+      )}
       <button style={{ ...primaryBtn(React), marginTop: 16 }} onClick={onContinue}>
-        {last ? "See the results ▶" : "Next — play another song ▶"}
+        {last ? "See the results ▶" : upNext ? "Next song ▶" : "Next — play another song ▶"}
       </button>
     </Center>
   );

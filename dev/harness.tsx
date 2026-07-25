@@ -19,6 +19,8 @@ import { createRoot } from "react-dom/client";
 import { parse } from "../src/ultrastar-parser";
 import { KaraokeView, type FrameDebug } from "../src/karaoke-view";
 import { SongPicker } from "../src/song-picker";
+import { SessionSetup } from "../src/session-view";
+import type { PlaylistRef } from "../src/playlist-source";
 import { startMicPitch, type MicPitch, type AppliedProcessing } from "../src/mic";
 import { sensitivityToThreshold } from "../src/pitch";
 
@@ -299,7 +301,24 @@ function App() {
     setLoadError(null);
   };
 
-  const [mode, setMode] = React.useState<"karaoke" | "picker">("karaoke");
+  // ?screen=session|picker opens straight to that surface (for dev + screenshots).
+  const initialMode =
+    params.get("screen") === "session"
+      ? "session"
+      : params.get("screen") === "picker"
+        ? "picker"
+        : "karaoke";
+  const [mode, setMode] = React.useState<"karaoke" | "picker" | "session">(initialMode);
+  // Mock playlists + a load-state toggle to exercise the SessionSetup screen.
+  const MOCK_PLAYLISTS: PlaylistRef[] = [
+    { uri: "spotify:playlist:1", name: "Karaoke Bangers", count: 12 },
+    { uri: "spotify:playlist:2", name: "90s Sing-alongs", count: 28 },
+    { uri: "spotify:playlist:3", name: "Power Ballads (feat. way too many key changes)", count: 40 },
+    { uri: "spotify:playlist:4", name: "Shower Setlist", count: null },
+  ];
+  const [plLoading, setPlLoading] = React.useState(false);
+  const [setupRounds, setSetupRounds] = React.useState(5);
+  const [sessionMsg, setSessionMsg] = React.useState<string | null>(null);
   const [pendingId, setPendingId] = React.useState<number | null>(null);
   const [pickError, setPickError] = React.useState<string | null>(null);
 
@@ -428,11 +447,26 @@ function App() {
         }}
       >
         <h2 style={{ color: "#fff", font: "600 18px system-ui", margin: 0 }}>
-          singify · {mode === "picker" ? "SongPicker" : "KaraokeView"} harness
+          singify ·{" "}
+          {mode === "picker" ? "SongPicker" : mode === "session" ? "SessionSetup" : "KaraokeView"}{" "}
+          harness
         </h2>
-        <button style={stepBtn} onClick={mode === "picker" ? onCancel : openPicker}>
-          {mode === "picker" ? "← Back to karaoke" : "Picker demo →"}
-        </button>
+        <div style={{ display: "flex", gap: 8 }}>
+          {mode === "karaoke" ? (
+            <>
+              <button style={stepBtn} onClick={openPicker}>
+                Picker demo →
+              </button>
+              <button style={stepBtn} onClick={() => setMode("session")}>
+                Session demo →
+              </button>
+            </>
+          ) : (
+            <button style={stepBtn} onClick={() => { onCancel(); setMode("karaoke"); }}>
+              ← Back to karaoke
+            </button>
+          )}
+        </div>
       </div>
 
       {mode === "karaoke" ? (
@@ -666,7 +700,7 @@ function App() {
         )}
       </div>
         </div>
-      ) : (
+      ) : mode === "picker" ? (
         <div
           style={{
             height: 520,
@@ -684,6 +718,41 @@ function App() {
             onPick={onPick}
             onCancel={onCancel}
           />
+        </div>
+      ) : (
+        <div>
+          {sessionMsg && (
+            <div style={{ color: "#1ed760", font: "600 13px system-ui", marginBottom: 10 }}>
+              {sessionMsg}
+            </div>
+          )}
+          <div style={{ marginBottom: 10, display: "flex", gap: 8 }}>
+            <button style={stepBtn} onClick={() => setPlLoading((v) => !v)}>
+              {plLoading ? "Show playlists" : "Simulate loading…"}
+            </button>
+          </div>
+          <div
+            style={{
+              minHeight: 640,
+              borderRadius: 14,
+              overflow: "auto",
+              background: "linear-gradient(160deg, #14141c, #0c0c12)",
+              border: "1px solid #23232c",
+            }}
+          >
+            <SessionSetup
+              playlists={MOCK_PLAYLISTS}
+              loadingPlaylists={plLoading}
+              onStartPlaylist={(p) =>
+                setSessionMsg(`▶ Would start session from “${p.name}” (${p.count ?? "?"} songs)`)
+              }
+              rounds={setupRounds}
+              onRounds={setSetupRounds}
+              onStart={() => setSessionMsg(`▶ Would start free-play session: ${setupRounds} rounds`)}
+              onCancel={() => { setSessionMsg(null); setMode("karaoke"); }}
+              micOn={micOn}
+            />
+          </div>
         </div>
       )}
     </div>

@@ -24,13 +24,21 @@ import {
 } from "./session-view";
 import {
   createSession,
+  createSessionFromPlaylist,
   recordRound,
   roundFromScore,
   isComplete,
+  upNext,
   summarize,
   type Session,
   type RoundResult,
 } from "./session";
+import {
+  fetchPlaylists,
+  fetchPlaylistTracks,
+  playPlaylist,
+  type PlaylistRef,
+} from "./playlist-source";
 import type { ScoreState } from "./scoring";
 import { startMicPitch, type MicPitch } from "./mic";
 import { resolveForTrack, confirmPick } from "./resolver-client";
@@ -313,6 +321,9 @@ let session: Session | null = null;
 let setupRounds = 5;
 let lastRound: RoundResult | null = null;
 let scoredTrackIds = new Set<string>(); // one round per distinct track per session
+// Playlist picker on the setup screen: the user's playlists + load state.
+let playlists: PlaylistRef[] = [];
+let playlistsLoading = false;
 // Set when a chart is loaded manually (L hotkey) instead of resolved from USDB —
 // lets you sing along in Spotify without a USDB account. While set, songchange
 // won't overwrite the chart (reload the client to go back to auto-resolve).
@@ -370,10 +381,7 @@ function renderOverlay(): void {
           screen = "sing";
           renderOverlay();
         },
-        onStartSession: () => {
-          screen = "session-setup";
-          renderOverlay();
-        },
+        onStartSession: openSessionSetup,
       })
     );
     return;
@@ -382,6 +390,9 @@ function renderOverlay(): void {
   if (screen === "session-setup") {
     root.render(
       React.createElement(SessionSetup, {
+        playlists,
+        loadingPlaylists: playlistsLoading,
+        onStartPlaylist: (ref: PlaylistRef) => void startPlaylistSession(ref),
         rounds: setupRounds,
         onRounds: (n: number) => {
           setupRounds = n;
@@ -406,6 +417,7 @@ function renderOverlay(): void {
         target: session.targetRounds,
         sessionTotal: sessionTotal(),
         onContinue: continueSession,
+        upNext: upNext(session),
       })
     );
     return;
@@ -522,7 +534,25 @@ function sessionTotal(): number {
     : 0;
 }
 
-/** Start a fresh session: reset bookkeeping, ensure the mic is live, go sing. */
+/** Open the setup screen and (re)load the user's playlists in the background. */
+function openSessionSetup(): void {
+  screen = "session-setup";
+  renderOverlay();
+  void loadPlaylists();
+}
+
+async function loadPlaylists(): Promise<void> {
+  playlistsLoading = true;
+  if (screen === "session-setup") renderOverlay();
+  try {
+    playlists = await fetchPlaylists();
+  } finally {
+    playlistsLoading = false;
+    if (screen === "session-setup") renderOverlay();
+  }
+}
+
+/** Start a fresh FREE-PLAY session: N rounds off whatever's queued. */
 function startSession(): void {
   session = createSession(setupRounds);
   scoredTrackIds = new Set();
@@ -530,6 +560,36 @@ function startSession(): void {
   if (!micPitch) void toggleMic(); // a scored session needs the mic
   screen = "sing";
   renderOverlay();
+}
+
+/**
+ * Start a session sourced from a playlist: fetch its tracks, bind the round
+ * count to them, start playback from the top, and sing. Advancing rounds
+ * (continue/skip) rides Spotify's own playlist ordering via Player.next().
+ */
+async function startPlaylistSession(ref: PlaylistRef): Promise<void> {
+  Spicetify.showNotification?.(`Loading “${ref.name}”…`);
+  const tracks = await fetchPlaylistTracks(ref.uri);
+  if (tracks.length === 0) {
+    Spicetify.showNotification?.(`“${ref.name}” has no playable tracks`, true);
+    return;
+  }
+  session = createSessionFromPlaylist(ref.name, tracks);
+  scoredTrackIds = new Set();
+  lastRound = null;
+  if (!micPitch) void toggleMic(); // a scored session needs the mic
+  screen = "sing";
+  renderOverlay();
+  // Kick Spotify into the playlist from track 1; songchange re-renders with the
+  // resolved chart. If playback couldn't start, we still show the sing screen —
+  // the user can hit play themselves.
+  const ok = await playPlaylist(ref.uri);
+  if (!ok) {
+    Spicetify.showNotification?.(
+      "Couldn't auto-start the playlist — press play to begin",
+      true
+    );
+  }
 }
 
 /** Fired by KaraokeView when a song finishes while scoring — records the round. */

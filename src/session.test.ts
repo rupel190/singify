@@ -1,12 +1,16 @@
 import { describe, test, expect } from "bun:test";
 import {
   createSession,
+  createSessionFromPlaylist,
+  isPlaylistSession,
+  upNext,
   recordRound,
   roundFromScore,
   roundsLeft,
   isComplete,
   summarize,
   type RoundResult,
+  type SessionTrack,
 } from "./session";
 import type { ScoreState } from "./scoring";
 
@@ -51,6 +55,52 @@ describe("session state", () => {
     expect(r.scores[0].notesSung).toBe(40);
     expect(r.scores[0].grade.name).toBe("Superstar"); // 9500 → top tier
     expect(r.scores[0].grade.stars).toBe(5);
+  });
+});
+
+describe("playlist-sourced session", () => {
+  const tracks: SessionTrack[] = [
+    { uri: "spotify:track:1", title: "One", artist: "A" },
+    { uri: "spotify:track:2", title: "Two", artist: "B" },
+    { uri: "spotify:track:3", title: "Three", artist: "C" },
+  ];
+
+  test("round count is the playlist length", () => {
+    const s = createSessionFromPlaylist("Party Bangers", tracks);
+    expect(s.targetRounds).toBe(3);
+    expect(s.playlistName).toBe("Party Bangers");
+    expect(isPlaylistSession(s)).toBe(true);
+  });
+
+  test("count-mode sessions are not playlist sessions", () => {
+    expect(isPlaylistSession(createSession(5))).toBe(false);
+    expect(upNext(createSession(5))).toBeNull();
+  });
+
+  test("upNext walks the list as rounds are recorded", () => {
+    let s = createSessionFromPlaylist("P", tracks);
+    expect(upNext(s)?.title).toBe("One"); // round 1 source
+    s = recordRound(s, round("One", 100));
+    expect(upNext(s)?.title).toBe("Two"); // round 2 source
+    s = recordRound(s, round("Two", 100));
+    expect(upNext(s)?.title).toBe("Three");
+    s = recordRound(s, round("Three", 100));
+    expect(upNext(s)).toBeNull(); // list spent
+    expect(isComplete(s)).toBe(true);
+  });
+
+  test("copies the track list (immune to later caller mutation)", () => {
+    const src = tracks.slice();
+    const s = createSessionFromPlaylist("P", src);
+    src.push({ uri: "spotify:track:9", title: "Nine", artist: "Z" });
+    expect(s.playlist).toHaveLength(3);
+  });
+
+  test("empty playlist clamps to a 1-round session", () => {
+    const s = createSessionFromPlaylist("Empty", []);
+    expect(s.targetRounds).toBe(1);
+    expect(isPlaylistSession(s)).toBe(false); // nothing to source
+    expect(upNext(s)).toBeNull();
   });
 });
 

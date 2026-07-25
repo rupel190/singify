@@ -14,6 +14,13 @@ import { gradeForScore, type Grade, type ScoreState } from "./scoring";
 
 export const DEFAULT_PLAYER = "You";
 
+/** One track in a playlist-sourced session's round list. */
+export interface SessionTrack {
+  uri: string; // Spotify track URI (round bookkeeping + playback)
+  title: string;
+  artist: string;
+}
+
 export interface PlayerScore {
   player: string;
   total: number;
@@ -32,6 +39,14 @@ export interface Session {
   targetRounds: number;
   players: string[]; // ["You"] for now
   rounds: RoundResult[];
+  /**
+   * Ordered round source. When set, the session plays through these tracks in
+   * order and its length fixes targetRounds. null/absent = follow-the-queue
+   * (count mode): the adapter just advances the Spotify queue N times.
+   */
+  playlist?: SessionTrack[] | null;
+  /** Display name of the source playlist, when playlist-sourced. */
+  playlistName?: string | null;
 }
 
 export function createSession(
@@ -42,7 +57,43 @@ export function createSession(
     targetRounds: Math.max(1, Math.round(targetRounds)),
     players: players.length ? players : [DEFAULT_PLAYER],
     rounds: [],
+    playlist: null,
+    playlistName: null,
   };
+}
+
+/**
+ * A session whose rounds ARE a playlist's tracks, played in order. The round
+ * count is the track count — you sing the whole list. Empty lists clamp to a
+ * 1-round session (the adapter shouldn't offer an empty playlist, but never
+ * produce a 0-round session).
+ */
+export function createSessionFromPlaylist(
+  name: string,
+  tracks: SessionTrack[],
+  players: string[] = [DEFAULT_PLAYER]
+): Session {
+  return {
+    targetRounds: Math.max(1, tracks.length),
+    players: players.length ? players : [DEFAULT_PLAYER],
+    rounds: [],
+    playlist: tracks.slice(),
+    playlistName: name,
+  };
+}
+
+/** True when the session's rounds come from a playlist (vs following the queue). */
+export function isPlaylistSession(s: Session): boolean {
+  return s.playlist != null && s.playlist.length > 0;
+}
+
+/**
+ * The track queued for the NEXT round in a playlist session (indexed by rounds
+ * already recorded), or null when following the queue or the list is spent.
+ */
+export function upNext(s: Session): SessionTrack | null {
+  if (!s.playlist) return null;
+  return s.playlist[s.rounds.length] ?? null;
 }
 
 /** Build a round result from a single-player ScoreState (the current mic). */
