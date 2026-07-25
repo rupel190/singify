@@ -765,6 +765,7 @@ function App() {
               <SessionSetup
                 playlists={MOCK_PLAYLISTS}
                 loadingPlaylists={plLoading}
+                current={{ uri: "spotify:playlist:now", name: "Road Trip 2026", count: null }}
                 onStartPlaylist={(p) =>
                   setSessionMsg(`▶ Would start session from “${p.name}” (${p.count ?? "?"} songs)`)
                 }

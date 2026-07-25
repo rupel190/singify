@@ -33,6 +33,8 @@ export function SessionSetup(props: {
   playlists: PlaylistRef[];
   loadingPlaylists: boolean;
   onStartPlaylist: (ref: PlaylistRef) => void;
+  /** The playlist the user is already playing, offered as a one-tap start. */
+  current?: PlaylistRef | null;
   // Free-play mode — sing N songs off whatever's queued.
   rounds: number;
   onRounds: (n: number) => void;
@@ -45,6 +47,7 @@ export function SessionSetup(props: {
     playlists,
     loadingPlaylists,
     onStartPlaylist,
+    current,
     rounds,
     onRounds,
     onStart,
@@ -95,6 +98,30 @@ export function SessionSetup(props: {
           marginTop: 10,
         }}
       >
+        {current && (
+          <button
+            onClick={() => onStartPlaylist(current)}
+            style={{
+              display: "flex",
+              flexDirection: "column",
+              alignItems: "flex-start",
+              gap: 2,
+              padding: "12px 16px",
+              borderRadius: 12,
+              border: `1px solid ${ACCENT}66`,
+              background: `${ACCENT}14`,
+              color: "#fff",
+              cursor: "pointer",
+              textAlign: "left",
+            }}
+          >
+            <span style={{ fontSize: 12, fontWeight: 700, letterSpacing: 1, textTransform: "uppercase", color: ACCENT }}>
+              ▶ Continue what you're playing
+            </span>
+            <span style={{ fontSize: 18, fontWeight: 800 }}>{current.name}</span>
+          </button>
+        )}
+
         <div style={sectionLabel}>Sing a playlist</div>
         <div
           style={{
@@ -188,9 +215,11 @@ export function SessionHud(props: {
   mics: MicInfo[];
   onSkip: () => void;
   onEnd: () => void;
+  /** Source playlist name, shown when the session is playlist-sourced. */
+  sourceName?: string | null;
 }) {
   const React = Spicetify.React;
-  const { round, target, sessionTotal, mics, onSkip, onEnd } = props;
+  const { round, target, sessionTotal, mics, onSkip, onEnd, sourceName } = props;
   const btn: React.CSSProperties = {
     padding: "5px 12px",
     borderRadius: 8,
@@ -219,8 +248,26 @@ export function SessionHud(props: {
         fontFamily: "var(--font-family, 'Spotify Circular', system-ui, sans-serif)",
       }}
     >
-      <div style={{ fontSize: 18, fontWeight: 800 }}>
-        Round <span style={{ color: ACCENT }}>{round}</span>/{target}
+      <div style={{ display: "flex", flexDirection: "column", lineHeight: 1.1 }}>
+        {sourceName && (
+          <span
+            style={{
+              fontSize: 11,
+              fontWeight: 700,
+              letterSpacing: 0.5,
+              color: "rgba(255,255,255,0.5)",
+              maxWidth: 180,
+              overflow: "hidden",
+              textOverflow: "ellipsis",
+              whiteSpace: "nowrap",
+            }}
+          >
+            {sourceName}
+          </span>
+        )}
+        <span style={{ fontSize: 18, fontWeight: 800 }}>
+          Round <span style={{ color: ACCENT }}>{round}</span>/{target}
+        </span>
       </div>
       <div style={{ fontSize: 18, fontWeight: 800, fontVariantNumeric: "tabular-nums" }}>
         {sessionTotal.toLocaleString()}

@@ -82,6 +82,25 @@ export function toSessionTrack(item: unknown): SessionTrack | null {
   return { uri, title, artist };
 }
 
+/**
+ * Map the current playback context (Spicetify.Player.data.context) to a
+ * PlaylistRef when the user is playing a playlist, else null. The count is
+ * unknown from the context alone (null) — the caller fetches tracks on start.
+ * Name lives under different keys across versions (name / context_description).
+ */
+export function contextToPlaylistRef(ctx: unknown): PlaylistRef | null {
+  if (!ctx || typeof ctx !== "object") return null;
+  const o = ctx as Record<string, any>;
+  const uri: unknown = o.uri ?? o.contextUri;
+  if (!isPlaylistUri(uri)) return null;
+  const name =
+    (typeof o.name === "string" && o.name) ||
+    (typeof o.metadata?.context_description === "string" && o.metadata.context_description) ||
+    (typeof o.metadata?.name === "string" && o.metadata.name) ||
+    "Current playlist";
+  return { uri, name, count: null };
+}
+
 /** Flatten a RootlistAPI tree (folders nest playlists) into PlaylistRefs. */
 export function flattenRootlist(root: unknown): PlaylistRef[] {
   const out: PlaylistRef[] = [];
@@ -122,6 +141,24 @@ export async function fetchPlaylists(): Promise<PlaylistRef[]> {
   } catch (err) {
     console.error("[singify] fetchPlaylists failed:", err);
     return [];
+  }
+}
+
+/**
+ * The playlist the user is currently playing, or null (not playing a playlist,
+ * or the API is unavailable). Synchronous — reads Player.data.context.
+ */
+export function currentContextPlaylist(): PlaylistRef | null {
+  try {
+    const data = (Spicetify.Player as unknown as { data?: Record<string, any> })?.data;
+    if (!data) return null;
+    // Prefer the structured context; fall back to legacy flat fields.
+    const ctx =
+      data.context ?? { uri: data.contextUri, metadata: data.contextMetadata };
+    return contextToPlaylistRef(ctx);
+  } catch (err) {
+    console.error("[singify] currentContextPlaylist failed:", err);
+    return null;
   }
 }
 

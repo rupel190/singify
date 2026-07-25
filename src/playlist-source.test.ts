@@ -4,6 +4,7 @@ import {
   toPlaylistRef,
   toSessionTrack,
   flattenRootlist,
+  contextToPlaylistRef,
 } from "./playlist-source";
 
 describe("isPlaylistUri", () => {
@@ -73,6 +74,28 @@ describe("toSessionTrack", () => {
     expect(toSessionTrack({ uri: "spotify:episode:x", name: "E" })).toBeNull();
     expect(toSessionTrack({ name: "no uri" })).toBeNull();
     expect(toSessionTrack(null)).toBeNull();
+  });
+});
+
+describe("contextToPlaylistRef", () => {
+  test("maps a playlist context with a structured name", () => {
+    const ref = contextToPlaylistRef({ uri: "spotify:playlist:5", name: "Now Playing" });
+    expect(ref).toEqual({ uri: "spotify:playlist:5", name: "Now Playing", count: null });
+  });
+
+  test("reads name from metadata.context_description", () => {
+    const ref = contextToPlaylistRef({
+      uri: "spotify:playlist:6",
+      metadata: { context_description: "Discover Weekly" },
+    });
+    expect(ref?.name).toBe("Discover Weekly");
+  });
+
+  test("null when the context isn't a playlist (album/artist/nothing)", () => {
+    expect(contextToPlaylistRef({ uri: "spotify:album:1" })).toBeNull();
+    expect(contextToPlaylistRef({ uri: "spotify:artist:1" })).toBeNull();
+    expect(contextToPlaylistRef(null)).toBeNull();
+    expect(contextToPlaylistRef({})).toBeNull();
   });
 });
 

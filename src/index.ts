@@ -38,6 +38,7 @@ import {
   fetchPlaylists,
   fetchPlaylistTracks,
   playPlaylist,
+  currentContextPlaylist,
   type PlaylistRef,
 } from "./playlist-source";
 import type { ScoreState } from "./scoring";
@@ -396,6 +397,7 @@ function renderOverlay(): void {
       React.createElement(SessionSetup, {
         playlists,
         loadingPlaylists: playlistsLoading,
+        current: currentContextPlaylist(),
         onStartPlaylist: (ref: PlaylistRef) => void startPlaylistSession(ref),
         rounds: setupRounds,
         onRounds: (n: number) => {
@@ -498,6 +500,7 @@ function renderOverlay(): void {
           mics,
           onSkip: skipRound,
           onEnd: endSession,
+          sourceName: session.playlistName,
         }),
         singContent
       )
