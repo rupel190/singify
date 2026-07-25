@@ -16,8 +16,13 @@ import { createRoot } from "react-dom/client";
   Player: {},
 };
 
-import { parse } from "../src/ultrastar-parser";
-import { KaraokeView, type FrameDebug } from "../src/karaoke-view";
+import { parse, targetPitchAt } from "../src/ultrastar-parser";
+import {
+  KaraokeView,
+  PLAYER_COLORS,
+  type FrameDebug,
+  type PlayerInput,
+} from "../src/karaoke-view";
 import { SongPicker } from "../src/song-picker";
 import { SessionSetup, NoChartInSession, SessionResultScreen } from "../src/session-view";
 import type { PlaylistRef } from "../src/playlist-source";
@@ -445,6 +450,34 @@ function App() {
     []
   );
 
+  // ── 2-player demo (no real mics) ──
+  // Two synthetic singers track the chart at different accuracy, so the versus
+  // rendering — two markers, two score HUDs — can be verified without hardware.
+  const [twoPlayer, setTwoPlayer] = React.useState(params.get("versus") === "1");
+  const songRef = React.useRef(song);
+  songRef.current = song;
+  // Two synthetic singers following the chart at different accuracy (stable
+  // getters — getPositionMs + songRef are stable, so the frame loop isn't rebuilt).
+  const singerA = React.useCallback((): number | null => {
+    const t = targetPitchAt(songRef.current, getPositionMs());
+    return t == null ? null : t + Math.sin(getPositionMs() / 140) * 0.35; // on-pitch
+  }, []);
+  const singerB = React.useCallback((): number | null => {
+    const t = targetPitchAt(songRef.current, getPositionMs());
+    return t == null ? null : t + 0.6 + Math.sin(getPositionMs() / 140) * 1.1; // sharp + wobbly
+  }, []);
+
+  // The players handed to KaraokeView: two synthetic in demo mode, else the
+  // single real mic (when on). This is the harness's "mic port" adapter.
+  const players: PlayerInput[] = twoPlayer
+    ? [
+        { id: "alex", name: "Alex", color: PLAYER_COLORS[0], getPitchMidi: singerA },
+        { id: "sam", name: "Sam", color: PLAYER_COLORS[1], getPitchMidi: singerB },
+      ]
+    : micOn
+      ? [{ id: "mic0", name: "You", color: PLAYER_COLORS[0], getPitchMidi: getLivePitchMidi }]
+      : [];
+
   React.useEffect(() => {
     let raf = 0;
     const tick = () => {
@@ -550,6 +583,21 @@ function App() {
           }}
         >
           {micOn ? "🎤 Mic on" : "🎤 Mic"}
+        </button>
+        <button
+          onClick={() => setTwoPlayer((v) => !v)}
+          title="Two synthetic singers — verify versus rendering without mics"
+          style={{
+            background: twoPlayer ? "#3a86ff" : "#2a2a33",
+            color: "#fff",
+            border: 0,
+            borderRadius: 20,
+            padding: "8px 14px",
+            font: "700 13px system-ui",
+            cursor: "pointer",
+          }}
+        >
+          {twoPlayer ? "👥 2P demo ✓" : "👥 2P demo"}
         </button>
         <button
           onClick={() => setShowDebug((v) => !v)}
@@ -708,8 +756,7 @@ function App() {
         <KaraokeView
           song={song}
           getPositionMs={getPositionMs}
-          getLivePitchMidi={getLivePitchMidi}
-          showScore={micOn}
+          players={players}
           onReplay={() => {
             seek(0);
             play();

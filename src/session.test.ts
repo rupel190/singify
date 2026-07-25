@@ -8,6 +8,7 @@ import {
   upNext,
   recordRound,
   roundFromScore,
+  roundFromScores,
   roundsLeft,
   isComplete,
   summarize,
@@ -103,6 +104,41 @@ describe("playlist-sourced session", () => {
     expect(s.targetRounds).toBe(1);
     expect(isPlaylistSession(s)).toBe(false); // nothing to source
     expect(upNext(s)).toBeNull();
+  });
+});
+
+describe("roundFromScores (true multiplayer)", () => {
+  test("builds one RoundResult with a score per player", () => {
+    const r = roundFromScores("Africa", "Toto", [
+      { player: "Alex", score: score(9000, 42, 44) },
+      { player: "Sam", score: score(6000, 30, 44) },
+    ]);
+    expect(r.scores.map((s) => s.player)).toEqual(["Alex", "Sam"]);
+    expect(r.scores[0].total).toBe(9000);
+    expect(r.scores[0].grade.stars).toBe(5);
+    expect(r.scores[1].total).toBe(6000);
+  });
+
+  test("a versus session summarizes both players every round", () => {
+    let s = createSession(2, ["Alex", "Sam"]);
+    s = recordRound(
+      s,
+      roundFromScores("A", "x", [
+        { player: "Alex", score: score(8000) },
+        { player: "Sam", score: score(5000) },
+      ])
+    );
+    s = recordRound(
+      s,
+      roundFromScores("B", "x", [
+        { player: "Alex", score: score(4000) },
+        { player: "Sam", score: score(9000) },
+      ])
+    );
+    const sum = summarize(s);
+    expect(sum.players.find((p) => p.player === "Alex")!.total).toBe(12000);
+    expect(sum.players.find((p) => p.player === "Sam")!.total).toBe(14000);
+    expect(sum.winner).toBe("Sam");
   });
 });
 

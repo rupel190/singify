@@ -28,41 +28,53 @@ import { foldSmoothHit, createPitchSmoother } from "./pitch";
 import { createScoreKeeper, gradeForScore, type ScoreState } from "./scoring";
 import { ResultScreen } from "./result-screen";
 
+/**
+ * One active singer — the generalised "mic port". Solo/hotseat pass a single
+ * entry; versus passes two. `getPitchMidi` must be a stable reference (the
+ * frame loop reads it every frame); `color` tints this player's marker, trail
+ * and score HUD so two singers stay visually distinct.
+ */
+export interface PlayerInput {
+  id: string;
+  name: string;
+  color: string;
+  getPitchMidi: () => number | null;
+}
+
+/** A player's final score for a round, handed to onComplete. */
+export interface PlayerRoundScore {
+  id: string;
+  name: string;
+  score: ScoreState;
+}
+
 export interface KaraokeViewProps {
   song: ParsedSong;
   /** Returns the current playback position in ms. Polled every frame. */
   getPositionMs: () => number;
   /**
-   * Optional: returns the singer's current pitch as a (fractional) MIDI note,
-   * or null when there's none. Polled every frame; drives the live-pitch marker.
-   * Must be a stable reference (memoise it) so the frame loop isn't rebuilt.
+   * Active singers, one mic each. Empty/undefined = play-along (no scoring, no
+   * markers). One entry = solo / hotseat. Two = versus — two markers + two
+   * score HUDs. Adding/removing a player starts a fresh scored attempt.
    */
-  getLivePitchMidi?: () => number | null;
-  /**
-   * When true, the running score accumulates and a score HUD is shown. The host
-   * sets this (typically = "mic is active"); flipping it true starts a fresh
-   * attempt. Scoring counts silence during a note as a miss, so it should only
-   * run once the singer is actually being listened to.
-   */
-  showScore?: boolean;
+  players?: PlayerInput[];
   /**
    * Called from the result screen's "Sing again" button. The host restarts the
    * track; the view resets its own score when playback jumps back to the start.
    */
   onReplay?: () => void;
   /**
-   * Optional per-frame diagnostics (dev harness overlay). Fires once per frame
-   * with the raw detected pitch, the current target, and the smoothed marker —
-   * so you can watch raw jitter vs the steadied marker on a real mic.
+   * Optional per-frame diagnostics for player 0 (dev harness overlay): the raw
+   * detected pitch, the current target, and the smoothed marker.
    */
   onDebug?: (d: FrameDebug) => void;
   /**
-   * Fired once when the song reaches its end while scoring, carrying the final
-   * score. When provided, the view hands off (renders nothing at the end) so a
-   * session host can record the round and advance; when absent, the view shows
-   * its own per-song ResultScreen (Quick Sing).
+   * Fired once when the song reaches its end while scoring, carrying every
+   * player's final score. When provided, the view hands off (renders nothing at
+   * the end) so a session host can record the round and advance; when absent
+   * (solo Quick Sing), the view shows its own per-song ResultScreen.
    */
-  onComplete?: (score: ScoreState) => void;
+  onComplete?: (scores: PlayerRoundScore[]) => void;
   fullscreen?: boolean;
 }
 
@@ -98,6 +110,12 @@ const COLORS = {
   axisLabel: "rgba(255, 255, 255, 0.58)",
 };
 
+/**
+ * Per-player marker/trail/HUD colours, assigned by index. Player 0 is the same
+ * pink the solo marker always used, so a one-player session looks identical.
+ */
+export const PLAYER_COLORS = [COLORS.livePitch, "#3a86ff", "#e6b422", "#43d17a"];
+
 // MIDI note number → name (60 = C4). Drives the left pitch axis.
 const NOTE_NAMES = ["C", "C♯", "D", "D♯", "E", "F", "F♯", "G", "G♯", "A", "A♯", "B"];
 function midiToName(midi: number): string {
@@ -121,120 +139,142 @@ function useSize(ref: { current: HTMLElement | null }): { w: number; h: number }
   return size;
 }
 
-interface FrameState {
-  ms: number;
+/** Per-player result for one frame (marker + running score). */
+interface PlayerFrame {
+  id: string;
   markerPitch: number | null; // folded + smoothed, ready to plot (target on a hit)
   markerHit: boolean;
   score: ScoreState | null;
 }
 
+interface FrameState {
+  ms: number;
+  players: PlayerFrame[]; // one per active singer, in input order
+}
+
 /**
  * Single rAF loop driving the view. Everything that must advance exactly once
- * per frame — scoring, the marker's fold+smooth — happens inside `computeFrame`
- * (never in render, which React may run multiple times per commit). The result
- * is one state object, so there's one re-render per frame.
+ * per frame — each player's scoring + marker fold/smooth — happens inside
+ * `computeFrame` (never in render, which React may run multiple times per
+ * commit). The result is one state object, so there's one re-render per frame.
  */
 function useFrame(
   getPositionMs: () => number,
-  getLivePitchMidi: (() => number | null) | undefined,
-  computeFrame: (ms: number, rawMidi: number | null) => FrameState
+  computeFrame: (ms: number) => FrameState
 ): FrameState {
   const { useState, useEffect, useRef } = Spicetify.React;
-  const [frame, setFrame] = useState<FrameState>({
-    ms: 0,
-    markerPitch: null,
-    markerHit: false,
-    score: null,
-  });
+  const [frame, setFrame] = useState<FrameState>({ ms: 0, players: [] });
   const raf = useRef(0);
   useEffect(() => {
     const tick = () => {
-      const ms = getPositionMs();
-      const raw = getLivePitchMidi ? getLivePitchMidi() : null;
-      setFrame(computeFrame(ms, raw));
+      setFrame(computeFrame(getPositionMs()));
       raf.current = requestAnimationFrame(tick);
     };
     raf.current = requestAnimationFrame(tick);
     return () => cancelAnimationFrame(raf.current);
-  }, [getPositionMs, getLivePitchMidi, computeFrame]);
+  }, [getPositionMs, computeFrame]);
   return frame;
+}
+
+/** One player's scoring engine: score keeper + marker smoother + sung trail. */
+interface Engine {
+  keeper: ReturnType<typeof createScoreKeeper>;
+  smoother: ReturnType<typeof createPitchSmoother>;
+  trail: { ms: number; pitch: number; hit: boolean }[];
 }
 
 export function KaraokeView(props: KaraokeViewProps) {
   const React = Spicetify.React;
   const { useRef, useMemo, useCallback, useEffect } = React;
-  const { song, getPositionMs, getLivePitchMidi, showScore, onReplay, fullscreen } =
-    props;
+  const { song, getPositionMs, onReplay, fullscreen } = props;
 
-  // One score keeper + one marker smoother per song.
-  const keeper = useMemo(() => createScoreKeeper(song), [song]);
-  const smoother = useMemo(() => createPitchSmoother(), [song]);
-  const showScoreRef = useRef(!!showScore);
+  // The active singers. Empty = play-along (no scoring); one = solo/hotseat;
+  // two = versus. Memoised on identity so the frame loop isn't rebuilt each render.
+  const players = useMemo(() => props.players ?? [], [props.players]);
+  const scoring = players.length > 0;
+  // Stable key for the roster (ids), so we reset engines when the set changes.
+  const idsKey = players.map((p) => p.id).join("|");
+
+  // One scoring engine per player, created lazily and reset per song / roster.
+  const enginesRef = useRef<Map<string, Engine>>(new Map());
+  const engineFor = useCallback(
+    (id: string): Engine => {
+      let e = enginesRef.current.get(id);
+      if (!e) {
+        e = { keeper: createScoreKeeper(song), smoother: createPitchSmoother(), trail: [] };
+        enginesRef.current.set(id, e);
+      }
+      return e;
+    },
+    [song]
+  );
+
   const lastMsRef = useRef(0);
-  // Ring buffer of recent sung-pitch samples, drawn as a fading trail leading
-  // into the now-line. Mutated once per frame in computeFrame; read in render.
-  const trailRef = useRef<{ ms: number; pitch: number; hit: boolean }[]>([]);
-  // onDebug read via a ref so a changing callback identity never rebuilds the
-  // frame loop (which would restart the rAF each render).
+  // Current players read via a ref so the rAF loop (keyed only on song) always
+  // sees the latest roster + getters without being torn down and rebuilt.
+  const playersRef = useRef(players);
+  playersRef.current = players;
+  // onDebug read via a ref so a changing callback identity never rebuilds the loop.
   const onDebugRef = useRef(props.onDebug);
   onDebugRef.current = props.onDebug;
   // Guards onComplete so it fires exactly once per attempt (reset on jump-back).
   const completedRef = useRef(false);
-  useEffect(() => {
-    showScoreRef.current = !!showScore;
-    if (showScore) {
-      keeper.reset(); // flipping on starts a fresh attempt
-      lastMsRef.current = 0;
-    }
-  }, [showScore, keeper]);
 
-  // A new song is a fresh attempt — clear the one-shot completion guard so the
-  // next song in a session can fire onComplete (seek-back alone isn't enough).
+  // Fresh attempt whenever the song OR the roster changes: drop every engine so
+  // scores/markers/trails start clean (turning a mic on = a fresh scored run).
   useEffect(() => {
+    enginesRef.current.clear();
+    lastMsRef.current = 0;
     completedRef.current = false;
-  }, [song]);
+  }, [song, idsKey]);
 
-  // The one per-frame computation. Scoring samples the RAW pitch; the marker
-  // folds the raw pitch to the target note FIRST, then smooths (foldSmoothHit —
-  // order matters so octave flicker doesn't average into garbage).
+  // The one per-frame computation, run once per active player. Scoring samples
+  // the RAW pitch; the marker folds the raw pitch to the target note FIRST, then
+  // smooths (foldSmoothHit — order matters so octave flicker doesn't average
+  // into garbage). Each player has its own engine (keeper/smoother/trail).
   const computeFrame = useCallback(
-    (ms: number, rawMidi: number | null): FrameState => {
+    (ms: number): FrameState => {
       const jumpedBack = ms < lastMsRef.current - 750; // restart / seek-back
       lastMsRef.current = ms;
-      if (jumpedBack) {
-        smoother.reset();
-        trailRef.current = [];
-        completedRef.current = false; // a restart begins a fresh attempt
-      }
-
-      let score: ScoreState | null = null;
-      if (showScoreRef.current) {
-        if (jumpedBack) keeper.reset();
-        keeper.sample(ms, rawMidi);
-        score = keeper.read();
-      }
+      if (jumpedBack) completedRef.current = false; // a restart begins a fresh attempt
 
       const target = targetPitchAt(song, ms);
-      const { pitch, hit } = foldSmoothHit(smoother, rawMidi, target, HIT_TOLERANCE);
-      // Record the sample for the trail, then drop anything older than the window.
-      if (pitch != null) {
-        const buf = trailRef.current;
-        buf.push({ ms, pitch, hit });
-        const cutoff = ms - TRAIL_MS;
-        while (buf.length && buf[0].ms < cutoff) buf.shift();
-        if (buf.length > TRAIL_MAX) buf.splice(0, buf.length - TRAIL_MAX);
+      const ps = playersRef.current;
+      const out: PlayerFrame[] = [];
+
+      for (let i = 0; i < ps.length; i++) {
+        const p = ps[i];
+        const eng = engineFor(p.id);
+        if (jumpedBack) {
+          eng.keeper.reset();
+          eng.smoother.reset();
+          eng.trail.length = 0;
+        }
+        const rawMidi = p.getPitchMidi();
+        eng.keeper.sample(ms, rawMidi);
+        const score = eng.keeper.read();
+
+        const { pitch, hit } = foldSmoothHit(eng.smoother, rawMidi, target, HIT_TOLERANCE);
+        if (pitch != null) {
+          const buf = eng.trail;
+          buf.push({ ms, pitch, hit });
+          const cutoff = ms - TRAIL_MS;
+          while (buf.length && buf[0].ms < cutoff) buf.shift();
+          if (buf.length > TRAIL_MAX) buf.splice(0, buf.length - TRAIL_MAX);
+        }
+        // Diagnostics track player 0 only (the harness debug overlay).
+        if (i === 0) {
+          onDebugRef.current?.({ rawMidi, targetPitch: target, markerPitch: pitch, markerHit: hit });
+        }
+        out.push({ id: p.id, markerPitch: pitch, markerHit: hit, score });
       }
-      onDebugRef.current?.({ rawMidi, targetPitch: target, markerPitch: pitch, markerHit: hit });
-      return { ms, markerPitch: pitch, markerHit: hit, score };
+      return { ms, players: out };
     },
-    [keeper, smoother, song]
+    [song, engineFor]
   );
 
-  const { ms: positionMs, markerPitch, markerHit, score } = useFrame(
-    getPositionMs,
-    getLivePitchMidi,
-    computeFrame
-  );
+  const frame = useFrame(getPositionMs, computeFrame);
+  const positionMs = frame.ms;
   const laneRef = useRef<HTMLDivElement | null>(null);
   const lane = useSize(laneRef);
 
@@ -298,43 +338,53 @@ export function KaraokeView(props: KaraokeViewProps) {
   const nowX = lane.w * NOW_FRACTION;
   const trackTranslate = nowX - positionMs * PX_PER_MS;
 
-  // Live sung-pitch marker. The fold-to-target + smooth + hit test already ran
-  // once in computeFrame (USDX UNote.pas:548-571 style — fold into the target
-  // note's octave so a rising interval reads as rising, then snap on a hit);
-  // here we just map the resulting pitch to a Y and colour it.
-  const markerColor = markerHit ? COLORS.nowLine : COLORS.livePitch;
-  const liveY =
-    markerPitch == null
-      ? null
-      : LANE_VPAD +
-        (1 - Math.min(1, Math.max(0, (markerPitch - minPitch) / pitchSpan))) *
-          (innerH - NOTE_HEIGHT) +
-        NOTE_HEIGHT / 2;
+  // Map a (folded, smoothed) pitch to its Y centre on the lane. The fold + smooth
+  // + hit test already ran in computeFrame (USDX UNote.pas:548-571 style — fold
+  // into the target note's octave so a rising interval reads as rising, then
+  // snap on a hit); here we just place it.
+  const yForMarker = (pitch: number): number =>
+    LANE_VPAD +
+    (1 - Math.min(1, Math.max(0, (pitch - minPitch) / pitchSpan))) *
+      (innerH - NOTE_HEIGHT) +
+    NOTE_HEIGHT / 2;
 
-  // Once playback passes the song's end (and we were scoring), the attempt is
-  // done. Fire onComplete once (session hook), then either hand off to the host
-  // (session) or show the per-song result (Quick Sing).
-  const atEnd =
-    showScore && score != null && song.durationMs > 0 && positionMs >= song.durationMs;
+  // Zip the per-frame results back to their inputs (colour/name), in order.
+  const rendered = frame.players
+    .map((pf, i) => ({ ...pf, input: players[i] }))
+    .filter((r) => r.input);
+
+  // Once playback passes the song's end (and someone was scoring), the attempt
+  // is done. Fire onComplete once with every player's score, then either hand
+  // off to the host (session) or show the per-song result (solo Quick Sing).
+  const anyScore = frame.players.some((p) => p.score != null);
+  const atEnd = scoring && anyScore && song.durationMs > 0 && positionMs >= song.durationMs;
 
   useEffect(() => {
-    if (atEnd && score && !completedRef.current) {
+    if (atEnd && !completedRef.current) {
       completedRef.current = true;
-      props.onComplete?.(score);
+      const scores: PlayerRoundScore[] = rendered
+        .filter((r) => r.score != null)
+        .map((r) => ({ id: r.id, name: r.input.name, score: r.score as ScoreState }));
+      if (scores.length) props.onComplete?.(scores);
     }
-  }, [atEnd, score]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [atEnd]);
 
-  if (atEnd && score) {
+  if (atEnd) {
     if (props.onComplete) return null; // a session host takes over from here
-    return (
-      <ResultScreen
-        score={score}
-        grade={gradeForScore(score.total)}
-        title={song.headers.title}
-        onReplay={onReplay}
-        fullscreen={fullscreen}
-      />
-    );
+    // Solo Quick Sing: show the one player's per-song result.
+    const solo = frame.players[0];
+    if (solo?.score) {
+      return (
+        <ResultScreen
+          score={solo.score}
+          grade={gradeForScore(solo.score.total)}
+          title={song.headers.title}
+          onReplay={onReplay}
+          fullscreen={fullscreen}
+        />
+      );
+    }
   }
 
   // ── Lyric window ──
@@ -440,94 +490,102 @@ export function KaraokeView(props: KaraokeViewProps) {
           }}
         />
 
-        {/* sung-pitch trail: recent samples pinned to the notes they were sung
-            against (x = now-line offset by age), fading + shrinking with age. */}
-        {trailRef.current.map((p, i) => {
-          const x = nowX + (p.ms - positionMs) * PX_PER_MS;
-          if (x < GUTTER + 4) return null; // don't paint under the label gutter
-          const ty =
-            LANE_VPAD +
-            (1 - Math.min(1, Math.max(0, (p.pitch - minPitch) / pitchSpan))) *
-              (innerH - NOTE_HEIGHT) +
-            NOTE_HEIGHT / 2;
-          const o = Math.max(0, 1 - (positionMs - p.ms) / TRAIL_MS);
-          const size = 3 + o * 3;
+        {/* sung-pitch trail, per player: recent samples pinned to the notes they
+            were sung against (x = now-line offset by age), fading with age. Each
+            player's dots take their own colour; a hit still flashes green. */}
+        {rendered.map((r) => {
+          const eng = enginesRef.current.get(r.id);
+          if (!eng) return null;
+          return eng.trail.map((p, i) => {
+            const x = nowX + (p.ms - positionMs) * PX_PER_MS;
+            if (x < GUTTER + 4) return null; // don't paint under the label gutter
+            const o = Math.max(0, 1 - (positionMs - p.ms) / TRAIL_MS);
+            const size = 3 + o * 3;
+            const ty = yForMarker(p.pitch);
+            return (
+              <div
+                key={`${r.id}-${i}`}
+                style={{
+                  position: "absolute",
+                  left: x - size / 2,
+                  top: ty - size / 2,
+                  width: size,
+                  height: size,
+                  borderRadius: "50%",
+                  background: p.hit ? COLORS.nowLine : r.input.color,
+                  opacity: o * 0.75,
+                  pointerEvents: "none",
+                }}
+              />
+            );
+          });
+        })}
+
+        {/* live sung-pitch marker per player. On a hit it goes green + pops
+            bigger + glows brighter — the "you nailed it" feedback. */}
+        {rendered.map((r) => {
+          if (r.markerPitch == null) return null;
+          const color = r.markerHit ? COLORS.nowLine : r.input.color;
           return (
             <div
-              key={i}
+              key={r.id}
               style={{
                 position: "absolute",
-                left: x - size / 2,
-                top: ty - size / 2,
-                width: size,
-                height: size,
+                left: nowX - 9,
+                top: yForMarker(r.markerPitch) - 9,
+                width: 18,
+                height: 18,
                 borderRadius: "50%",
-                background: p.hit ? COLORS.nowLine : COLORS.livePitch,
-                opacity: o * 0.75,
+                background: color,
+                boxShadow: r.markerHit
+                  ? `0 0 22px ${color}, 0 0 9px ${color}`
+                  : `0 0 12px ${color}`,
+                transform: r.markerHit ? "scale(1.3)" : "scale(1)",
+                transition:
+                  "top 60ms linear, transform 110ms ease, box-shadow 110ms ease, background 90ms ease",
                 pointerEvents: "none",
+                zIndex: 3,
               }}
             />
           );
         })}
 
-        {/* live sung-pitch marker (only when a mic pitch is available). On a hit
-            it pops bigger + glows brighter — the "you nailed it" feedback. */}
-        {liveY != null && (
-          <div
-            style={{
-              position: "absolute",
-              left: nowX - 9,
-              top: liveY - 9,
-              width: 18,
-              height: 18,
-              borderRadius: "50%",
-              background: markerColor,
-              boxShadow: markerHit
-                ? `0 0 22px ${markerColor}, 0 0 9px ${markerColor}`
-                : `0 0 12px ${markerColor}`,
-              transform: markerHit ? "scale(1.3)" : "scale(1)",
-              transition:
-                "top 60ms linear, transform 110ms ease, box-shadow 110ms ease, background 90ms ease",
-              pointerEvents: "none",
-              zIndex: 3,
-            }}
-          />
-        )}
-
-        {/* running score HUD (only while scoring is active) */}
-        {showScore && score && (
-          <div
-            style={{
-              position: "absolute",
-              top: 8,
-              right: 12,
-              textAlign: "right",
-              fontVariantNumeric: "tabular-nums",
-              pointerEvents: "none",
-            }}
-          >
+        {/* running score HUD per player — player 0 top-right, player 1 top-left,
+            each tinted its colour; the name shows only in multiplayer. */}
+        {rendered.map((r, i) =>
+          r.score ? (
             <div
+              key={r.id}
               style={{
-                fontSize: 80,
-                fontWeight: 800,
-                lineHeight: 1,
-                color: COLORS.nowLine,
-                textShadow: "0 1px 6px rgba(0,0,0,0.5)",
+                position: "absolute",
+                top: 8,
+                [i === 0 ? "right" : "left"]: 12,
+                textAlign: i === 0 ? "right" : "left",
+                fontVariantNumeric: "tabular-nums",
+                pointerEvents: "none",
               }}
             >
-              {score.total.toLocaleString()}
+              {rendered.length > 1 && (
+                <div style={{ fontSize: 22, fontWeight: 800, color: r.input.color, lineHeight: 1 }}>
+                  {r.input.name}
+                </div>
+              )}
+              <div
+                style={{
+                  fontSize: 80,
+                  fontWeight: 800,
+                  lineHeight: 1,
+                  color: rendered.length > 1 ? r.input.color : COLORS.nowLine,
+                  textShadow: "0 1px 6px rgba(0,0,0,0.5)",
+                }}
+              >
+                {r.score.total.toLocaleString()}
+              </div>
+              <div style={{ marginTop: 6, fontSize: 24, fontWeight: 600, color: "rgba(255,255,255,0.55)" }}>
+                {r.score.notesSung}/{r.score.notesTotal} notes
+              </div>
             </div>
-            <div
-              style={{
-                marginTop: 6,
-                fontSize: 24,
-                fontWeight: 600,
-                color: "rgba(255,255,255,0.55)",
-              }}
-            >
-              {score.notesSung}/{score.notesTotal} notes
-            </div>
-          </div>
+          ) : null
         )}
       </div>
 

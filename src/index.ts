@@ -12,7 +12,12 @@
  * <KaraokeView> directly with a fixture song and never touch the cache.
  */
 
-import { KaraokeView } from "./karaoke-view";
+import {
+  KaraokeView,
+  PLAYER_COLORS,
+  type PlayerInput,
+  type PlayerRoundScore,
+} from "./karaoke-view";
 import { SongPicker } from "./song-picker";
 import { HomeMenu } from "./home-menu";
 import {
@@ -27,7 +32,7 @@ import {
   createSession,
   createSessionFromPlaylist,
   recordRound,
-  roundFromScore,
+  roundFromScores,
   isComplete,
   isMultiplayer,
   activePlayer,
@@ -43,7 +48,6 @@ import {
   currentContextPlaylist,
   type PlaylistRef,
 } from "./playlist-source";
-import type { ScoreState } from "./scoring";
 import { startMicPitch, type MicPitch } from "./mic";
 import { resolveForTrack, confirmPick } from "./resolver-client";
 import { sensitivityToThreshold } from "./pitch";
@@ -238,6 +242,17 @@ async function toggleMic(): Promise<void> {
 
 function getLivePitchMidi(): number | null {
   return micPitch?.read()?.midi ?? null;
+}
+
+/**
+ * The active singers handed to KaraokeView — one entry per live mic. Today
+ * there's a single mic: in a session it's whoever's turn it is (hotseat), else
+ * "You" (Quick Sing). Versus (two mics) will return two entries here.
+ */
+function activePlayers(): PlayerInput[] {
+  if (!micPitch) return [];
+  const name = session ? activePlayer(session) : "You";
+  return [{ id: "mic0", name, color: PLAYER_COLORS[0], getPitchMidi: getLivePitchMidi }];
 }
 
 /** "Sing again" from the result screen — restart the track from the top. */
@@ -456,8 +471,7 @@ function renderOverlay(): void {
     ? React.createElement(KaraokeView, {
         song: currentSong,
         getPositionMs: getCurrentMs,
-        getLivePitchMidi,
-        showScore: micPitch != null, // score while the mic is live
+        players: activePlayers(), // one mic today; two when versus lands
         onReplay,
         onComplete: session ? onRoundComplete : undefined, // sessions record + advance
         fullscreen: true,
@@ -615,16 +629,17 @@ async function startPlaylistSession(ref: PlaylistRef): Promise<void> {
   }
 }
 
-/** Fired by KaraokeView when a song finishes while scoring — records the round. */
-function onRoundComplete(score: ScoreState): void {
+/** Fired by KaraokeView when a song finishes while scoring — records the round.
+ *  scores has one entry (hotseat, this round's singer) or N (versus). */
+function onRoundComplete(scores: PlayerRoundScore[]): void {
   if (!session || !currentSong || !currentTrackId) return;
   if (scoredTrackIds.has(currentTrackId)) return; // one round per song
+  if (scores.length === 0) return;
   scoredTrackIds.add(currentTrackId);
-  const r = roundFromScore(
+  const r = roundFromScores(
     currentSong.headers.title,
     currentSong.headers.artist,
-    score,
-    activePlayer(session) // hotseat: this round's singer
+    scores.map((s) => ({ player: s.name, score: s.score }))
   );
   session = recordRound(session, r);
   lastRound = r;

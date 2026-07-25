@@ -96,25 +96,41 @@ export function upNext(s: Session): SessionTrack | null {
   return s.playlist[s.rounds.length] ?? null;
 }
 
-/** Build a round result from a single-player ScoreState (the current mic). */
+/** Turn one player's ScoreState into a PlayerScore (adds the computed grade). */
+function playerScoreFrom(player: string, score: ScoreState): PlayerScore {
+  return {
+    player,
+    total: score.total,
+    grade: gradeForScore(score.total),
+    notesSung: score.notesSung,
+    notesTotal: score.notesTotal,
+  };
+}
+
+/** Build a round result from a single-player ScoreState (hotseat / Quick Sing). */
 export function roundFromScore(
   title: string,
   artist: string,
   score: ScoreState,
   player: string = DEFAULT_PLAYER
 ): RoundResult {
+  return { title, artist, scores: [playerScoreFrom(player, score)] };
+}
+
+/**
+ * Build a round result from several players' scores at once — true multiplayer,
+ * where everyone sang the same song simultaneously (one mic each). Order is
+ * preserved; summarize() aggregates each player across rounds.
+ */
+export function roundFromScores(
+  title: string,
+  artist: string,
+  entries: { player: string; score: ScoreState }[]
+): RoundResult {
   return {
     title,
     artist,
-    scores: [
-      {
-        player,
-        total: score.total,
-        grade: gradeForScore(score.total),
-        notesSung: score.notesSung,
-        notesTotal: score.notesTotal,
-      },
-    ],
+    scores: entries.map((e) => playerScoreFrom(e.player, e.score)),
   };
 }
 
