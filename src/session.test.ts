@@ -3,6 +3,8 @@ import {
   createSession,
   createSessionFromPlaylist,
   isPlaylistSession,
+  isMultiplayer,
+  activePlayer,
   upNext,
   recordRound,
   roundFromScore,
@@ -101,6 +103,46 @@ describe("playlist-sourced session", () => {
     expect(s.targetRounds).toBe(1);
     expect(isPlaylistSession(s)).toBe(false); // nothing to source
     expect(upNext(s)).toBeNull();
+  });
+});
+
+describe("hotseat roster + rotation", () => {
+  test("single player is never multiplayer; active player is that one", () => {
+    const s = createSession(3);
+    expect(isMultiplayer(s)).toBe(false);
+    expect(activePlayer(s)).toBe("You");
+  });
+
+  test("activePlayer rotates through the roster by rounds recorded", () => {
+    let s = createSession(4, ["P1", "P2"]);
+    expect(isMultiplayer(s)).toBe(true);
+    expect(activePlayer(s)).toBe("P1"); // round 1
+    s = recordRound(s, round("A", 100, "P1"));
+    expect(activePlayer(s)).toBe("P2"); // round 2
+    s = recordRound(s, round("B", 100, "P2"));
+    expect(activePlayer(s)).toBe("P1"); // round 3 wraps
+  });
+
+  test("summarize averages over each player's OWN rounds, not all rounds", () => {
+    // 2 players, 4 rounds hotseat: P1 sings 1 & 3, P2 sings 2 & 4.
+    let s = createSession(4, ["P1", "P2"]);
+    s = recordRound(s, round("A", 8000, "P1"));
+    s = recordRound(s, round("B", 4000, "P2"));
+    s = recordRound(s, round("C", 6000, "P1"));
+    s = recordRound(s, round("D", 2000, "P2"));
+    const sum = summarize(s);
+    const p1 = sum.players.find((p) => p.player === "P1")!;
+    const p2 = sum.players.find((p) => p.player === "P2")!;
+    expect(p1.total).toBe(14000);
+    expect(p1.avg).toBe(7000); // 14000 / 2 sung, NOT / 4 rounds
+    expect(p1.roundsSung).toBe(2);
+    expect(p2.total).toBe(6000);
+    expect(p2.avg).toBe(3000);
+    expect(sum.winner).toBe("P1");
+  });
+
+  test("winner is null before any round", () => {
+    expect(summarize(createSession(3, ["P1", "P2"])).winner).toBeNull();
   });
 });
 

@@ -41,6 +41,9 @@ export function SessionSetup(props: {
   onStart: () => void;
   onCancel: () => void;
   micOn: boolean;
+  // Hotseat roster — players take turns on the one mic. onPlayers replaces it.
+  players: string[];
+  onPlayers: (names: string[]) => void;
 }) {
   const React = Spicetify.React;
   const {
@@ -53,7 +56,17 @@ export function SessionSetup(props: {
     onStart,
     onCancel,
     micOn,
+    players,
+    onPlayers,
   } = props;
+
+  const MAX_PLAYERS = 6; // hotseat can seat a few; the mic just passes around
+  const setName = (i: number, name: string) =>
+    onPlayers(players.map((p, j) => (j === i ? name : p)));
+  const addPlayer = () =>
+    players.length < MAX_PLAYERS && onPlayers([...players, `P${players.length + 1}`]);
+  const removePlayer = (i: number) =>
+    players.length > 1 && onPlayers(players.filter((_, j) => j !== i));
 
   const chip = (n: number): React.CSSProperties => ({
     padding: "8px 16px",
@@ -88,7 +101,7 @@ export function SessionSetup(props: {
         {micOn ? "🎤 Mic on — you'll be scored" : "🎤 Mic is off — starting turns it on"}
       </div>
 
-      {/* Panel keeps the two modes tidy in one column. */}
+      {/* Panel keeps the modes tidy in one column. */}
       <div
         style={{
           display: "flex",
@@ -98,6 +111,77 @@ export function SessionSetup(props: {
           marginTop: 10,
         }}
       >
+        {/* Roster — one player is solo; add singers for hotseat (they share the mic). */}
+        <div style={sectionLabel}>
+          Players {players.length > 1 && <span style={{ color: ACCENT }}>· hotseat, take turns</span>}
+        </div>
+        <div style={{ display: "flex", flexWrap: "wrap", gap: 8, alignItems: "center" }}>
+          {players.map((name, i) => (
+            <div
+              key={i}
+              style={{
+                display: "flex",
+                alignItems: "center",
+                gap: 4,
+                padding: "4px 6px 4px 10px",
+                borderRadius: 10,
+                background: "rgba(255,255,255,0.05)",
+                border: "1px solid rgba(255,255,255,0.1)",
+              }}
+            >
+              <span style={{ color: ACCENT, fontWeight: 800, fontSize: 13 }}>{i + 1}</span>
+              <input
+                value={name}
+                onChange={(e) => setName(i, (e.target as HTMLInputElement).value)}
+                maxLength={16}
+                style={{
+                  width: 96,
+                  background: "transparent",
+                  border: "none",
+                  color: "#fff",
+                  fontSize: 15,
+                  fontWeight: 600,
+                  outline: "none",
+                }}
+              />
+              {players.length > 1 && (
+                <button
+                  onClick={() => removePlayer(i)}
+                  title="Remove"
+                  style={{
+                    border: "none",
+                    background: "transparent",
+                    color: "rgba(255,255,255,0.5)",
+                    cursor: "pointer",
+                    fontSize: 16,
+                    lineHeight: 1,
+                    padding: "0 2px",
+                  }}
+                >
+                  ×
+                </button>
+              )}
+            </div>
+          ))}
+          {players.length < MAX_PLAYERS && (
+            <button
+              onClick={addPlayer}
+              style={{
+                padding: "8px 12px",
+                borderRadius: 10,
+                border: "1px dashed rgba(255,255,255,0.2)",
+                background: "transparent",
+                color: "rgba(255,255,255,0.7)",
+                cursor: "pointer",
+                fontSize: 14,
+                fontWeight: 700,
+              }}
+            >
+              + Add singer
+            </button>
+          )}
+        </div>
+
         {current && (
           <button
             onClick={() => onStartPlaylist(current)}
@@ -217,9 +301,12 @@ export function SessionHud(props: {
   onEnd: () => void;
   /** Source playlist name, shown when the session is playlist-sourced. */
   sourceName?: string | null;
+  /** Whose turn it is (hotseat), shown when there's more than one player. */
+  currentSinger?: string | null;
 }) {
   const React = Spicetify.React;
-  const { round, target, sessionTotal, mics, onSkip, onEnd, sourceName } = props;
+  const { round, target, sessionTotal, mics, onSkip, onEnd, sourceName, currentSinger } =
+    props;
   const btn: React.CSSProperties = {
     padding: "5px 12px",
     borderRadius: 8,
@@ -272,6 +359,20 @@ export function SessionHud(props: {
       <div style={{ fontSize: 18, fontWeight: 800, fontVariantNumeric: "tabular-nums" }}>
         {sessionTotal.toLocaleString()}
       </div>
+      {currentSinger && (
+        <div
+          style={{
+            fontSize: 14,
+            fontWeight: 800,
+            padding: "4px 10px",
+            borderRadius: 8,
+            color: ACCENT,
+            background: `${ACCENT}1e`,
+          }}
+        >
+          🎤 {currentSinger}'s turn
+        </div>
+      )}
       <div style={{ display: "flex", gap: 6 }}>
         {mics.map((m, i) => (
           <span
@@ -349,9 +450,12 @@ export function RoundEnd(props: {
   onContinue: () => void;
   /** Next track in a playlist session, shown as "Up next" (null = free play). */
   upNext?: SessionTrack | null;
+  /** Who sings the next round (hotseat); null when solo. */
+  nextSinger?: string | null;
 }) {
   const React = Spicetify.React;
-  const { justFinished, roundNumber, target, sessionTotal, onContinue, upNext } = props;
+  const { justFinished, roundNumber, target, sessionTotal, onContinue, upNext, nextSinger } =
+    props;
   const s = justFinished.scores[0];
   const last = roundNumber >= target;
   return (
@@ -360,6 +464,12 @@ export function RoundEnd(props: {
         Round {roundNumber} of {target} done
       </div>
       <div style={{ fontSize: 30, fontWeight: 800 }}>{justFinished.title}</div>
+      {/* In hotseat, name who just sang this round. */}
+      {s.player && s.player !== "You" && (
+        <div style={{ fontSize: 16, color: "rgba(255,255,255,0.65)" }}>
+          🎤 sung by <span style={{ color: "#fff", fontWeight: 700 }}>{s.player}</span>
+        </div>
+      )}
       <div style={{ fontSize: 22, color: GOLD }}>{stars(s.grade.stars)}</div>
       <div
         style={{ fontSize: 56, fontWeight: 800, color: ACCENT, fontVariantNumeric: "tabular-nums" }}
@@ -369,13 +479,22 @@ export function RoundEnd(props: {
       <div style={{ fontSize: 16, color: "rgba(255,255,255,0.6)" }}>
         Session total {sessionTotal.toLocaleString()}
       </div>
-      {!last && upNext && (
+      {!last && (upNext || nextSinger) && (
         <div style={{ fontSize: 15, color: "rgba(255,255,255,0.5)", marginTop: 4 }}>
-          Up next: <span style={{ color: "#fff", fontWeight: 600 }}>{upNext.artist} — {upNext.title}</span>
+          Up next:{" "}
+          {nextSinger && (
+            <span style={{ color: ACCENT, fontWeight: 700 }}>🎤 {nextSinger}'s turn</span>
+          )}
+          {upNext && (
+            <span style={{ color: "#fff", fontWeight: 600 }}>
+              {nextSinger ? " · " : ""}
+              {upNext.artist} — {upNext.title}
+            </span>
+          )}
         </div>
       )}
       <button style={{ ...primaryBtn(React), marginTop: 16 }} onClick={onContinue}>
-        {last ? "See the results ▶" : upNext ? "Next song ▶" : "Next — play another song ▶"}
+        {last ? "See the results ▶" : nextSinger ? `${nextSinger}, you're up ▶` : upNext ? "Next song ▶" : "Next — play another song ▶"}
       </button>
     </Center>
   );
@@ -390,7 +509,10 @@ export function SessionResultScreen(props: {
 }) {
   const React = Spicetify.React;
   const { summary, onDone, onSave } = props;
-  const p = summary.players[0]; // headline player (multi-player renders columns later)
+  const multiplayer = summary.players.length > 1;
+  const headline = summary.players[0]; // solo headline
+  // Standings: players ranked by total (winner first).
+  const ranked = [...summary.players].sort((a, b) => b.total - a.total);
 
   const cell: React.CSSProperties = { padding: "8px 12px", fontSize: 17 };
   const head: React.CSSProperties = {
@@ -407,14 +529,63 @@ export function SessionResultScreen(props: {
       <div style={{ fontSize: 22, color: "rgba(255,255,255,0.6)", fontWeight: 700 }}>
         Session complete
       </div>
-      <div
-        style={{ fontSize: 84, fontWeight: 800, color: ACCENT, fontVariantNumeric: "tabular-nums", lineHeight: 1 }}
-      >
-        {p.total.toLocaleString()}
-      </div>
-      <div style={{ fontSize: 26, color: GOLD, fontWeight: 800 }}>
-        {stars(p.grade.stars)} {p.grade.name}
-      </div>
+
+      {multiplayer ? (
+        <>
+          {summary.winner && (
+            <div style={{ fontSize: 30, fontWeight: 800, color: GOLD }}>
+              👑 {summary.winner} wins
+            </div>
+          )}
+          {/* Player standings — winner-first cards. */}
+          <div style={{ display: "flex", gap: 12, flexWrap: "wrap", justifyContent: "center", marginTop: 6 }}>
+            {ranked.map((pl, i) => {
+              const win = pl.player === summary.winner;
+              return (
+                <div
+                  key={pl.player}
+                  style={{
+                    display: "flex",
+                    flexDirection: "column",
+                    alignItems: "center",
+                    gap: 2,
+                    minWidth: 140,
+                    padding: "14px 18px",
+                    borderRadius: 14,
+                    border: `1px solid ${win ? GOLD : "rgba(255,255,255,0.1)"}`,
+                    background: win ? `${GOLD}14` : "rgba(255,255,255,0.03)",
+                  }}
+                >
+                  <div style={{ fontSize: 15, fontWeight: 700, color: "rgba(255,255,255,0.6)" }}>
+                    {i === 0 ? "①" : i === 1 ? "②" : i === 2 ? "③" : `#${i + 1}`} {pl.player}
+                  </div>
+                  <div
+                    style={{ fontSize: 34, fontWeight: 800, color: win ? GOLD : ACCENT, fontVariantNumeric: "tabular-nums" }}
+                  >
+                    {pl.total.toLocaleString()}
+                  </div>
+                  <div style={{ fontSize: 15, color: GOLD }}>{stars(pl.grade.stars)}</div>
+                  <div style={{ fontSize: 12, color: "rgba(255,255,255,0.4)" }}>
+                    {pl.roundsSung} {pl.roundsSung === 1 ? "song" : "songs"} · avg{" "}
+                    {pl.avg.toLocaleString()}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </>
+      ) : (
+        <>
+          <div
+            style={{ fontSize: 84, fontWeight: 800, color: ACCENT, fontVariantNumeric: "tabular-nums", lineHeight: 1 }}
+          >
+            {headline.total.toLocaleString()}
+          </div>
+          <div style={{ fontSize: 26, color: GOLD, fontWeight: 800 }}>
+            {stars(headline.grade.stars)} {headline.grade.name}
+          </div>
+        </>
+      )}
 
       <table
         style={{
@@ -429,6 +600,7 @@ export function SessionResultScreen(props: {
           <tr>
             <th style={head}>#</th>
             <th style={{ ...head, textAlign: "left" }}>Song</th>
+            {multiplayer && <th style={{ ...head, textAlign: "left" }}>Singer</th>}
             <th style={head}>Grade</th>
             <th style={{ ...head, textAlign: "right" }}>Score</th>
           </tr>
@@ -443,6 +615,11 @@ export function SessionResultScreen(props: {
                 <td style={{ ...cell, textAlign: "left", fontWeight: 700 }}>
                   {r.title} {best && <span style={{ color: GOLD }}>★ best</span>}
                 </td>
+                {multiplayer && (
+                  <td style={{ ...cell, textAlign: "left", color: ACCENT, fontWeight: 700 }}>
+                    {sc.player}
+                  </td>
+                )}
                 <td style={{ ...cell, color: GOLD }}>{stars(sc.grade.stars)}</td>
                 <td style={{ ...cell, textAlign: "right", fontVariantNumeric: "tabular-nums" }}>
                   {sc.total.toLocaleString()}

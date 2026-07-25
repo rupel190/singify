@@ -29,6 +29,8 @@ import {
   recordRound,
   roundFromScore,
   isComplete,
+  isMultiplayer,
+  activePlayer,
   upNext,
   summarize,
   type Session,
@@ -321,6 +323,7 @@ let screen: Screen = "sing";
 // choice on the setup screen; lastRound + scoredTrackIds track round bookkeeping.
 let session: Session | null = null;
 let setupRounds = 5;
+let setupPlayers: string[] = ["You"]; // hotseat roster chosen on the setup screen
 let lastRound: RoundResult | null = null;
 let scoredTrackIds = new Set<string>(); // one round per distinct track per session
 // Playlist picker on the setup screen: the user's playlists + load state.
@@ -404,6 +407,11 @@ function renderOverlay(): void {
           setupRounds = n;
           renderOverlay();
         },
+        players: setupPlayers,
+        onPlayers: (names: string[]) => {
+          setupPlayers = names.length ? names : ["You"];
+          renderOverlay();
+        },
         onStart: startSession,
         onCancel: () => {
           screen = "home";
@@ -424,6 +432,7 @@ function renderOverlay(): void {
         sessionTotal: sessionTotal(),
         onContinue: continueSession,
         upNext: upNext(session),
+        nextSinger: isMultiplayer(session) ? activePlayer(session) : null,
       })
     );
     return;
@@ -501,6 +510,7 @@ function renderOverlay(): void {
           onSkip: skipRound,
           onEnd: endSession,
           sourceName: session.playlistName,
+          currentSinger: isMultiplayer(session) ? activePlayer(session) : null,
         }),
         singContent
       )
@@ -567,7 +577,7 @@ async function loadPlaylists(): Promise<void> {
 
 /** Start a fresh FREE-PLAY session: N rounds off whatever's queued. */
 function startSession(): void {
-  session = createSession(setupRounds);
+  session = createSession(setupRounds, setupPlayers);
   scoredTrackIds = new Set();
   lastRound = null;
   if (!micPitch) void toggleMic(); // a scored session needs the mic
@@ -587,7 +597,7 @@ async function startPlaylistSession(ref: PlaylistRef): Promise<void> {
     Spicetify.showNotification?.(`“${ref.name}” has no playable tracks`, true);
     return;
   }
-  session = createSessionFromPlaylist(ref.name, tracks);
+  session = createSessionFromPlaylist(ref.name, tracks, setupPlayers);
   scoredTrackIds = new Set();
   lastRound = null;
   if (!micPitch) void toggleMic(); // a scored session needs the mic
@@ -613,7 +623,8 @@ function onRoundComplete(score: ScoreState): void {
   const r = roundFromScore(
     currentSong.headers.title,
     currentSong.headers.artist,
-    score
+    score,
+    activePlayer(session) // hotseat: this round's singer
   );
   session = recordRound(session, r);
   lastRound = r;

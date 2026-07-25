@@ -19,8 +19,15 @@ import { createRoot } from "react-dom/client";
 import { parse } from "../src/ultrastar-parser";
 import { KaraokeView, type FrameDebug } from "../src/karaoke-view";
 import { SongPicker } from "../src/song-picker";
-import { SessionSetup, NoChartInSession } from "../src/session-view";
+import { SessionSetup, NoChartInSession, SessionResultScreen } from "../src/session-view";
 import type { PlaylistRef } from "../src/playlist-source";
+import {
+  createSession,
+  recordRound,
+  roundFromScore,
+  summarize,
+} from "../src/session";
+import type { ScoreState } from "../src/scoring";
 import { startMicPitch, type MicPitch, type AppliedProcessing } from "../src/mic";
 import { sensitivityToThreshold } from "../src/pitch";
 
@@ -304,7 +311,7 @@ function App() {
   // ?screen=session|picker opens straight to that surface (for dev + screenshots).
   const screenParam = params.get("screen");
   const initialMode =
-    screenParam === "session" || screenParam === "nochart"
+    screenParam === "session" || screenParam === "nochart" || screenParam === "result"
       ? "session"
       : screenParam === "picker"
         ? "picker"
@@ -319,10 +326,26 @@ function App() {
   ];
   const [plLoading, setPlLoading] = React.useState(false);
   const [setupRounds, setSetupRounds] = React.useState(5);
+  const [setupPlayers, setSetupPlayers] = React.useState<string[]>(["You"]);
   const [sessionMsg, setSessionMsg] = React.useState<string | null>(null);
-  // Toggle the session demo between the setup screen and the no-chart card.
-  const [sessionScreen, setSessionScreen] = React.useState<"setup" | "nochart">(
-    params.get("screen") === "nochart" ? "nochart" : "setup"
+  // A mock 2-player hotseat result, built with the real session helpers.
+  const demoSummary = React.useMemo(() => {
+    const mk = (total: number): ScoreState =>
+      ({ total, notesSung: 40, notesTotal: 44 }) as ScoreState;
+    let s = createSession(4, ["Alex", "Sam"]);
+    s = recordRound(s, roundFromScore("Bohemian Rhapsody", "Queen", mk(8200), "Alex"));
+    s = recordRound(s, roundFromScore("Dancing Queen", "ABBA", mk(6400), "Sam"));
+    s = recordRound(s, roundFromScore("Livin' on a Prayer", "Bon Jovi", mk(9100), "Alex"));
+    s = recordRound(s, roundFromScore("Africa", "Toto", mk(7000), "Sam"));
+    return summarize(s);
+  }, []);
+  // Toggle the session demo between setup, the no-chart card, and the result screen.
+  const [sessionScreen, setSessionScreen] = React.useState<"setup" | "nochart" | "result">(
+    params.get("screen") === "nochart"
+      ? "nochart"
+      : params.get("screen") === "result"
+        ? "result"
+        : "setup"
   );
   const [pendingId, setPendingId] = React.useState<number | null>(null);
   const [pickError, setPickError] = React.useState<string | null>(null);
@@ -732,12 +755,19 @@ function App() {
             </div>
           )}
           <div style={{ marginBottom: 10, display: "flex", gap: 8 }}>
-            <button
-              style={stepBtn}
-              onClick={() => setSessionScreen((s) => (s === "setup" ? "nochart" : "setup"))}
-            >
-              {sessionScreen === "setup" ? "Preview: no-chart card" : "← Setup screen"}
-            </button>
+            {(["setup", "nochart", "result"] as const).map((sc) => (
+              <button
+                key={sc}
+                style={{
+                  ...stepBtn,
+                  background: sessionScreen === sc ? "#1ed760" : "#2a2a33",
+                  color: sessionScreen === sc ? "#08210f" : "#fff",
+                }}
+                onClick={() => setSessionScreen(sc)}
+              >
+                {sc === "setup" ? "Setup" : sc === "nochart" ? "No-chart" : "Result (2P)"}
+              </button>
+            ))}
             {sessionScreen === "setup" && (
               <button style={stepBtn} onClick={() => setPlLoading((v) => !v)}>
                 {plLoading ? "Show playlists" : "Simulate loading…"}
@@ -761,6 +791,12 @@ function App() {
                 onSkip={() => setSessionMsg("⏭ Would skip to the next playlist track")}
                 onReChoose={() => setSessionMsg("🔎 Would re-search USDB for this track")}
               />
+            ) : sessionScreen === "result" ? (
+              <SessionResultScreen
+                summary={demoSummary}
+                onDone={() => setSessionMsg("✓ Done")}
+                onSave={() => setSessionMsg("💾 Would save as a Spotify playlist")}
+              />
             ) : (
               <SessionSetup
                 playlists={MOCK_PLAYLISTS}
@@ -771,6 +807,8 @@ function App() {
                 }
                 rounds={setupRounds}
                 onRounds={setSetupRounds}
+                players={setupPlayers}
+                onPlayers={setSetupPlayers}
                 onStart={() => setSessionMsg(`▶ Would start free-play session: ${setupRounds} rounds`)}
                 onCancel={() => { setSessionMsg(null); setMode("karaoke"); }}
                 micOn={micOn}
