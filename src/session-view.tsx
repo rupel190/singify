@@ -11,6 +11,8 @@
 
 import type { RoundResult, SessionSummary, SessionTrack } from "./session";
 import type { PlaylistRef } from "./playlist-source";
+import type { AudioInput } from "./mic";
+import { PLAYER_COLORS } from "./karaoke-view";
 
 const ACCENT = "#1ed760";
 const GOLD = "#e6b422";
@@ -20,6 +22,17 @@ export interface MicInfo {
   label: string; // e.g. "🎤" or a player name
   sensitivity: number; // 0..100
   active: boolean;
+}
+
+/**
+ * One player's setup slot: display name + which input device feeds them + a
+ * per-mic input gain. In versus every slot sings at once on its own device;
+ * solo is a single slot. deviceId undefined = the system default input.
+ */
+export interface PlayerSlot {
+  name: string;
+  deviceId?: string;
+  gain: number; // input-gain multiplier (1 = unity)
 }
 
 function stars(n: number): string {
@@ -41,9 +54,11 @@ export function SessionSetup(props: {
   onStart: () => void;
   onCancel: () => void;
   micOn: boolean;
-  // Hotseat roster — players take turns on the one mic. onPlayers replaces it.
-  players: string[];
-  onPlayers: (names: string[]) => void;
+  // Versus roster — every player sings at once on their OWN mic. onPlayers replaces it.
+  players: PlayerSlot[];
+  onPlayers: (roster: PlayerSlot[]) => void;
+  /** Available audio input devices for the per-player mic picker. */
+  devices: AudioInput[];
 }) {
   const React = Spicetify.React;
   const {
@@ -58,13 +73,15 @@ export function SessionSetup(props: {
     micOn,
     players,
     onPlayers,
+    devices,
   } = props;
 
-  const MAX_PLAYERS = 6; // hotseat can seat a few; the mic just passes around
-  const setName = (i: number, name: string) =>
-    onPlayers(players.map((p, j) => (j === i ? name : p)));
+  const MAX_PLAYERS = 4; // versus: one lane + colour + mic per singer
+  const update = (i: number, patch: Partial<PlayerSlot>) =>
+    onPlayers(players.map((p, j) => (j === i ? { ...p, ...patch } : p)));
   const addPlayer = () =>
-    players.length < MAX_PLAYERS && onPlayers([...players, `P${players.length + 1}`]);
+    players.length < MAX_PLAYERS &&
+    onPlayers([...players, { name: `P${players.length + 1}`, gain: 1 }]);
   const removePlayer = (i: number) =>
     players.length > 1 && onPlayers(players.filter((_, j) => j !== i));
 
@@ -111,39 +128,103 @@ export function SessionSetup(props: {
           marginTop: 10,
         }}
       >
-        {/* Roster — one player is solo; add singers for hotseat (they share the mic). */}
+        {/* Roster — one slot is solo; add singers for VERSUS (all sing at once,
+            each on their OWN mic). Every slot picks its input device + gain. */}
         <div style={sectionLabel}>
-          Players {players.length > 1 && <span style={{ color: ACCENT }}>· hotseat, take turns</span>}
+          Players{" "}
+          {players.length > 1 && (
+            <span style={{ color: ACCENT }}>· versus — everyone sings at once</span>
+          )}
         </div>
-        <div style={{ display: "flex", flexWrap: "wrap", gap: 8, alignItems: "center" }}>
-          {players.map((name, i) => (
+        <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+          {players.map((p, i) => (
             <div
               key={i}
               style={{
                 display: "flex",
                 alignItems: "center",
-                gap: 4,
-                padding: "4px 6px 4px 10px",
+                gap: 10,
+                padding: "8px 10px",
                 borderRadius: 10,
                 background: "rgba(255,255,255,0.05)",
                 border: "1px solid rgba(255,255,255,0.1)",
               }}
             >
-              <span style={{ color: ACCENT, fontWeight: 800, fontSize: 13 }}>{i + 1}</span>
+              <span
+                style={{
+                  color: PLAYER_COLORS[i % PLAYER_COLORS.length],
+                  fontWeight: 800,
+                  fontSize: 16,
+                }}
+              >
+                ●
+              </span>
               <input
-                value={name}
-                onChange={(e) => setName(i, (e.target as HTMLInputElement).value)}
+                value={p.name}
+                onChange={(e) => update(i, { name: (e.target as HTMLInputElement).value })}
                 maxLength={16}
                 style={{
-                  width: 96,
+                  width: 88,
                   background: "transparent",
                   border: "none",
+                  borderBottom: "1px solid rgba(255,255,255,0.15)",
                   color: "#fff",
                   fontSize: 15,
                   fontWeight: 600,
                   outline: "none",
                 }}
               />
+              <select
+                value={p.deviceId ?? ""}
+                onChange={(e) =>
+                  update(i, { deviceId: (e.target as HTMLSelectElement).value || undefined })
+                }
+                style={{
+                  flex: "1 1 auto",
+                  minWidth: 0,
+                  maxWidth: 190,
+                  background: "rgba(0,0,0,0.3)",
+                  border: "1px solid rgba(255,255,255,0.12)",
+                  borderRadius: 8,
+                  color: "#fff",
+                  fontSize: 13,
+                  padding: "5px 8px",
+                }}
+              >
+                <option value="">Default mic</option>
+                {devices.map((d) => (
+                  <option key={d.deviceId} value={d.deviceId}>
+                    {d.label}
+                  </option>
+                ))}
+              </select>
+              <div
+                style={{ display: "flex", alignItems: "center", gap: 6, flexShrink: 0 }}
+                title="Input gain — balance a hot mic against a quiet one"
+              >
+                <span style={{ fontSize: 12, color: "rgba(255,255,255,0.4)" }}>gain</span>
+                <input
+                  type="range"
+                  min={25}
+                  max={300}
+                  value={Math.round(p.gain * 100)}
+                  onChange={(e) =>
+                    update(i, { gain: Number((e.target as HTMLInputElement).value) / 100 })
+                  }
+                  style={{ width: 76 }}
+                />
+                <span
+                  style={{
+                    fontSize: 12,
+                    color: "rgba(255,255,255,0.55)",
+                    width: 36,
+                    textAlign: "right",
+                    fontVariantNumeric: "tabular-nums",
+                  }}
+                >
+                  {Math.round(p.gain * 100)}%
+                </span>
+              </div>
               {players.length > 1 && (
                 <button
                   onClick={() => removePlayer(i)}
@@ -153,9 +234,10 @@ export function SessionSetup(props: {
                     background: "transparent",
                     color: "rgba(255,255,255,0.5)",
                     cursor: "pointer",
-                    fontSize: 16,
+                    fontSize: 18,
                     lineHeight: 1,
                     padding: "0 2px",
+                    flexShrink: 0,
                   }}
                 >
                   ×
@@ -163,23 +245,30 @@ export function SessionSetup(props: {
               )}
             </div>
           ))}
-          {players.length < MAX_PLAYERS && (
-            <button
-              onClick={addPlayer}
-              style={{
-                padding: "8px 12px",
-                borderRadius: 10,
-                border: "1px dashed rgba(255,255,255,0.2)",
-                background: "transparent",
-                color: "rgba(255,255,255,0.7)",
-                cursor: "pointer",
-                fontSize: 14,
-                fontWeight: 700,
-              }}
-            >
-              + Add singer
-            </button>
-          )}
+          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+            {players.length < MAX_PLAYERS && (
+              <button
+                onClick={addPlayer}
+                style={{
+                  padding: "8px 12px",
+                  borderRadius: 10,
+                  border: "1px dashed rgba(255,255,255,0.2)",
+                  background: "transparent",
+                  color: "rgba(255,255,255,0.7)",
+                  cursor: "pointer",
+                  fontSize: 14,
+                  fontWeight: 700,
+                }}
+              >
+                + Add singer
+              </button>
+            )}
+            {devices.length === 0 && (
+              <span style={{ fontSize: 12, color: "rgba(255,255,255,0.4)" }}>
+                Grant mic access to see device names.
+              </span>
+            )}
+          </div>
         </div>
 
         {current && (
@@ -450,13 +539,13 @@ export function RoundEnd(props: {
   onContinue: () => void;
   /** Next track in a playlist session, shown as "Up next" (null = free play). */
   upNext?: SessionTrack | null;
-  /** Who sings the next round (hotseat); null when solo. */
-  nextSinger?: string | null;
 }) {
   const React = Spicetify.React;
-  const { justFinished, roundNumber, target, sessionTotal, onContinue, upNext, nextSinger } =
-    props;
-  const s = justFinished.scores[0];
+  const { justFinished, roundNumber, target, sessionTotal, onContinue, upNext } = props;
+  const scores = justFinished.scores;
+  const versus = scores.length > 1;
+  const ranked = [...scores].sort((a, b) => b.total - a.total);
+  const solo = scores[0];
   const last = roundNumber >= target;
   return (
     <Center>
@@ -464,37 +553,75 @@ export function RoundEnd(props: {
         Round {roundNumber} of {target} done
       </div>
       <div style={{ fontSize: 30, fontWeight: 800 }}>{justFinished.title}</div>
-      {/* In hotseat, name who just sang this round. */}
-      {s.player && s.player !== "You" && (
-        <div style={{ fontSize: 16, color: "rgba(255,255,255,0.65)" }}>
-          🎤 sung by <span style={{ color: "#fff", fontWeight: 700 }}>{s.player}</span>
+
+      {versus ? (
+        /* Every singer's score for this round, round-winner first + crowned. */
+        <div
+          style={{
+            display: "flex",
+            gap: 12,
+            flexWrap: "wrap",
+            justifyContent: "center",
+            marginTop: 4,
+          }}
+        >
+          {ranked.map((s, i) => (
+            <div
+              key={s.player}
+              style={{
+                display: "flex",
+                flexDirection: "column",
+                alignItems: "center",
+                gap: 2,
+                minWidth: 128,
+                padding: "12px 16px",
+                borderRadius: 12,
+                border: `1px solid ${i === 0 ? GOLD : "rgba(255,255,255,0.1)"}`,
+                background: i === 0 ? `${GOLD}14` : "rgba(255,255,255,0.03)",
+              }}
+            >
+              <div style={{ fontSize: 15, fontWeight: 700, color: "rgba(255,255,255,0.7)" }}>
+                {i === 0 ? "👑 " : ""}
+                {s.player}
+              </div>
+              <div
+                style={{
+                  fontSize: 40,
+                  fontWeight: 800,
+                  color: i === 0 ? GOLD : ACCENT,
+                  fontVariantNumeric: "tabular-nums",
+                }}
+              >
+                {s.total.toLocaleString()}
+              </div>
+              <div style={{ fontSize: 15, color: GOLD }}>{stars(s.grade.stars)}</div>
+            </div>
+          ))}
         </div>
+      ) : (
+        <>
+          <div style={{ fontSize: 22, color: GOLD }}>{stars(solo.grade.stars)}</div>
+          <div
+            style={{ fontSize: 56, fontWeight: 800, color: ACCENT, fontVariantNumeric: "tabular-nums" }}
+          >
+            {solo.total.toLocaleString()}
+          </div>
+        </>
       )}
-      <div style={{ fontSize: 22, color: GOLD }}>{stars(s.grade.stars)}</div>
-      <div
-        style={{ fontSize: 56, fontWeight: 800, color: ACCENT, fontVariantNumeric: "tabular-nums" }}
-      >
-        {s.total.toLocaleString()}
-      </div>
-      <div style={{ fontSize: 16, color: "rgba(255,255,255,0.6)" }}>
+
+      <div style={{ fontSize: 16, color: "rgba(255,255,255,0.6)", marginTop: versus ? 4 : 0 }}>
         Session total {sessionTotal.toLocaleString()}
       </div>
-      {!last && (upNext || nextSinger) && (
+      {!last && upNext && (
         <div style={{ fontSize: 15, color: "rgba(255,255,255,0.5)", marginTop: 4 }}>
           Up next:{" "}
-          {nextSinger && (
-            <span style={{ color: ACCENT, fontWeight: 700 }}>🎤 {nextSinger}'s turn</span>
-          )}
-          {upNext && (
-            <span style={{ color: "#fff", fontWeight: 600 }}>
-              {nextSinger ? " · " : ""}
-              {upNext.artist} — {upNext.title}
-            </span>
-          )}
+          <span style={{ color: "#fff", fontWeight: 600 }}>
+            {upNext.artist} — {upNext.title}
+          </span>
         </div>
       )}
       <button style={{ ...primaryBtn(React), marginTop: 16 }} onClick={onContinue}>
-        {last ? "See the results ▶" : nextSinger ? `${nextSinger}, you're up ▶` : upNext ? "Next song ▶" : "Next — play another song ▶"}
+        {last ? "See the results ▶" : upNext ? "Next song ▶" : "Next — play another song ▶"}
       </button>
     </Center>
   );
@@ -600,30 +727,58 @@ export function SessionResultScreen(props: {
           <tr>
             <th style={head}>#</th>
             <th style={{ ...head, textAlign: "left" }}>Song</th>
-            {multiplayer && <th style={{ ...head, textAlign: "left" }}>Singer</th>}
-            <th style={head}>Grade</th>
-            <th style={{ ...head, textAlign: "right" }}>Score</th>
+            {multiplayer ? (
+              summary.players.map((p) => (
+                <th key={p.player} style={{ ...head, textAlign: "right" }}>
+                  {p.player}
+                </th>
+              ))
+            ) : (
+              <>
+                <th style={head}>Grade</th>
+                <th style={{ ...head, textAlign: "right" }}>Score</th>
+              </>
+            )}
           </tr>
         </thead>
         <tbody>
           {summary.rounds.map((r, i) => {
-            const sc = r.scores[0];
             const best = summary.bestRound?.title === r.title;
+            // Highlight the per-round winner (only meaningful when >1 sang it).
+            const roundWinner = [...r.scores].sort((a, b) => b.total - a.total)[0]?.player;
             return (
               <tr key={i} style={{ background: best ? `${GOLD}18` : "transparent" }}>
                 <td style={{ ...cell, color: "rgba(255,255,255,0.5)" }}>{i + 1}</td>
                 <td style={{ ...cell, textAlign: "left", fontWeight: 700 }}>
                   {r.title} {best && <span style={{ color: GOLD }}>★ best</span>}
                 </td>
-                {multiplayer && (
-                  <td style={{ ...cell, textAlign: "left", color: ACCENT, fontWeight: 700 }}>
-                    {sc.player}
-                  </td>
+                {multiplayer ? (
+                  summary.players.map((p) => {
+                    const sc = r.scores.find((x) => x.player === p.player);
+                    const win = !!sc && p.player === roundWinner && r.scores.length > 1;
+                    return (
+                      <td
+                        key={p.player}
+                        style={{
+                          ...cell,
+                          textAlign: "right",
+                          fontVariantNumeric: "tabular-nums",
+                          color: win ? GOLD : "#fff",
+                          fontWeight: win ? 800 : 500,
+                        }}
+                      >
+                        {sc ? sc.total.toLocaleString() : "—"}
+                      </td>
+                    );
+                  })
+                ) : (
+                  <>
+                    <td style={{ ...cell, color: GOLD }}>{stars(r.scores[0].grade.stars)}</td>
+                    <td style={{ ...cell, textAlign: "right", fontVariantNumeric: "tabular-nums" }}>
+                      {r.scores[0].total.toLocaleString()}
+                    </td>
+                  </>
                 )}
-                <td style={{ ...cell, color: GOLD }}>{stars(sc.grade.stars)}</td>
-                <td style={{ ...cell, textAlign: "right", fontVariantNumeric: "tabular-nums" }}>
-                  {sc.total.toLocaleString()}
-                </td>
               </tr>
             );
           })}

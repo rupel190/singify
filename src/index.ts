@@ -27,6 +27,7 @@ import {
   SessionResultScreen,
   NoChartInSession,
   type MicInfo,
+  type PlayerSlot,
 } from "./session-view";
 import {
   createSession,
@@ -34,8 +35,6 @@ import {
   recordRound,
   roundFromScores,
   isComplete,
-  isMultiplayer,
-  activePlayer,
   upNext,
   summarize,
   type Session,
@@ -48,7 +47,7 @@ import {
   currentContextPlaylist,
   type PlaylistRef,
 } from "./playlist-source";
-import { startMicPitch, type MicPitch } from "./mic";
+import { startMicPitch, enumerateInputs, type MicPitch, type AudioInput } from "./mic";
 import { resolveForTrack, confirmPick } from "./resolver-client";
 import { sensitivityToThreshold } from "./pitch";
 import { parse, type ParsedSong } from "./ultrastar-parser";
@@ -217,42 +216,68 @@ function punchSync(): void {
 
 // ── Mic pitch ────────────────────────────────────────────────────────────────
 //
-// M toggles the mic. read() is polled by <KaraokeView> each frame via
-// getLivePitchMidi; all the analysis is the pure detectPitch().
+// M toggles the mics. Each player's read() is polled by <KaraokeView> every
+// frame via its own getPitchMidi; all the analysis is the pure detectPitch().
 
-async function toggleMic(): Promise<void> {
-  if (micPitch) {
-    micPitch.stop();
-    micPitch = null;
-    Spicetify.showNotification?.("Mic off");
-    if (visible) renderOverlay(); // drop scoring/HUD
-    return;
-  }
-  try {
-    micPitch = await startMicPitch({
-      rmsThreshold: sensitivityToThreshold(sensitivity),
-    });
-    Spicetify.showNotification?.("🎤 Mic on");
-    if (visible) renderOverlay(); // start a fresh scored attempt
-  } catch (err) {
-    Spicetify.showNotification?.("Mic access denied", true);
-    console.error("[singify] mic failed:", err);
-  }
+/** The roster whose mics we run: a versus session's players, or a lone "You". */
+function activeRoster(): PlayerSlot[] {
+  return session ? sessionRoster : [{ name: "You", gain: 1 }];
 }
 
-function getLivePitchMidi(): number | null {
-  return micPitch?.read()?.midi ?? null;
+/** Start one mic per player in the active roster — each on its own device. */
+async function startMics(): Promise<void> {
+  const roster = activeRoster();
+  const slots: MicSlot[] = [];
+  for (const p of roster) {
+    try {
+      const pitch = await startMicPitch({
+        deviceId: p.deviceId,
+        gain: p.gain,
+        rmsThreshold: sensitivityToThreshold(sensitivity),
+      });
+      slots.push({ name: p.name, gain: p.gain, pitch });
+    } catch (err) {
+      // One player's device failing shouldn't sink the others.
+      console.error(`[singify] mic for ${p.name} failed:`, err);
+      Spicetify.showNotification?.(`Mic unavailable for ${p.name}`, true);
+    }
+  }
+  mics = slots;
+  if (mics.length === 0) Spicetify.showNotification?.("Mic access denied", true);
+  else Spicetify.showNotification?.(mics.length > 1 ? `🎤 ${mics.length} mics on` : "🎤 Mic on");
+  if (visible) renderOverlay(); // start a fresh scored attempt
+}
+
+/** Stop every mic and drop scoring/HUD. `quiet` suppresses the toast (restart). */
+function stopMics(quiet = false): void {
+  for (const m of mics) m.pitch.stop();
+  mics = [];
+  if (!quiet) Spicetify.showNotification?.("Mic off");
+  if (visible) renderOverlay();
+}
+
+/** M hotkey: toggle all mics for the active roster. */
+async function toggleMics(): Promise<void> {
+  if (mics.length) stopMics();
+  else await startMics();
+}
+
+function micsActive(): boolean {
+  return mics.length > 0;
 }
 
 /**
- * The active singers handed to KaraokeView — one entry per live mic. Today
- * there's a single mic: in a session it's whoever's turn it is (hotseat), else
- * "You" (Quick Sing). Versus (two mics) will return two entries here.
+ * The active singers handed to KaraokeView — one entry per LIVE mic. Solo has
+ * one; a versus session has one per player, each reading its own device. The
+ * marker/HUD colour is by slot index, matching the setup-screen dots.
  */
 function activePlayers(): PlayerInput[] {
-  if (!micPitch) return [];
-  const name = session ? activePlayer(session) : "You";
-  return [{ id: "mic0", name, color: PLAYER_COLORS[0], getPitchMidi: getLivePitchMidi }];
+  return mics.map((m, i) => ({
+    id: `mic${i}`,
+    name: m.name,
+    color: PLAYER_COLORS[i % PLAYER_COLORS.length],
+    getPitchMidi: () => m.pitch.read()?.midi ?? null,
+  }));
 }
 
 /** "Sing again" from the result screen — restart the track from the top. */
@@ -286,7 +311,7 @@ function setSensitivity(next: number): void {
   } catch {
     /* storage blocked — keep the in-memory value */
   }
-  micPitch?.setOptions({ rmsThreshold: sensitivityToThreshold(sensitivity) });
+  for (const m of mics) m.pitch.setOptions({ rmsThreshold: sensitivityToThreshold(sensitivity) });
   showReadout(`🎤 Sensitivity ${sensitivity}%`);
 }
 
@@ -343,7 +368,13 @@ let activeScreen: Screen = "sing";
 // choice on the setup screen; lastRound + scoredTrackIds track round bookkeeping.
 let session: Session | null = null;
 let setupRounds = 5;
-let setupPlayers: string[] = ["You"]; // hotseat roster chosen on the setup screen
+// Versus roster chosen on the setup screen: each player + their mic device + gain.
+let setupRoster: PlayerSlot[] = [{ name: "You", gain: 1 }];
+// Snapshot of the roster taken when a session starts (the setup screen can keep
+// changing after). Solo/Quick-Sing uses a lone default-device "You".
+let sessionRoster: PlayerSlot[] = [{ name: "You", gain: 1 }];
+// Audio input devices for the setup mic picker (populated when it opens).
+let audioInputs: AudioInput[] = [];
 let lastRound: RoundResult | null = null;
 let scoredTrackIds = new Set<string>(); // one round per distinct track per session
 // Playlist picker on the setup screen: the user's playlists + load state.
@@ -364,7 +395,15 @@ let pickerCandidates: USDBSong[] | null = null;
 let pickPending: number | null = null;
 let pickError: string | null = null;
 
-let micPitch: MicPitch | null = null;
+// One live mic per active player (versus). Empty = mic off. Solo/Quick-Sing has
+// exactly one. `mics` is not a Window global (unlike `screen`), so it's safe at
+// module scope; see the activeScreen note above for why that matters.
+interface MicSlot {
+  name: string;
+  gain: number;
+  pitch: MicPitch;
+}
+let mics: MicSlot[] = [];
 
 function ensureOverlay(): HTMLDivElement {
   if (overlay) return overlay;
@@ -427,17 +466,18 @@ function renderOverlay(): void {
           setupRounds = n;
           renderOverlay();
         },
-        players: setupPlayers,
-        onPlayers: (names: string[]) => {
-          setupPlayers = names.length ? names : ["You"];
+        players: setupRoster,
+        onPlayers: (roster: PlayerSlot[]) => {
+          setupRoster = roster.length ? roster : [{ name: "You", gain: 1 }];
           renderOverlay();
         },
+        devices: audioInputs,
         onStart: startSession,
         onCancel: () => {
           activeScreen = "home";
           renderOverlay();
         },
-        micOn: micPitch != null,
+        micOn: micsActive(),
       })
     );
     return;
@@ -452,7 +492,6 @@ function renderOverlay(): void {
         sessionTotal: sessionTotal(),
         onContinue: continueSession,
         upNext: upNext(session),
-        nextSinger: isMultiplayer(session) ? activePlayer(session) : null,
       })
     );
     return;
@@ -476,7 +515,7 @@ function renderOverlay(): void {
     ? React.createElement(KaraokeView, {
         song: currentSong,
         getPositionMs: getCurrentMs,
-        players: activePlayers(), // one mic today; two when versus lands
+        players: activePlayers(), // one entry per live mic — N in a versus session
         onReplay,
         onComplete: session ? onRoundComplete : undefined, // sessions record + advance
         fullscreen: true,
@@ -514,9 +553,9 @@ function renderOverlay(): void {
           );
 
   if (session) {
-    const mics: MicInfo[] = [
-      { label: "🎤", sensitivity, active: micPitch != null },
-    ];
+    const micInfos: MicInfo[] = mics.length
+      ? mics.map((m) => ({ label: mics.length > 1 ? m.name : "🎤", sensitivity, active: true }))
+      : [{ label: "🎤", sensitivity, active: false }];
     root.render(
       React.createElement(
         "div",
@@ -525,11 +564,11 @@ function renderOverlay(): void {
           round: Math.min(session.rounds.length + 1, session.targetRounds),
           target: session.targetRounds,
           sessionTotal: sessionTotal(),
-          mics,
+          mics: micInfos,
           onSkip: skipRound,
           onEnd: endSession,
           sourceName: session.playlistName,
-          currentSinger: isMultiplayer(session) ? activePlayer(session) : null,
+          currentSinger: null,
         }),
         singContent
       )
@@ -576,11 +615,28 @@ function sessionTotal(): number {
     : 0;
 }
 
-/** Open the setup screen and (re)load the user's playlists in the background. */
+/** Open the setup screen and (re)load playlists + input devices in the background. */
 function openSessionSetup(): void {
   activeScreen = "session-setup";
   renderOverlay();
   void loadPlaylists();
+  void loadDevices();
+}
+
+/**
+ * Populate the input-device list for the setup mic picker. Browsers withhold
+ * device labels until one mic grant, so prime a throwaway getUserMedia first —
+ * this also pre-authorises, so starting the session won't re-prompt.
+ */
+async function loadDevices(): Promise<void> {
+  try {
+    const s = await navigator.mediaDevices.getUserMedia({ audio: true });
+    for (const t of s.getTracks()) t.stop();
+  } catch (err) {
+    console.error("[singify] mic permission for device list denied:", err);
+  }
+  audioInputs = await enumerateInputs();
+  if (activeScreen === "session-setup") renderOverlay();
 }
 
 async function loadPlaylists(): Promise<void> {
@@ -596,10 +652,13 @@ async function loadPlaylists(): Promise<void> {
 
 /** Start a fresh FREE-PLAY session: N rounds off whatever's queued. */
 function startSession(): void {
-  session = createSession(setupRounds, setupPlayers);
+  session = createSession(setupRounds, setupRoster.map((p) => p.name));
+  sessionRoster = setupRoster.map((p) => ({ ...p }));
   scoredTrackIds = new Set();
   lastRound = null;
-  if (!micPitch) void toggleMic(); // a scored session needs the mic
+  // A scored session needs a mic per player; (re)bind to the roster's devices.
+  if (micsActive()) stopMics(true);
+  void startMics();
   activeScreen = "sing";
   renderOverlay();
 }
@@ -616,10 +675,12 @@ async function startPlaylistSession(ref: PlaylistRef): Promise<void> {
     Spicetify.showNotification?.(`“${ref.name}” has no playable tracks`, true);
     return;
   }
-  session = createSessionFromPlaylist(ref.name, tracks, setupPlayers);
+  session = createSessionFromPlaylist(ref.name, tracks, setupRoster.map((p) => p.name));
+  sessionRoster = setupRoster.map((p) => ({ ...p }));
   scoredTrackIds = new Set();
   lastRound = null;
-  if (!micPitch) void toggleMic(); // a scored session needs the mic
+  if (micsActive()) stopMics(true);
+  void startMics();
   activeScreen = "sing";
   renderOverlay();
   // Kick Spotify into the playlist from track 1; songchange re-renders with the
@@ -900,7 +961,7 @@ async function main(): Promise<void> {
     } else if (e.key === "\\") {
       setOffset(0); // reset sync
     } else if (e.key === "m" || e.key === "M") {
-      void toggleMic();
+      void toggleMics();
     } else if (e.key === "l" || e.key === "L") {
       loadLocalChart(); // pick an UltraStar .txt (no USDB needed)
     } else if (e.key === "p" || e.key === "P") {

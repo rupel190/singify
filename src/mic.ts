@@ -29,6 +29,8 @@ export interface MicPitch {
   level(): number;
   /** Live-adjust detection thresholds (e.g. rmsThreshold for mic sensitivity). */
   setOptions(opts: LiveDetectOptions): void;
+  /** Live-adjust input gain — a per-mic "level" knob (see MicPitchOptions.gain). */
+  setGain(gain: number): void;
   /**
    * What the browser ACTUALLY applied for the three DSP stages — which can
    * differ from what we requested (the constraints are advisory). Any of these
@@ -58,6 +60,20 @@ export interface MicPitchOptions extends Omit<DetectOptions, "sampleRate"> {
   noiseSuppression?: boolean;
   /** Auto gain control (default false) — pumps the level, smears pitch. */
   autoGainControl?: boolean;
+  /**
+   * Capture from a specific input device (a deviceId from enumerateInputs());
+   * omitted = the system default mic. The per-player selector for multi-mic —
+   * each singer's own device.
+   */
+  deviceId?: string;
+  /**
+   * Initial input gain multiplier applied BEFORE analysis (default 1). A per-mic
+   * "level" knob: pitch detection is amplitude-normalised, so gain doesn't change
+   * the detected note — it scales where the signal sits relative to the energy
+   * gate. Turn a hot mic down / a quiet one up so both singers balance into one
+   * sensitivity setting.
+   */
+  gain?: number;
 }
 
 export async function startMicPitch(opts: MicPitchOptions = {}): Promise<MicPitch> {
@@ -68,11 +84,18 @@ export async function startMicPitch(opts: MicPitchOptions = {}): Promise<MicPitc
     echoCancellation = false,
     noiseSuppression = false,
     autoGainControl = false,
+    deviceId,
+    gain = 1,
     ...detectOpts
   } = opts;
 
   const stream = await navigator.mediaDevices.getUserMedia({
-    audio: { echoCancellation, noiseSuppression, autoGainControl },
+    audio: {
+      ...(deviceId ? { deviceId: { exact: deviceId } } : {}),
+      echoCancellation,
+      noiseSuppression,
+      autoGainControl,
+    },
   });
 
   // Read back what the browser actually granted — constraints are advisory, so
@@ -87,11 +110,14 @@ export async function startMicPitch(opts: MicPitchOptions = {}): Promise<MicPitc
 
   const ctx = new AudioContext();
   const source = ctx.createMediaStreamSource(stream);
+  const gainNode = ctx.createGain();
+  gainNode.gain.value = Math.max(0, gain);
   const analyser = ctx.createAnalyser();
   analyser.fftSize = fftSize;
-  // source → analyser ONLY. Never connect to ctx.destination, or the mic loops
-  // back out the speakers.
-  source.connect(analyser);
+  // source → gain → analyser ONLY. Never connect to ctx.destination, or the mic
+  // loops back out the speakers.
+  source.connect(gainNode);
+  gainNode.connect(analyser);
 
   const buf = new Float32Array(analyser.fftSize);
   let stopped = false;
@@ -114,12 +140,44 @@ export async function startMicPitch(opts: MicPitchOptions = {}): Promise<MicPitc
     setOptions(opts: LiveDetectOptions) {
       liveOpts = { ...liveOpts, ...opts };
     },
+    setGain(g: number) {
+      gainNode.gain.value = Math.max(0, g);
+    },
     stop() {
       if (stopped) return;
       stopped = true;
       source.disconnect();
+      gainNode.disconnect();
       for (const t of stream.getTracks()) t.stop();
       void ctx.close();
     },
   };
+}
+
+/** One selectable audio input, for a per-player mic picker. */
+export interface AudioInput {
+  deviceId: string;
+  label: string;
+}
+
+/**
+ * List available audio input devices for the per-player mic picker. Browsers
+ * withhold device LABELS until the page has been granted mic access at least
+ * once (a privacy rule), so call this AFTER a first startMicPitch()/getUserMedia
+ * or expect blank labels — hence the "Microphone N" fallback. Duplicate/virtual
+ * entries (e.g. "default", "communications") are left in; the caller can dedupe.
+ * Returns [] when the API is unavailable (old client / no permission).
+ */
+export async function enumerateInputs(): Promise<AudioInput[]> {
+  const md = navigator.mediaDevices;
+  if (!md?.enumerateDevices) return [];
+  try {
+    const devices = await md.enumerateDevices();
+    return devices
+      .filter((d) => d.kind === "audioinput")
+      .map((d, i) => ({ deviceId: d.deviceId, label: d.label || `Microphone ${i + 1}` }));
+  } catch (err) {
+    console.error("[singify] enumerateInputs failed:", err);
+    return [];
+  }
 }
