@@ -13,15 +13,15 @@ import type { RoundResult, SessionSummary, SessionTrack } from "./session";
 import type { PlaylistRef } from "./playlist-source";
 import type { AudioInput } from "./mic";
 import { PLAYER_COLORS } from "./karaoke-view";
+import { MicMeter } from "./mic-meter";
 
 const ACCENT = "#1ed760";
 const GOLD = "#e6b422";
 
-/** One microphone's live state — a list so multi-mic slots in later. */
-export interface MicInfo {
-  label: string; // e.g. "🎤" or a player name
-  sensitivity: number; // 0..100
-  active: boolean;
+/** One live mic for the in-game HUD meter: its display name + a level getter. */
+export interface HudMic {
+  name: string;
+  getLevel: () => number; // current post-gain RMS (0..~0.4)
 }
 
 /**
@@ -54,11 +54,20 @@ export function SessionSetup(props: {
   onStart: () => void;
   onCancel: () => void;
   micOn: boolean;
-  // Versus roster — every player sings at once on their OWN mic. onPlayers replaces it.
+  // Versus roster — every player sings at once on their OWN mic.
   players: PlayerSlot[];
-  onPlayers: (roster: PlayerSlot[]) => void;
+  onName: (i: number, name: string) => void;
+  onDevice: (i: number, deviceId: string | undefined) => void;
+  onGain: (i: number, gain: number) => void;
+  onAddPlayer: () => void;
+  onRemovePlayer: (i: number) => void;
   /** Available audio input devices for the per-player mic picker. */
   devices: AudioInput[];
+  /** Live input level (0..~0.4) for player i's preview mic — drives the meter. */
+  levelFor: (i: number) => number;
+  /** Shared detection gate as 0..100 sensitivity, drawn on every meter. */
+  sensitivity: number;
+  onSensitivity: (n: number) => void;
 }) {
   const React = Spicetify.React;
   const {
@@ -72,18 +81,18 @@ export function SessionSetup(props: {
     onCancel,
     micOn,
     players,
-    onPlayers,
+    onName,
+    onDevice,
+    onGain,
+    onAddPlayer,
+    onRemovePlayer,
     devices,
+    levelFor,
+    sensitivity,
+    onSensitivity,
   } = props;
 
   const MAX_PLAYERS = 4; // versus: one lane + colour + mic per singer
-  const update = (i: number, patch: Partial<PlayerSlot>) =>
-    onPlayers(players.map((p, j) => (j === i ? { ...p, ...patch } : p)));
-  const addPlayer = () =>
-    players.length < MAX_PLAYERS &&
-    onPlayers([...players, { name: `P${players.length + 1}`, gain: 1 }]);
-  const removePlayer = (i: number) =>
-    players.length > 1 && onPlayers(players.filter((_, j) => j !== i));
 
   const chip = (n: number): React.CSSProperties => ({
     padding: "8px 16px",
@@ -142,113 +151,126 @@ export function SessionSetup(props: {
               key={i}
               style={{
                 display: "flex",
-                alignItems: "center",
-                gap: 10,
-                padding: "8px 10px",
+                flexDirection: "column",
+                gap: 8,
+                padding: "10px 12px",
                 borderRadius: 10,
                 background: "rgba(255,255,255,0.05)",
                 border: "1px solid rgba(255,255,255,0.1)",
               }}
             >
-              <span
-                style={{
-                  color: PLAYER_COLORS[i % PLAYER_COLORS.length],
-                  fontWeight: 800,
-                  fontSize: 16,
-                }}
-              >
-                ●
-              </span>
-              <input
-                value={p.name}
-                onChange={(e) => update(i, { name: (e.target as HTMLInputElement).value })}
-                maxLength={16}
-                style={{
-                  width: 88,
-                  background: "transparent",
-                  border: "none",
-                  borderBottom: "1px solid rgba(255,255,255,0.15)",
-                  color: "#fff",
-                  fontSize: 15,
-                  fontWeight: 600,
-                  outline: "none",
-                }}
-              />
-              <select
-                value={p.deviceId ?? ""}
-                onChange={(e) =>
-                  update(i, { deviceId: (e.target as HTMLSelectElement).value || undefined })
-                }
-                style={{
-                  flex: "1 1 auto",
-                  minWidth: 0,
-                  maxWidth: 190,
-                  background: "rgba(0,0,0,0.3)",
-                  border: "1px solid rgba(255,255,255,0.12)",
-                  borderRadius: 8,
-                  color: "#fff",
-                  fontSize: 13,
-                  padding: "5px 8px",
-                }}
-              >
-                <option value="">Default mic</option>
-                {devices.map((d) => (
-                  <option key={d.deviceId} value={d.deviceId}>
-                    {d.label}
-                  </option>
-                ))}
-              </select>
-              <div
-                style={{ display: "flex", alignItems: "center", gap: 6, flexShrink: 0 }}
-                title="Input gain — balance a hot mic against a quiet one"
-              >
-                <span style={{ fontSize: 12, color: "rgba(255,255,255,0.4)" }}>gain</span>
-                <input
-                  type="range"
-                  min={25}
-                  max={300}
-                  value={Math.round(p.gain * 100)}
-                  onChange={(e) =>
-                    update(i, { gain: Number((e.target as HTMLInputElement).value) / 100 })
-                  }
-                  style={{ width: 76 }}
-                />
+              {/* line 1: colour dot · name · device · remove */}
+              <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
                 <span
                   style={{
-                    fontSize: 12,
-                    color: "rgba(255,255,255,0.55)",
-                    width: 36,
-                    textAlign: "right",
-                    fontVariantNumeric: "tabular-nums",
+                    color: PLAYER_COLORS[i % PLAYER_COLORS.length],
+                    fontWeight: 800,
+                    fontSize: 16,
                   }}
                 >
-                  {Math.round(p.gain * 100)}%
+                  ●
                 </span>
-              </div>
-              {players.length > 1 && (
-                <button
-                  onClick={() => removePlayer(i)}
-                  title="Remove"
+                <input
+                  value={p.name}
+                  onChange={(e) => onName(i, (e.target as HTMLInputElement).value)}
+                  maxLength={16}
                   style={{
-                    border: "none",
+                    width: 96,
                     background: "transparent",
-                    color: "rgba(255,255,255,0.5)",
-                    cursor: "pointer",
-                    fontSize: 18,
-                    lineHeight: 1,
-                    padding: "0 2px",
-                    flexShrink: 0,
+                    border: "none",
+                    borderBottom: "1px solid rgba(255,255,255,0.15)",
+                    color: "#fff",
+                    fontSize: 15,
+                    fontWeight: 600,
+                    outline: "none",
+                  }}
+                />
+                <select
+                  value={p.deviceId ?? ""}
+                  onChange={(e) =>
+                    onDevice(i, (e.target as HTMLSelectElement).value || undefined)
+                  }
+                  style={{
+                    flex: "1 1 auto",
+                    minWidth: 0,
+                    background: "rgba(0,0,0,0.3)",
+                    border: "1px solid rgba(255,255,255,0.12)",
+                    borderRadius: 8,
+                    color: "#fff",
+                    fontSize: 13,
+                    padding: "5px 8px",
                   }}
                 >
-                  ×
-                </button>
-              )}
+                  <option value="">Default mic</option>
+                  {devices.map((d) => (
+                    <option key={d.deviceId} value={d.deviceId}>
+                      {d.label}
+                    </option>
+                  ))}
+                </select>
+                {players.length > 1 && (
+                  <button
+                    onClick={() => onRemovePlayer(i)}
+                    title="Remove"
+                    style={{
+                      border: "none",
+                      background: "transparent",
+                      color: "rgba(255,255,255,0.5)",
+                      cursor: "pointer",
+                      fontSize: 18,
+                      lineHeight: 1,
+                      padding: "0 2px",
+                      flexShrink: 0,
+                    }}
+                  >
+                    ×
+                  </button>
+                )}
+              </div>
+
+              {/* line 2: live level meter (drag the gate) · input gain */}
+              <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+                <div style={{ flex: "1 1 auto", minWidth: 0 }}>
+                  <MicMeter
+                    getLevel={() => levelFor(i)}
+                    sensitivity={sensitivity}
+                    onSensitivity={onSensitivity}
+                    color={PLAYER_COLORS[i % PLAYER_COLORS.length]}
+                    height={14}
+                  />
+                </div>
+                <div
+                  style={{ display: "flex", alignItems: "center", gap: 6, flexShrink: 0 }}
+                  title="Input gain — moves this mic's level against the shared gate"
+                >
+                  <span style={{ fontSize: 12, color: "rgba(255,255,255,0.4)" }}>gain</span>
+                  <input
+                    type="range"
+                    min={25}
+                    max={300}
+                    value={Math.round(p.gain * 100)}
+                    onChange={(e) => onGain(i, Number((e.target as HTMLInputElement).value) / 100)}
+                    style={{ width: 84 }}
+                  />
+                  <span
+                    style={{
+                      fontSize: 12,
+                      color: "rgba(255,255,255,0.55)",
+                      width: 36,
+                      textAlign: "right",
+                      fontVariantNumeric: "tabular-nums",
+                    }}
+                  >
+                    {Math.round(p.gain * 100)}%
+                  </span>
+                </div>
+              </div>
             </div>
           ))}
           <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
             {players.length < MAX_PLAYERS && (
               <button
-                onClick={addPlayer}
+                onClick={onAddPlayer}
                 style={{
                   padding: "8px 12px",
                   borderRadius: 10,
@@ -385,16 +407,18 @@ export function SessionHud(props: {
   round: number;
   target: number;
   sessionTotal: number;
-  mics: MicInfo[];
+  /** Live mics — each gets a level+gate meter in the HUD. */
+  mics: HudMic[];
+  /** Shared detection gate as 0..100 sensitivity, drawn on every meter. */
+  sensitivity: number;
+  onSensitivity: (n: number) => void;
   onSkip: () => void;
   onEnd: () => void;
   /** Source playlist name, shown when the session is playlist-sourced. */
   sourceName?: string | null;
-  /** Whose turn it is (hotseat), shown when there's more than one player. */
-  currentSinger?: string | null;
 }) {
   const React = Spicetify.React;
-  const { round, target, sessionTotal, mics, onSkip, onEnd, sourceName, currentSinger } =
+  const { round, target, sessionTotal, mics, sensitivity, onSensitivity, onSkip, onEnd, sourceName } =
     props;
   const btn: React.CSSProperties = {
     padding: "5px 12px",
@@ -410,8 +434,8 @@ export function SessionHud(props: {
     <div
       style={{
         position: "absolute",
-        top: 10,
-        left: 12,
+        top: 18,
+        left: 16,
         zIndex: 6,
         display: "flex",
         alignItems: "center",
@@ -448,36 +472,26 @@ export function SessionHud(props: {
       <div style={{ fontSize: 18, fontWeight: 800, fontVariantNumeric: "tabular-nums" }}>
         {sessionTotal.toLocaleString()}
       </div>
-      {currentSinger && (
-        <div
-          style={{
-            fontSize: 14,
-            fontWeight: 800,
-            padding: "4px 10px",
-            borderRadius: 8,
-            color: ACCENT,
-            background: `${ACCENT}1e`,
-          }}
-        >
-          🎤 {currentSinger}'s turn
-        </div>
-      )}
-      <div style={{ display: "flex", gap: 6 }}>
-        {mics.map((m, i) => (
-          <span
-            key={i}
-            style={{
-              fontSize: 13,
-              fontWeight: 700,
-              padding: "3px 8px",
-              borderRadius: 8,
-              color: m.active ? ACCENT : "rgba(255,255,255,0.4)",
-              background: m.active ? `${ACCENT}1e` : "rgba(255,255,255,0.05)",
-            }}
-          >
-            {m.label} {m.active ? `${m.sensitivity}%` : "off"}
+      {/* Per-mic level meters with the shared gate — drag any to tune live. */}
+      <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
+        {mics.length === 0 ? (
+          <span style={{ fontSize: 13, fontWeight: 700, color: "rgba(255,255,255,0.4)" }}>
+            🎤 off
           </span>
-        ))}
+        ) : (
+          mics.map((m, i) => (
+            <div key={i} style={{ width: 132 }}>
+              <MicMeter
+                getLevel={m.getLevel}
+                sensitivity={sensitivity}
+                onSensitivity={onSensitivity}
+                label={mics.length > 1 ? m.name : "🎤"}
+                color={PLAYER_COLORS[i % PLAYER_COLORS.length]}
+                height={12}
+              />
+            </div>
+          ))
+        )}
       </div>
       <button style={btn} onClick={onSkip}>
         Skip

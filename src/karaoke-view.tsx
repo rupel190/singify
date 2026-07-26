@@ -403,7 +403,9 @@ export function KaraokeView(props: KaraokeViewProps) {
         fontFamily:
           "var(--font-family, 'Spotify Circular', system-ui, sans-serif)",
         gap: 12,
-        padding: 16,
+        // Extra headroom up top so the HUD + score readouts don't hug the edge;
+        // it comes out of the note lane (flex:1), which can spare it.
+        padding: fullscreen ? "52px 24px 20px" : 16,
         boxSizing: "border-box",
       }}
     >

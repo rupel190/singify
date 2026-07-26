@@ -166,6 +166,38 @@ export function sensitivityToThreshold(sensitivity: number): number {
   return MAX * (MIN / MAX) ** (s / 100);
 }
 
+/**
+ * Inverse of sensitivityToThreshold: an RMS gate → its 0..100 sensitivity.
+ * Lets a graphical gate handle (dragged in RMS/meter space) report back the
+ * sensitivity value the rest of the app persists and fans out to the mics.
+ */
+export function thresholdToSensitivity(threshold: number): number {
+  const MIN = 0.003;
+  const MAX = 0.05;
+  const t = Math.min(MAX, Math.max(MIN, threshold));
+  return Math.min(100, Math.max(0, 100 * (Math.log(t / MAX) / Math.log(MIN / MAX))));
+}
+
+// The RMS that reads as a "full" meter bar. Singing peaks well below 1.0, so the
+// meter tops out here rather than at unity — keeps the useful range legible.
+const METER_PEAK = 0.35;
+
+/**
+ * Map an RMS level (0..~METER_PEAK) to a 0..1 meter fraction on a perceptual
+ * (square-root) scale. A linear bar crushes the gate + quiet detail into the
+ * bottom few pixels; √ spreads them out. The live level AND the gate marker both
+ * go through this, so the singer literally watches their voice cross the gate.
+ */
+export function rmsToMeter(rms: number): number {
+  return Math.min(1, Math.max(0, Math.sqrt(Math.max(0, rms) / METER_PEAK)));
+}
+
+/** Inverse of rmsToMeter: a 0..1 meter fraction (e.g. a drag position) → RMS. */
+export function meterToRms(frac: number): number {
+  const f = Math.min(1, Math.max(0, frac));
+  return f * f * METER_PEAK;
+}
+
 export interface DetectOptions {
   sampleRate: number;
   /** Lowest frequency to consider (default 70 Hz, ~C#2). */

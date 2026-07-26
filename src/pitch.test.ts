@@ -9,6 +9,9 @@ import {
   foldSmoothHit,
   rms,
   sensitivityToThreshold,
+  thresholdToSensitivity,
+  rmsToMeter,
+  meterToRms,
 } from "./pitch";
 
 const SR = 44100;
@@ -291,4 +294,42 @@ describe("detectPitch stability across frames", () => {
       expect(r.jump).toBeLessThan(0.5); // frame-to-frame wobble under half a semitone
     });
   }
+});
+
+describe("mic meter mappings (sensitivity ↔ threshold, rms ↔ meter)", () => {
+  test("sensitivity → threshold → sensitivity round-trips", () => {
+    for (const s of [0, 15, 40, 60, 85, 100]) {
+      const back = thresholdToSensitivity(sensitivityToThreshold(s));
+      expect(Math.abs(back - s)).toBeLessThan(0.01);
+    }
+  });
+
+  test("sensitivity is inverse-monotone with the gate (higher = lower gate)", () => {
+    expect(sensitivityToThreshold(100)).toBeLessThan(sensitivityToThreshold(0));
+  });
+
+  test("thresholdToSensitivity clamps out-of-range gates to 0..100", () => {
+    expect(thresholdToSensitivity(0)).toBe(100); // below MIN → most sensitive
+    expect(thresholdToSensitivity(999)).toBe(0); // above MAX → least sensitive
+  });
+
+  test("rms → meter → rms round-trips inside the meter's range", () => {
+    for (const rmsVal of [0, 0.003, 0.01, 0.05, 0.2, 0.35]) {
+      const back = meterToRms(rmsToMeter(rmsVal));
+      expect(Math.abs(back - rmsVal)).toBeLessThan(1e-6);
+    }
+  });
+
+  test("meter fraction is monotone and clamped to 0..1", () => {
+    expect(rmsToMeter(0)).toBe(0);
+    expect(rmsToMeter(1)).toBe(1); // above METER_PEAK saturates
+    expect(rmsToMeter(0.05)).toBeGreaterThan(rmsToMeter(0.01));
+  });
+
+  test("the gate sits on the same meter scale as the level (louder-than-gate reads as past it)", () => {
+    // A voice at RMS 0.1 should clear the default-ish gate at sensitivity 60.
+    const gateFrac = rmsToMeter(sensitivityToThreshold(60));
+    const voiceFrac = rmsToMeter(0.1);
+    expect(voiceFrac).toBeGreaterThan(gateFrac);
+  });
 });

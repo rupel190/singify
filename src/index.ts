@@ -26,7 +26,6 @@ import {
   RoundEnd,
   SessionResultScreen,
   NoChartInSession,
-  type MicInfo,
   type PlayerSlot,
 } from "./session-view";
 import {
@@ -311,8 +310,11 @@ function setSensitivity(next: number): void {
   } catch {
     /* storage blocked — keep the in-memory value */
   }
-  for (const m of mics) m.pitch.setOptions({ rmsThreshold: sensitivityToThreshold(sensitivity) });
+  const t = sensitivityToThreshold(sensitivity);
+  for (const m of mics) m.pitch.setOptions({ rmsThreshold: t });
+  for (const m of previewMics) m?.setOptions({ rmsThreshold: t });
   showReadout(`🎤 Sensitivity ${sensitivity}%`);
+  if (visible) renderOverlay(); // move the gate marker on every live meter
 }
 
 // ── Load a local chart (no USDB) ─────────────────────────────────────────────
@@ -404,6 +406,10 @@ interface MicSlot {
   pitch: MicPitch;
 }
 let mics: MicSlot[] = [];
+// Live preview mics on the setup screen — one per roster slot — so you can tune
+// gain + gate against a moving meter BEFORE the session starts. Parallel to
+// setupRoster; stopped when the session begins or the setup screen is left.
+let previewMics: (MicPitch | null)[] = [];
 
 function ensureOverlay(): HTMLDivElement {
   if (overlay) return overlay;
@@ -467,13 +473,40 @@ function renderOverlay(): void {
           renderOverlay();
         },
         players: setupRoster,
-        onPlayers: (roster: PlayerSlot[]) => {
-          setupRoster = roster.length ? roster : [{ name: "You", gain: 1 }];
+        onName: (i: number, name: string) => {
+          setupRoster = setupRoster.map((p, j) => (j === i ? { ...p, name } : p));
+          renderOverlay();
+        },
+        onDevice: (i: number, deviceId: string | undefined) => {
+          setupRoster = setupRoster.map((p, j) => (j === i ? { ...p, deviceId } : p));
+          void startPreviewMic(i); // rebind this slot's preview to the new device
+          renderOverlay();
+        },
+        onGain: (i: number, gain: number) => {
+          setupRoster = setupRoster.map((p, j) => (j === i ? { ...p, gain } : p));
+          previewMics[i]?.setGain(gain); // live — no restart
+          renderOverlay();
+        },
+        onAddPlayer: () => {
+          if (setupRoster.length >= 4) return;
+          setupRoster = [...setupRoster, { name: `P${setupRoster.length + 1}`, gain: 1 }];
+          void startPreviewMic(setupRoster.length - 1);
+          renderOverlay();
+        },
+        onRemovePlayer: (i: number) => {
+          if (setupRoster.length <= 1) return;
+          previewMics[i]?.stop();
+          previewMics = previewMics.filter((_, j) => j !== i);
+          setupRoster = setupRoster.filter((_, j) => j !== i);
           renderOverlay();
         },
         devices: audioInputs,
+        levelFor: previewLevel,
+        sensitivity,
+        onSensitivity: (n: number) => setSensitivity(n),
         onStart: startSession,
         onCancel: () => {
+          stopPreviews();
           activeScreen = "home";
           renderOverlay();
         },
@@ -553,9 +586,7 @@ function renderOverlay(): void {
           );
 
   if (session) {
-    const micInfos: MicInfo[] = mics.length
-      ? mics.map((m) => ({ label: mics.length > 1 ? m.name : "🎤", sensitivity, active: true }))
-      : [{ label: "🎤", sensitivity, active: false }];
+    const hudMics = mics.map((m) => ({ name: m.name, getLevel: () => m.pitch.level() }));
     root.render(
       React.createElement(
         "div",
@@ -564,11 +595,12 @@ function renderOverlay(): void {
           round: Math.min(session.rounds.length + 1, session.targetRounds),
           target: session.targetRounds,
           sessionTotal: sessionTotal(),
-          mics: micInfos,
+          mics: hudMics,
+          sensitivity,
+          onSensitivity: (n: number) => setSensitivity(n),
           onSkip: skipRound,
           onEnd: endSession,
           sourceName: session.playlistName,
-          currentSinger: null,
         }),
         singContent
       )
@@ -584,6 +616,7 @@ function setVisible(next: boolean): void {
   const el = ensureOverlay();
   el.style.display = visible ? "block" : "none";
   if (visible) renderOverlay();
+  else stopPreviews(); // closing the overlay releases any setup preview mics
 }
 
 // K → the karaoke surface (Quick Sing); toggles closed if already there.
@@ -636,7 +669,50 @@ async function loadDevices(): Promise<void> {
     console.error("[singify] mic permission for device list denied:", err);
   }
   audioInputs = await enumerateInputs();
+  if (activeScreen === "session-setup") {
+    renderOverlay();
+    void startPreviews(); // live meters need a running mic per slot
+  }
+}
+
+// ── Setup-screen mic previews ────────────────────────────────────────────────
+// One live mic per roster slot while the setup screen is open, so the meters
+// move and gain/gate can be tuned before the session. Stopped on Start/Cancel.
+
+/** (Re)start the preview mic for roster slot i on its current device + gain. */
+async function startPreviewMic(i: number): Promise<void> {
+  const p = setupRoster[i];
+  if (!p) return;
+  previewMics[i]?.stop();
+  try {
+    previewMics[i] = await startMicPitch({
+      deviceId: p.deviceId,
+      gain: p.gain,
+      rmsThreshold: sensitivityToThreshold(sensitivity),
+    });
+  } catch (err) {
+    console.error(`[singify] preview mic for ${p.name} failed:`, err);
+    previewMics[i] = null;
+  }
   if (activeScreen === "session-setup") renderOverlay();
+}
+
+/** Start a preview mic for every roster slot. */
+async function startPreviews(): Promise<void> {
+  stopPreviews();
+  previewMics = new Array(setupRoster.length).fill(null);
+  await Promise.all(setupRoster.map((_, i) => startPreviewMic(i)));
+}
+
+/** Stop and drop all preview mics. */
+function stopPreviews(): void {
+  for (const m of previewMics) m?.stop();
+  previewMics = [];
+}
+
+/** Live level (0..~0.4) for slot i's preview mic — feeds the setup meter. */
+function previewLevel(i: number): number {
+  return previewMics[i]?.level() ?? 0;
 }
 
 async function loadPlaylists(): Promise<void> {
@@ -657,6 +733,7 @@ function startSession(): void {
   scoredTrackIds = new Set();
   lastRound = null;
   // A scored session needs a mic per player; (re)bind to the roster's devices.
+  stopPreviews(); // leaving setup — drop preview mics before the real ones
   if (micsActive()) stopMics(true);
   void startMics();
   activeScreen = "sing";
@@ -679,6 +756,7 @@ async function startPlaylistSession(ref: PlaylistRef): Promise<void> {
   sessionRoster = setupRoster.map((p) => ({ ...p }));
   scoredTrackIds = new Set();
   lastRound = null;
+  stopPreviews(); // leaving setup — drop preview mics before the real ones
   if (micsActive()) stopMics(true);
   void startMics();
   activeScreen = "sing";
