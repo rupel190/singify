@@ -24,10 +24,10 @@ export function HomeMenu(props: HomeMenuProps) {
     display: "flex",
     flexDirection: "column",
     alignItems: "flex-start",
-    gap: 6,
-    width: "min(560px, 82vw)",
-    padding: "22px 26px",
-    borderRadius: 16,
+    gap: 10,
+    width: "min(640px, 88vw)",
+    padding: "30px 34px",
+    borderRadius: 20,
     border: "1px solid rgba(255,255,255,0.08)",
     background: "rgba(255,255,255,0.04)",
     color: "#fff",
@@ -35,9 +35,9 @@ export function HomeMenu(props: HomeMenuProps) {
     textAlign: "left",
     transition: "border-color 120ms ease, background 120ms ease",
   };
-  const title: React.CSSProperties = { fontSize: 30, fontWeight: 800, lineHeight: 1 };
+  const title: React.CSSProperties = { fontSize: 45, fontWeight: 800, lineHeight: 1 };
   const sub: React.CSSProperties = {
-    fontSize: 16,
+    fontSize: 24,
     fontWeight: 500,
     color: "rgba(255,255,255,0.6)",
   };
@@ -49,12 +49,12 @@ export function HomeMenu(props: HomeMenuProps) {
         flexDirection: "column",
         alignItems: "center",
         justifyContent: "center",
-        gap: 20,
+        gap: 28,
         height: "100vh",
         fontFamily: "var(--font-family, 'Spotify Circular', system-ui, sans-serif)",
       }}
     >
-      <div style={{ fontSize: 22, fontWeight: 800, letterSpacing: 2, color: ACCENT }}>
+      <div style={{ fontSize: 33, fontWeight: 800, letterSpacing: 3, color: ACCENT }}>
         SINGIFY
       </div>
 
@@ -73,7 +73,7 @@ export function HomeMenu(props: HomeMenuProps) {
         <span style={sub}>multi-round · scores carry across songs · big finish</span>
       </button>
 
-      <div style={{ fontSize: 13, color: "rgba(255,255,255,0.4)", marginTop: 6 }}>
+      <div style={{ fontSize: 26, color: "rgba(255,255,255,0.5)", marginTop: 10 }}>
         K quick-sing · M mic · P punch-sync · R re-choose · L load file · [ ] offset
       </div>
     </div>
