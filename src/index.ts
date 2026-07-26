@@ -332,7 +332,12 @@ let visible = false;
 // Which screen the overlay shows. "sing" is the karaoke surface (K / Quick Sing,
 // today's behaviour); the rest are the session flow.
 type Screen = "home" | "sing" | "session-setup" | "round-end" | "session-result";
-let screen: Screen = "sing";
+// NB: named `activeScreen`, NOT `screen`. Spicetify loads this bundle as a classic
+// <script>, so a top-level `let screen` binds in the GLOBAL lexical scope and shadows
+// window.screen for the entire page. Spotify's own hooks then run
+// `"addEventListener" in screen`, hit our string instead of the Screen object, throw a
+// TypeError mid-render, and blank the whole client. Keep UI state namespaced.
+let activeScreen: Screen = "sing";
 
 // Active multi-round session (null = just Quick Sing). setupRounds is the pending
 // choice on the setup screen; lastRound + scoredTrackIds track round bookkeeping.
@@ -392,7 +397,7 @@ function renderOverlay(): void {
   if (!root) return;
   const React = Spicetify.React;
 
-  if (screen === "home") {
+  if (activeScreen === "home") {
     const item = Spicetify.Player.data?.item ?? Spicetify.Player.data?.track;
     const track = item
       ? { artist: item.artists?.[0]?.name ?? "", title: item.name ?? "" }
@@ -401,7 +406,7 @@ function renderOverlay(): void {
       React.createElement(HomeMenu, {
         track,
         onQuickSing: () => {
-          screen = "sing";
+          activeScreen = "sing";
           renderOverlay();
         },
         onStartSession: openSessionSetup,
@@ -410,7 +415,7 @@ function renderOverlay(): void {
     return;
   }
 
-  if (screen === "session-setup") {
+  if (activeScreen === "session-setup") {
     root.render(
       React.createElement(SessionSetup, {
         playlists,
@@ -429,7 +434,7 @@ function renderOverlay(): void {
         },
         onStart: startSession,
         onCancel: () => {
-          screen = "home";
+          activeScreen = "home";
           renderOverlay();
         },
         micOn: micPitch != null,
@@ -438,7 +443,7 @@ function renderOverlay(): void {
     return;
   }
 
-  if (screen === "round-end" && session && lastRound) {
+  if (activeScreen === "round-end" && session && lastRound) {
     root.render(
       React.createElement(RoundEnd, {
         justFinished: lastRound,
@@ -453,7 +458,7 @@ function renderOverlay(): void {
     return;
   }
 
-  if (screen === "session-result" && session) {
+  if (activeScreen === "session-result" && session) {
     root.render(
       React.createElement(SessionResultScreen, {
         summary: summarize(session),
@@ -465,7 +470,7 @@ function renderOverlay(): void {
     return;
   }
 
-  // screen === "sing": the karaoke surface (chart / picker / no-chart), wrapped
+  // activeScreen === "sing": the karaoke surface (chart / picker / no-chart), wrapped
   // in the session HUD when a session is running.
   const singContent = currentSong
     ? React.createElement(KaraokeView, {
@@ -544,21 +549,21 @@ function setVisible(next: boolean): void {
 
 // K → the karaoke surface (Quick Sing); toggles closed if already there.
 function openSing(): void {
-  if (visible && screen === "sing") {
+  if (visible && activeScreen === "sing") {
     setVisible(false);
     return;
   }
-  screen = "sing";
+  activeScreen = "sing";
   setVisible(true);
 }
 
 // Topbar button → the session menu; toggles closed if already there.
 function openHome(): void {
-  if (visible && screen === "home") {
+  if (visible && activeScreen === "home") {
     setVisible(false);
     return;
   }
-  screen = "home";
+  activeScreen = "home";
   setVisible(true);
 }
 
@@ -573,19 +578,19 @@ function sessionTotal(): number {
 
 /** Open the setup screen and (re)load the user's playlists in the background. */
 function openSessionSetup(): void {
-  screen = "session-setup";
+  activeScreen = "session-setup";
   renderOverlay();
   void loadPlaylists();
 }
 
 async function loadPlaylists(): Promise<void> {
   playlistsLoading = true;
-  if (screen === "session-setup") renderOverlay();
+  if (activeScreen === "session-setup") renderOverlay();
   try {
     playlists = await fetchPlaylists();
   } finally {
     playlistsLoading = false;
-    if (screen === "session-setup") renderOverlay();
+    if (activeScreen === "session-setup") renderOverlay();
   }
 }
 
@@ -595,7 +600,7 @@ function startSession(): void {
   scoredTrackIds = new Set();
   lastRound = null;
   if (!micPitch) void toggleMic(); // a scored session needs the mic
-  screen = "sing";
+  activeScreen = "sing";
   renderOverlay();
 }
 
@@ -615,7 +620,7 @@ async function startPlaylistSession(ref: PlaylistRef): Promise<void> {
   scoredTrackIds = new Set();
   lastRound = null;
   if (!micPitch) void toggleMic(); // a scored session needs the mic
-  screen = "sing";
+  activeScreen = "sing";
   renderOverlay();
   // Kick Spotify into the playlist from track 1; songchange re-renders with the
   // resolved chart. If playback couldn't start, we still show the sing screen —
@@ -643,7 +648,7 @@ function onRoundComplete(scores: PlayerRoundScore[]): void {
   );
   session = recordRound(session, r);
   lastRound = r;
-  screen = isComplete(session) ? "session-result" : "round-end";
+  activeScreen = isComplete(session) ? "session-result" : "round-end";
   renderOverlay();
 }
 
@@ -668,10 +673,10 @@ function skipRound(): void {
 /** From the HUD "End" — finish early: show results if any rounds ran, else bail. */
 function endSession(): void {
   if (session && session.rounds.length > 0) {
-    screen = "session-result";
+    activeScreen = "session-result";
   } else {
     session = null;
-    screen = "home";
+    activeScreen = "home";
   }
   renderOverlay();
 }
@@ -681,7 +686,7 @@ function finishSession(): void {
   session = null;
   lastRound = null;
   scoredTrackIds = new Set();
-  screen = "home";
+  activeScreen = "home";
   renderOverlay();
 }
 
@@ -783,7 +788,7 @@ async function onSongChange(): Promise<void> {
 
   // In a session, playing a new song advances from the between-rounds screen
   // back to singing (the follow model — you queued up the next song).
-  if (session && screen === "round-end") screen = "sing";
+  if (session && activeScreen === "round-end") activeScreen = "sing";
 
   if (visible) renderOverlay();
 }
