@@ -34,8 +34,8 @@ export function ResultScreen(props: ResultScreenProps) {
         alignItems: "center",
         justifyContent: "center",
         width: "100%",
-        height: fullscreen ? "100vh" : "100%",
-        minHeight: fullscreen ? "100vh" : 360,
+        height: "100%",
+        minHeight: fullscreen ? "100%" : 360,
         gap: 10,
         color: "#fff",
         fontFamily:

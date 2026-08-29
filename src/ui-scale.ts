@@ -1,19 +1,17 @@
 /**
  * ui-scale.ts — one knob for how big the whole karaoke UI renders.
  *
- * Applied as CSS `zoom` on the overlay's root, so every screen inside scales
- * together: type, padding, controls, the note lane. 1 = the sizes written in the
- * components; 0.75 = everything three-quarters. Change this, not forty font
- * sizes.
+ * Applied as CSS `zoom` on the overlay's render root, so every screen inside
+ * scales together: type, padding, controls, the note lane. 1 = the sizes written
+ * in the components; 0.75 = everything three-quarters. Change this, not forty
+ * font sizes.
  *
- * `zoom` participates in layout (unlike transform: scale), so anything sized in
- * `vh` has to divide the scale back out or it would overflow the viewport —
- * that's what fullHeight() is for. Screens that set their OWN zoom (the 3× menus)
- * multiply with this one, hence the extraZoom argument.
+ * NOTE: do not "compensate" for the zoom anywhere. Chromium resolves lengths
+ * inside a zoomed element in the ZOOMED coordinate space, so `width: 100%` and
+ * `height: 100%` already fill the parent exactly — dividing by the scale makes
+ * the box 1/scale too big and shoves the content off-centre. Every box under the
+ * root is sized in percentages against the fixed, inset-0 overlay for that
+ * reason; `vh` is avoided entirely, since whether zoom applies to viewport units
+ * is exactly the ambiguity this note exists to dodge.
  */
 export const UI_SCALE = 0.75;
-
-/** A full viewport height, expressed inside this scale (times any local zoom). */
-export function fullHeight(extraZoom = 1): string {
-  return `calc(100vh / ${UI_SCALE * extraZoom})`;
-}

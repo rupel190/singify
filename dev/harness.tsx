@@ -34,7 +34,7 @@ import {
   type PlayerSlot,
 } from "../src/session-view";
 import type { PlaylistRef } from "../src/playlist-source";
-import { UI_SCALE, fullHeight } from "../src/ui-scale";
+import { UI_SCALE } from "../src/ui-scale";
 import {
   createSession,
   recordRound,
@@ -964,8 +964,8 @@ function App() {
           style={{
             position: "relative",
             zoom: UI_SCALE,
-            width: `calc(100% / ${UI_SCALE})`,
-            height: fullHeight(),
+            width: "100%",
+            height: "100%",
           }}
         >
           {/* Same three-cell top row the Spotify adapter builds: HUD left,

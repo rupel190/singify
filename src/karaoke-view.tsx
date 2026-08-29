@@ -27,7 +27,6 @@ import {
 import { foldSmoothHit, createPitchSmoother } from "./pitch";
 import { createScoreKeeper, gradeForScore, type ScoreState } from "./scoring";
 import { ResultScreen } from "./result-screen";
-import { fullHeight } from "./ui-scale";
 
 /**
  * One active singer — the generalised "mic port". Solo/hotseat pass a single
@@ -114,6 +113,12 @@ const AXIS_LABEL_SIZE = 60;
 const GUTTER = 12 + Math.round(AXIS_LABEL_SIZE * 2.6);
 const TRAIL_MS = 850; // how far back (ms) the sung-pitch trail reaches
 const TRAIL_MAX = 96; // ring-buffer cap (frames) — a safety bound on dot count
+// Marker and trail are sized as MULTIPLES of the note height rather than in
+// fixed px, so they stay in proportion when the lane geometry changes — the
+// live marker reads a little fatter than the note it is chasing.
+const MARKER_SCALE = 1.6;
+const TRAIL_DOT_MIN = 0.35; // oldest sample in the trail
+const TRAIL_DOT_MAX = 0.7; // newest
 
 const COLORS = {
   laneBg: "rgba(0, 0, 0, 0.28)",
@@ -426,8 +431,8 @@ export function KaraokeView(props: KaraokeViewProps) {
         display: "flex",
         flexDirection: "column",
         width: "100%",
-        height: fullscreen ? fullHeight() : "100%",
-        minHeight: fullscreen ? fullHeight() : 360,
+        height: "100%",
+        minHeight: fullscreen ? "100%" : 360,
         color: "#fff",
         fontFamily:
           "var(--font-family, 'Spotify Circular', system-ui, sans-serif)",
@@ -544,7 +549,7 @@ export function KaraokeView(props: KaraokeViewProps) {
             const x = nowX + (p.ms - positionMs) * pxPerMs;
             if (x < GUTTER + 4) return null; // don't paint under the label gutter
             const o = Math.max(0, 1 - (positionMs - p.ms) / TRAIL_MS);
-            const size = 3 + o * 3;
+            const size = noteH * (TRAIL_DOT_MIN + o * (TRAIL_DOT_MAX - TRAIL_DOT_MIN));
             const ty = yForMarker(p.pitch);
             return (
               <div
@@ -570,20 +575,21 @@ export function KaraokeView(props: KaraokeViewProps) {
         {rendered.map((r) => {
           if (r.markerPitch == null) return null;
           const color = r.markerHit ? COLORS.nowLine : r.input.color;
+          const size = Math.round(noteH * MARKER_SCALE);
           return (
             <div
               key={r.id}
               style={{
                 position: "absolute",
-                left: nowX - 9,
-                top: yForMarker(r.markerPitch) - 9,
-                width: 18,
-                height: 18,
+                left: nowX - size / 2,
+                top: yForMarker(r.markerPitch) - size / 2,
+                width: size,
+                height: size,
                 borderRadius: "50%",
                 background: color,
                 boxShadow: r.markerHit
-                  ? `0 0 22px ${color}, 0 0 9px ${color}`
-                  : `0 0 12px ${color}`,
+                  ? `0 0 ${size * 1.2}px ${color}, 0 0 ${size / 2}px ${color}`
+                  : `0 0 ${size * 0.7}px ${color}`,
                 transform: r.markerHit ? "scale(1.3)" : "scale(1)",
                 transition:
                   "top 60ms linear, transform 110ms ease, box-shadow 110ms ease, background 90ms ease",

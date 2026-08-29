@@ -15,7 +15,6 @@ import type { PlaylistRef } from "./playlist-source";
 import type { AudioInput } from "./mic";
 import { PLAYER_COLORS } from "./karaoke-view";
 import { MicMeter } from "./mic-meter";
-import { fullHeight } from "./ui-scale";
 
 const ACCENT = "#1ed760";
 const GOLD = "#e6b422";
@@ -1018,11 +1017,11 @@ function Center(props: { children: unknown; gap?: number; zoom?: number }) {
         justifyContent: "center",
         gap: props.gap ?? 10,
         // One number scales a whole screen — type, padding, controls, gaps —
-        // instead of hand-multiplying every size and missing some. Unlike
-        // transform: scale, `zoom` participates in layout, which is why 100vh
-        // has to be divided back out or the box would be `zoom` screens tall.
+        // instead of hand-multiplying every size and missing some. It multiplies
+        // with the root's UI_SCALE; percentages resolve in the zoomed space, so
+        // height 100% still means "fill the parent" at any zoom.
         zoom: zoom === 1 ? undefined : zoom,
-        height: fullHeight(zoom),
+        height: "100%",
         overflowY: "auto",
         color: "#fff",
         textAlign: "center",

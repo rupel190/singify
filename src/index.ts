@@ -52,7 +52,7 @@ import {
 import { startMicPitch, enumerateInputs, type MicPitch, type AudioInput } from "./mic";
 import { resolveForTrack, confirmPick } from "./resolver-client";
 import { sensitivityToThreshold, thresholdToSensitivity } from "./pitch";
-import { UI_SCALE, fullHeight } from "./ui-scale";
+import { UI_SCALE } from "./ui-scale";
 import { parse, type ParsedSong } from "./ultrastar-parser";
 import type { USDBSong } from "./usdb";
 
@@ -237,15 +237,23 @@ function setActiveRoster(next: PlayerSlot[]): void {
 
 /** Open one mic for roster slot i, or null if its device won't open. */
 async function openMic(p: PlayerSlot): Promise<MicPitch | null> {
+  const opts = { gain: p.gain, rmsThreshold: sensitivityToThreshold(p.sensitivity) };
   try {
-    return await startMicPitch({
-      deviceId: p.deviceId,
-      gain: p.gain,
-      rmsThreshold: sensitivityToThreshold(p.sensitivity),
-    });
+    return await startMicPitch({ deviceId: p.deviceId, ...opts });
   } catch (err) {
-    // One player's device failing shouldn't sink the others.
     console.error(`[singify] mic for ${p.name} failed:`, err);
+    // A REMEMBERED device may simply be unplugged since last time — that
+    // shouldn't cost the player their mic, so fall back to the system default.
+    if (p.deviceId) {
+      try {
+        const fallback = await startMicPitch(opts);
+        Spicetify.showNotification?.(`${p.name}: saved mic missing — using the default`);
+        return fallback;
+      } catch (err2) {
+        console.error(`[singify] default mic for ${p.name} failed too:`, err2);
+      }
+    }
+    // One player's device failing shouldn't sink the others.
     Spicetify.showNotification?.(`Mic unavailable for ${p.name}`, true);
     return null;
   }
@@ -296,7 +304,9 @@ function patchSlot(i: number, patch: Partial<PlayerSlot>): PlayerSlot | null {
   const slot = roster[i];
   if (!slot) return null;
   const next = { ...slot, ...patch };
-  setActiveRoster(roster.map((p, j) => (j === i ? next : p)));
+  const updated = roster.map((p, j) => (j === i ? next : p));
+  setActiveRoster(updated);
+  saveMicSlots(updated); // in-game tweaks stick for next time
   return next;
 }
 
@@ -310,7 +320,6 @@ function setPlayerSensitivity(i: number, value: number): void {
   const n = Math.min(100, Math.max(0, Math.round(value)));
   if (!patchSlot(i, { sensitivity: n })) return;
   mics[i]?.setOptions({ rmsThreshold: sensitivityToThreshold(n) });
-  savePlayerSensitivities(activeRoster());
   if (visible) renderOverlay();
 }
 
@@ -394,7 +403,34 @@ function loadSensitivity(): number {
 // they move everybody at once, which is the "the room got loud" case.
 let sensitivity = loadSensitivity();
 
-/** Per-slot gates, by roster index; a slot with no stored value takes the default. */
+// Every slot's mic settings — name, device, gain, gate — saved by ROSTER INDEX,
+// so a new slot i restores whatever slot i last used. Indexed rather than kept
+// as one roster blob so editing solo (one slot) can't wipe player 2's setup.
+const MIC_SLOTS_KEY = "singify:micSlots";
+
+function loadMicSlots(): Partial<PlayerSlot>[] {
+  try {
+    const raw: unknown = JSON.parse(localStorage.getItem(MIC_SLOTS_KEY) ?? "[]");
+    return Array.isArray(raw) ? (raw as Partial<PlayerSlot>[]) : [];
+  } catch {
+    return [];
+  }
+}
+
+/** Write a roster's slots back, leaving any saved slots beyond it untouched. */
+function saveMicSlots(roster: PlayerSlot[]): void {
+  const merged = loadMicSlots();
+  roster.forEach((p, i) => {
+    merged[i] = { name: p.name, deviceId: p.deviceId, gain: p.gain, sensitivity: p.sensitivity };
+  });
+  try {
+    localStorage.setItem(MIC_SLOTS_KEY, JSON.stringify(merged));
+  } catch {
+    /* storage blocked — the in-memory roster still holds the values */
+  }
+}
+
+/** Legacy per-slot gates (pre-micSlots) — still read as a fallback. */
 const PLAYER_SENS_KEY = "singify:playerSens";
 
 function loadPlayerSensitivities(): number[] {
@@ -403,14 +439,6 @@ function loadPlayerSensitivities(): number[] {
     return Array.isArray(raw) ? raw.filter((n) => typeof n === "number") : [];
   } catch {
     return [];
-  }
-}
-
-function savePlayerSensitivities(roster: PlayerSlot[]): void {
-  try {
-    localStorage.setItem(PLAYER_SENS_KEY, JSON.stringify(roster.map((p) => p.sensitivity)));
-  } catch {
-    /* storage blocked — the in-memory roster still holds the values */
   }
 }
 
@@ -433,7 +461,7 @@ function setSensitivity(next: number): void {
   setupRoster = setupRoster.map((p) => ({ ...p, sensitivity }));
   for (const m of mics) m?.setOptions({ rmsThreshold: t });
   for (const m of previewMics) m?.setOptions({ rmsThreshold: t });
-  savePlayerSensitivities(activeRoster());
+  saveMicSlots(activeRoster());
   showReadout(`🎤 Sensitivity ${sensitivity}%`);
   if (visible) renderOverlay(); // move the gate marker on every live meter
 }
@@ -491,9 +519,16 @@ let activeScreen: Screen = "sing";
 // choice on the setup screen; lastRound + scoredTrackIds track round bookkeeping.
 let session: Session | null = null;
 let setupRounds = 5;
-/** A fresh roster slot: unity gain on the default mic, with slot i's saved gate. */
+/** A fresh roster slot, restored from whatever slot i last used. */
 function newSlot(i: number, name: string): PlayerSlot {
-  return { name, gain: 1, sensitivity: defaultSensitivityFor(i) };
+  const saved = loadMicSlots()[i];
+  return {
+    name: saved?.name ?? name,
+    deviceId: saved?.deviceId,
+    gain: typeof saved?.gain === "number" ? saved.gain : 1,
+    sensitivity:
+      typeof saved?.sensitivity === "number" ? saved.sensitivity : defaultSensitivityFor(i),
+  };
 }
 
 // Versus roster chosen on the setup screen: each player + their mic device + gain.
@@ -577,11 +612,7 @@ function renderScaled(el: unknown): void {
     React.createElement(
       "div",
       {
-        style: {
-          zoom: UI_SCALE,
-          width: `calc(100% / ${UI_SCALE})`,
-          height: fullHeight(),
-        },
+        style: { zoom: UI_SCALE, width: "100%", height: "100%" },
       },
       el as never
     )
@@ -625,15 +656,18 @@ function renderOverlay(): void {
         players: setupRoster,
         onName: (i: number, name: string) => {
           setupRoster = setupRoster.map((p, j) => (j === i ? { ...p, name } : p));
+          saveMicSlots(setupRoster);
           renderOverlay();
         },
         onDevice: (i: number, deviceId: string | undefined) => {
           setupRoster = setupRoster.map((p, j) => (j === i ? { ...p, deviceId } : p));
+          saveMicSlots(setupRoster);
           void startPreviewMic(i); // rebind this slot's preview to the new device
           renderOverlay();
         },
         onGain: (i: number, gain: number) => {
           setupRoster = setupRoster.map((p, j) => (j === i ? { ...p, gain } : p));
+          saveMicSlots(setupRoster);
           previewMics[i]?.setGain(gain); // live — no restart
           renderOverlay();
         },
@@ -643,6 +677,7 @@ function renderOverlay(): void {
             ...setupRoster,
             newSlot(setupRoster.length, `P${setupRoster.length + 1}`),
           ];
+          saveMicSlots(setupRoster);
           void startPreviewMic(setupRoster.length - 1);
           renderOverlay();
         },
@@ -658,7 +693,7 @@ function renderOverlay(): void {
         onSensitivity: (i: number, n: number) => {
           setupRoster = setupRoster.map((q, j) => (j === i ? { ...q, sensitivity: n } : q));
           previewMics[i]?.setOptions({ rmsThreshold: sensitivityToThreshold(n) });
-          savePlayerSensitivities(setupRoster);
+          saveMicSlots(setupRoster);
           renderOverlay();
         },
         onStart: startSession,
@@ -732,7 +767,7 @@ function renderOverlay(): void {
             {
               style: {
                 display: "flex",
-                height: "100vh",
+                height: "100%",
                 alignItems: "center",
                 justifyContent: "center",
                 color: "#c8c8c8",
@@ -822,7 +857,7 @@ function renderOverlay(): void {
     renderScaled(
       React.createElement(
         "div",
-        { style: { position: "relative", height: fullHeight() } },
+        { style: { position: "relative", height: "100%" } },
         topRow,
         singContent
       )
