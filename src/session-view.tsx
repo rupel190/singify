@@ -15,6 +15,7 @@ import type { PlaylistRef } from "./playlist-source";
 import type { AudioInput } from "./mic";
 import { PLAYER_COLORS } from "./karaoke-view";
 import { MicMeter } from "./mic-meter";
+import { fullHeight } from "./ui-scale";
 
 const ACCENT = "#1ed760";
 const GOLD = "#e6b422";
@@ -411,8 +412,8 @@ const BAR_W = 600;
 const BAR_LABEL = 48;
 
 /**
- * The in-game mic banner — one strip per live singer, centred across the top of
- * the stage: level meter with that player's OWN gate handle, an input-gain
+ * The in-game mic banner — one strip per live singer, in the RIGHT-hand cell of
+ * the stage's top row: level meter with that player's OWN gate handle, an input-gain
  * slider, and a device picker. Every control is live; gain and gate apply to the
  * running mic instantly, and changing the device restarts only that one mic.
  *
@@ -443,12 +444,8 @@ export function MicOverlay(props: {
   return (
     <div
       style={{
-        position: "absolute",
-        top: 24,
-        left: "50%",
-        transform: "translateX(-50%)",
-        width: `min(94vw, ${wanted}px)`,
-        zIndex: 6,
+        justifySelf: "end",
+        width: `min(100%, ${wanted}px)`,
         padding: "18px 28px",
         borderRadius: 22,
         background: "rgba(8,8,12,0.72)",
@@ -522,6 +519,43 @@ export function MicOverlay(props: {
   );
 }
 
+/**
+ * The middle cell of the top row: what you're singing right now. Title over
+ * artist, both clipped to one line so a long name can't widen the box and shove
+ * the row's centre off — the row is a 1fr/auto/1fr grid, so this stays dead
+ * centre on screen however wide the HUD or the mic banner get.
+ */
+export function NowPlaying(props: { title: string; artist: string }) {
+  const React = Spicetify.React;
+  const clip: React.CSSProperties = {
+    whiteSpace: "nowrap",
+    overflow: "hidden",
+    textOverflow: "ellipsis",
+  };
+  return (
+    <div
+      style={{
+        maxWidth: "100%",
+        minWidth: 0,
+        padding: "18px 34px",
+        borderRadius: 22,
+        background: "rgba(8,8,12,0.72)",
+        border: "1px solid rgba(255,255,255,0.1)",
+        color: "#fff",
+        textAlign: "center",
+        fontFamily: "var(--font-family, 'Spotify Circular', system-ui, sans-serif)",
+      }}
+    >
+      <div style={{ ...clip, fontSize: 64, fontWeight: 800, lineHeight: 1.05 }}>
+        {props.title}
+      </div>
+      <div style={{ ...clip, fontSize: 40, fontWeight: 600, color: "rgba(255,255,255,0.55)" }}>
+        {props.artist}
+      </div>
+    </div>
+  );
+}
+
 // ── In-round HUD ─────────────────────────────────────────────────────────────
 
 export function SessionHud(props: {
@@ -557,10 +591,7 @@ export function SessionHud(props: {
   return (
     <div
       style={{
-        position: "absolute",
-        top: 52,
-        left: 16,
-        zIndex: 6,
+        justifySelf: "start",
         display: "flex",
         flexDirection: "column",
         alignItems: "flex-start",
@@ -991,7 +1022,7 @@ function Center(props: { children: unknown; gap?: number; zoom?: number }) {
         // transform: scale, `zoom` participates in layout, which is why 100vh
         // has to be divided back out or the box would be `zoom` screens tall.
         zoom: zoom === 1 ? undefined : zoom,
-        height: zoom === 1 ? "100vh" : `calc(100vh / ${zoom})`,
+        height: fullHeight(zoom),
         overflowY: "auto",
         color: "#fff",
         textAlign: "center",

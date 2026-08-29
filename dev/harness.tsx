@@ -28,11 +28,13 @@ import {
   SessionSetup,
   SessionHud,
   MicOverlay,
+  NowPlaying,
   NoChartInSession,
   SessionResultScreen,
   type PlayerSlot,
 } from "../src/session-view";
 import type { PlaylistRef } from "../src/playlist-source";
+import { UI_SCALE, fullHeight } from "../src/ui-scale";
 import {
   createSession,
   recordRound,
@@ -958,7 +960,30 @@ function App() {
           backdropFilter: "blur(6px)",
         }}
       >
-        <div style={{ position: "relative", height: "100vh" }}>
+        <div
+          style={{
+            position: "relative",
+            zoom: UI_SCALE,
+            width: `calc(100% / ${UI_SCALE})`,
+            height: fullHeight(),
+          }}
+        >
+          {/* Same three-cell top row the Spotify adapter builds: HUD left,
+              track centred, mic banner right. */}
+          <div
+            style={{
+              position: "absolute",
+              top: 24,
+              left: 24,
+              right: 24,
+              zIndex: 6,
+              display: "grid",
+              gridTemplateColumns: "minmax(0, 1fr) auto minmax(0, 1fr)",
+              alignItems: "start",
+              gap: 24,
+            }}
+          >
+            <div style={{ minWidth: 0 }}>
           <SessionHud
             round={1}
             target={5}
@@ -970,6 +995,14 @@ function App() {
             onAutoSkip={setAutoSkip}
             sourceName="Karaoke Bangers"
           />
+            </div>
+            <div style={{ minWidth: 0 }}>
+              <NowPlaying
+                title={song.headers.title ?? "Untitled"}
+                artist={song.headers.artist ?? "Unknown"}
+              />
+            </div>
+            <div style={{ minWidth: 0, display: "flex", justifyContent: "flex-end" }}>
           <MicOverlay
             mics={hudMics}
             devices={[]}
@@ -977,6 +1010,8 @@ function App() {
             onSensitivity={(i, n) => patchHud(i, { sensitivity: n })}
             onDevice={(i, deviceId) => patchHud(i, { deviceId })}
           />
+            </div>
+          </div>
           <KaraokeView song={song} getPositionMs={getPositionMs} players={gamePlayers} fullscreen />
         </div>
         <button

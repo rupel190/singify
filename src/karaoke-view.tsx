@@ -27,6 +27,7 @@ import {
 import { foldSmoothHit, createPitchSmoother } from "./pitch";
 import { createScoreKeeper, gradeForScore, type ScoreState } from "./scoring";
 import { ResultScreen } from "./result-screen";
+import { fullHeight } from "./ui-scale";
 
 /**
  * One active singer — the generalised "mic port". Solo/hotseat pass a single
@@ -425,8 +426,8 @@ export function KaraokeView(props: KaraokeViewProps) {
         display: "flex",
         flexDirection: "column",
         width: "100%",
-        height: fullscreen ? "100vh" : "100%",
-        minHeight: fullscreen ? "100vh" : 360,
+        height: fullscreen ? fullHeight() : "100%",
+        minHeight: fullscreen ? fullHeight() : 360,
         color: "#fff",
         fontFamily:
           "var(--font-family, 'Spotify Circular', system-ui, sans-serif)",

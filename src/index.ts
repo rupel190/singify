@@ -25,6 +25,7 @@ import {
   SessionSetup,
   SessionHud,
   MicOverlay,
+  NowPlaying,
   RoundEnd,
   SessionResultScreen,
   NoChartInSession,
@@ -51,6 +52,7 @@ import {
 import { startMicPitch, enumerateInputs, type MicPitch, type AudioInput } from "./mic";
 import { resolveForTrack, confirmPick } from "./resolver-client";
 import { sensitivityToThreshold, thresholdToSensitivity } from "./pitch";
+import { UI_SCALE, fullHeight } from "./ui-scale";
 import { parse, type ParsedSong } from "./ultrastar-parser";
 import type { USDBSong } from "./usdb";
 
@@ -155,9 +157,8 @@ function showReadout(text: string): void {
     readoutEl.id = "singify-readout";
     Object.assign(readoutEl.style, {
       position: "fixed",
-      bottom: "84px",
-      left: "50%",
-      transform: "translateX(-50%)",
+      bottom: "24px",
+      left: "24px",
       zIndex: "1000",
       padding: "32px 64px",
       borderRadius: "72px",
@@ -168,6 +169,9 @@ function showReadout(text: string): void {
       opacity: "0",
       transition: "opacity 180ms ease",
     } as CSSStyleDeclaration);
+    // Lives on <body>, not inside the overlay, so it needs UI_SCALE applied by
+    // hand to shrink along with everything else.
+    readoutEl.style.setProperty("zoom", String(UI_SCALE));
     document.body.appendChild(readoutEl);
   }
   readoutEl.textContent = text;
@@ -561,6 +565,29 @@ function ensureOverlay(): HTMLDivElement {
   return overlay;
 }
 
+/**
+ * Every screen the overlay shows goes through here, so UI_SCALE is applied in
+ * exactly one place. The wrapper divides its own width and height back out of
+ * the scale so it still covers the viewport after `zoom` shrinks it.
+ */
+function renderScaled(el: unknown): void {
+  if (!root) return;
+  const React = Spicetify.React;
+  root.render(
+    React.createElement(
+      "div",
+      {
+        style: {
+          zoom: UI_SCALE,
+          width: `calc(100% / ${UI_SCALE})`,
+          height: fullHeight(),
+        },
+      },
+      el as never
+    )
+  );
+}
+
 function renderOverlay(): void {
   if (!root) return;
   const React = Spicetify.React;
@@ -570,7 +597,7 @@ function renderOverlay(): void {
     const track = item
       ? { artist: item.artists?.[0]?.name ?? "", title: item.name ?? "" }
       : null;
-    root.render(
+    renderScaled(
       React.createElement(HomeMenu, {
         track,
         onQuickSing: () => {
@@ -584,7 +611,7 @@ function renderOverlay(): void {
   }
 
   if (activeScreen === "session-setup") {
-    root.render(
+    renderScaled(
       React.createElement(SessionSetup, {
         playlists,
         loadingPlaylists: playlistsLoading,
@@ -647,7 +674,7 @@ function renderOverlay(): void {
   }
 
   if (activeScreen === "round-end" && session && lastRound) {
-    root.render(
+    renderScaled(
       React.createElement(RoundEnd, {
         justFinished: lastRound,
         roundNumber: session.rounds.length,
@@ -661,7 +688,7 @@ function renderOverlay(): void {
   }
 
   if (activeScreen === "session-result" && session) {
-    root.render(
+    renderScaled(
       React.createElement(SessionResultScreen, {
         summary: summarize(session),
         onDone: finishSession,
@@ -736,42 +763,74 @@ function renderOverlay(): void {
       })
     : null;
 
-  if (session) {
-    root.render(
+  // What you're singing, for the middle of the top row. Spotify's metadata is
+  // the authority on what's PLAYING; the chart's headers are the fallback for a
+  // manually loaded file where the client has nothing useful.
+  const nowPlaying = currentSong
+    ? React.createElement(NowPlaying, {
+        title: currentTitle() || currentSong.headers.title || "",
+        artist: currentArtist() || currentSong.headers.artist || "",
+      })
+    : null;
+
+  const hud = session
+    ? React.createElement(SessionHud, {
+        round: Math.min(session.rounds.length + 1, session.targetRounds),
+        target: session.targetRounds,
+        totals: sessionTotals(),
+        micsOn: micsActive(),
+        onSkip: skipRound,
+        onEnd: endSession,
+        autoSkip: autoSkipNoChart,
+        onAutoSkip: setAutoSkip,
+        sourceName: session.playlistName,
+      })
+    : null;
+
+  // The stage's top row: session HUD left, the track dead centre, mic banner
+  // right. A minmax(0,1fr) / auto / minmax(0,1fr) grid, so the middle cell is
+  // screen-centred however wide the other two grow — and the EMPTY cells still
+  // have to be rendered, or the centre would drift to fill the gap.
+  const topRow =
+    hud || nowPlaying || micBanner
+      ? React.createElement(
+          "div",
+          {
+            style: {
+              position: "absolute",
+              top: 24,
+              left: 24,
+              right: 24,
+              zIndex: 6,
+              display: "grid",
+              gridTemplateColumns: "minmax(0, 1fr) auto minmax(0, 1fr)",
+              alignItems: "start",
+              gap: 24,
+            },
+          },
+          React.createElement("div", { style: { minWidth: 0 } }, hud),
+          React.createElement("div", { style: { minWidth: 0 } }, nowPlaying),
+          React.createElement(
+            "div",
+            { style: { minWidth: 0, display: "flex", justifyContent: "flex-end" } },
+            micBanner
+          )
+        )
+      : null;
+
+  if (topRow) {
+    renderScaled(
       React.createElement(
         "div",
-        { style: { position: "relative", height: "100vh" } },
-        React.createElement(SessionHud, {
-          round: Math.min(session.rounds.length + 1, session.targetRounds),
-          target: session.targetRounds,
-          totals: sessionTotals(),
-          micsOn: micsActive(),
-          onSkip: skipRound,
-          onEnd: endSession,
-          autoSkip: autoSkipNoChart,
-          onAutoSkip: setAutoSkip,
-          sourceName: session.playlistName,
-        }),
-        micBanner,
+        { style: { position: "relative", height: fullHeight() } },
+        topRow,
         singContent
       )
     );
     return;
   }
 
-  if (micBanner) {
-    root.render(
-      React.createElement(
-        "div",
-        { style: { position: "relative", height: "100vh" } },
-        micBanner,
-        singContent
-      )
-    );
-    return;
-  }
-
-  root.render(singContent);
+  renderScaled(singContent);
 }
 
 function setVisible(next: boolean): void {

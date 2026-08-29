@@ -8,6 +8,8 @@
  * milestone). A pure view — the adapter hands it the current track + callbacks.
  */
 
+import { fullHeight } from "./ui-scale";
+
 export interface HomeMenuProps {
   /** The track Spotify is currently on, or null if nothing's playing. */
   track: { artist: string; title: string } | null;
@@ -54,7 +56,7 @@ export function HomeMenu(props: HomeMenuProps) {
         // 3× the whole screen in one number — see Center's zoom note in
         // session-view.tsx for why 100vh is divided back out.
         zoom: 3,
-        height: "calc(100vh / 3)",
+        height: fullHeight(3),
         overflowY: "auto",
         fontFamily: "var(--font-family, 'Spotify Circular', system-ui, sans-serif)",
       }}
