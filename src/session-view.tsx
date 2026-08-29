@@ -752,7 +752,7 @@ export function RoundEnd(props: {
   const solo = scores[0];
   const last = roundNumber >= target;
   return (
-    <Center>
+    <Center zoom={2}>
       <div style={{ fontSize: 22, color: "rgba(255,255,255,0.6)", fontWeight: 700 }}>
         Round {roundNumber} of {target} done
       </div>
