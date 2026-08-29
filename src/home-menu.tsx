@@ -1,7 +1,8 @@
 /**
  * home-menu.tsx — the session/menu home screen.
  *
- * Opened from the Spicetify Topbar button (K still goes straight to Quick Sing).
+ * Opened with `K` or the Spicetify Topbar button; `Q` skips it and goes straight
+ * to Quick Sing.
  * This is the entry point for the multi-round session flow; for now it offers
  * Quick Sing (today's behaviour) and Start a Session (wired in the next
  * milestone). A pure view — the adapter hands it the current track + callbacks.
@@ -50,7 +51,11 @@ export function HomeMenu(props: HomeMenuProps) {
         alignItems: "center",
         justifyContent: "center",
         gap: 28,
-        height: "100vh",
+        // 3× the whole screen in one number — see Center's zoom note in
+        // session-view.tsx for why 100vh is divided back out.
+        zoom: 3,
+        height: "calc(100vh / 3)",
+        overflowY: "auto",
         fontFamily: "var(--font-family, 'Spotify Circular', system-ui, sans-serif)",
       }}
     >
@@ -74,7 +79,7 @@ export function HomeMenu(props: HomeMenuProps) {
       </button>
 
       <div style={{ fontSize: 26, color: "rgba(255,255,255,0.5)", marginTop: 10 }}>
-        K quick-sing · M mic · P punch-sync · R re-choose · L load file · [ ] offset
+        Q quick-sing · M mic · P punch-sync · R re-choose · L load file · [ ] offset
       </div>
     </div>
   );

@@ -155,14 +155,18 @@ export function rms(samples: Float32Array): number {
 
 /**
  * Map a mic "sensitivity" (0..100, higher = more sensitive) to an RMS gate.
- * Log-spaced so the control feels even across the useful range; ~60 lands near
- * the default 0.01 gate. Higher sensitivity → lower gate → quieter input passes
+ * Log-spaced so the control feels even across the useful range; ~70 lands near
+ * the default 0.01 gate. The range deliberately stops at 0.12 RMS — about 59%
+ * of the meter bar — because a gate any higher would sit up where SINGING lives
+ * and reject the voice it is meant to score. The top of the bar is level
+ * headroom, not gate range.
+ * Higher sensitivity → lower gate → quieter input passes
  * (home alone); lower sensitivity → higher gate → rejects room/crowd noise.
  */
 export function sensitivityToThreshold(sensitivity: number): number {
   const s = Math.min(100, Math.max(0, sensitivity));
-  const MIN = 0.003; // most sensitive (s=100)
-  const MAX = 0.05; // least sensitive (s=0)
+  const MIN = 0.003; // most sensitive (s=100) — meter fraction ~9%
+  const MAX = 0.12; // least sensitive (s=0) — meter fraction ~59%
   return MAX * (MIN / MAX) ** (s / 100);
 }
 
@@ -173,7 +177,7 @@ export function sensitivityToThreshold(sensitivity: number): number {
  */
 export function thresholdToSensitivity(threshold: number): number {
   const MIN = 0.003;
-  const MAX = 0.05;
+  const MAX = 0.12;
   const t = Math.min(MAX, Math.max(MIN, threshold));
   return Math.min(100, Math.max(0, 100 * (Math.log(t / MAX) / Math.log(MIN / MAX))));
 }

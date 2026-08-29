@@ -3,7 +3,8 @@
  *
  * Waits for Spicetify, tracks playback position (interpolated between
  * onprogress events), resolves an UltraStar chart for the current track, and
- * renders <KaraokeView> into a fullscreen overlay toggled with the `K` hotkey.
+ * renders <KaraokeView> into a fullscreen overlay: `K` opens the menu, `Q`
+ * sings the current track.
  *
  * NOTE (real-runtime, stage 2): the cache layer (src/cache.ts) uses node:fs to
  * persist songs under ~/spicetify-karaoke/. That requires a Node-capable
@@ -23,6 +24,7 @@ import { HomeMenu } from "./home-menu";
 import {
   SessionSetup,
   SessionHud,
+  MicOverlay,
   RoundEnd,
   SessionResultScreen,
   NoChartInSession,
@@ -48,7 +50,7 @@ import {
 } from "./playlist-source";
 import { startMicPitch, enumerateInputs, type MicPitch, type AudioInput } from "./mic";
 import { resolveForTrack, confirmPick } from "./resolver-client";
-import { sensitivityToThreshold } from "./pitch";
+import { sensitivityToThreshold, thresholdToSensitivity } from "./pitch";
 import { parse, type ParsedSong } from "./ultrastar-parser";
 import type { USDBSong } from "./usdb";
 
@@ -157,11 +159,11 @@ function showReadout(text: string): void {
       left: "50%",
       transform: "translateX(-50%)",
       zIndex: "1000",
-      padding: "8px 16px",
-      borderRadius: "18px",
+      padding: "32px 64px",
+      borderRadius: "72px",
       background: "rgba(10, 10, 14, 0.92)",
       color: "#fff",
-      font: "600 13px 'Spotify Circular', system-ui, sans-serif",
+      font: "600 52px 'Spotify Circular', system-ui, sans-serif",
       pointerEvents: "none",
       opacity: "0",
       transition: "opacity 180ms ease",
@@ -218,38 +220,47 @@ function punchSync(): void {
 // M toggles the mics. Each player's read() is polled by <KaraokeView> every
 // frame via its own getPitchMidi; all the analysis is the pure detectPitch().
 
-/** The roster whose mics we run: a versus session's players, or a lone "You". */
+/** The roster whose mics we run: a versus session's players, or solo's "You". */
 function activeRoster(): PlayerSlot[] {
-  return session ? sessionRoster : [{ name: "You", gain: 1 }];
+  return session ? sessionRoster : soloRoster;
+}
+
+/** Write back to whichever roster is live — in-game edits must persist to it. */
+function setActiveRoster(next: PlayerSlot[]): void {
+  if (session) sessionRoster = next;
+  else soloRoster = next;
+}
+
+/** Open one mic for roster slot i, or null if its device won't open. */
+async function openMic(p: PlayerSlot): Promise<MicPitch | null> {
+  try {
+    return await startMicPitch({
+      deviceId: p.deviceId,
+      gain: p.gain,
+      rmsThreshold: sensitivityToThreshold(p.sensitivity),
+    });
+  } catch (err) {
+    // One player's device failing shouldn't sink the others.
+    console.error(`[singify] mic for ${p.name} failed:`, err);
+    Spicetify.showNotification?.(`Mic unavailable for ${p.name}`, true);
+    return null;
+  }
 }
 
 /** Start one mic per player in the active roster — each on its own device. */
 async function startMics(): Promise<void> {
   const roster = activeRoster();
-  const slots: MicSlot[] = [];
-  for (const p of roster) {
-    try {
-      const pitch = await startMicPitch({
-        deviceId: p.deviceId,
-        gain: p.gain,
-        rmsThreshold: sensitivityToThreshold(sensitivity),
-      });
-      slots.push({ name: p.name, gain: p.gain, pitch });
-    } catch (err) {
-      // One player's device failing shouldn't sink the others.
-      console.error(`[singify] mic for ${p.name} failed:`, err);
-      Spicetify.showNotification?.(`Mic unavailable for ${p.name}`, true);
-    }
-  }
-  mics = slots;
-  if (mics.length === 0) Spicetify.showNotification?.("Mic access denied", true);
-  else Spicetify.showNotification?.(mics.length > 1 ? `🎤 ${mics.length} mics on` : "🎤 Mic on");
+  mics = await Promise.all(roster.map(openMic));
+  const live = micCount();
+  if (live === 0) Spicetify.showNotification?.("Mic access denied", true);
+  else Spicetify.showNotification?.(live > 1 ? `🎤 ${live} mics on` : "🎤 Mic on");
+  void loadDevices(); // the in-game device picker needs labels
   if (visible) renderOverlay(); // start a fresh scored attempt
 }
 
 /** Stop every mic and drop scoring/HUD. `quiet` suppresses the toast (restart). */
 function stopMics(quiet = false): void {
-  for (const m of mics) m.pitch.stop();
+  for (const m of mics) m?.stop();
   mics = [];
   if (!quiet) Spicetify.showNotification?.("Mic off");
   if (visible) renderOverlay();
@@ -261,8 +272,52 @@ async function toggleMics(): Promise<void> {
   else await startMics();
 }
 
+function micCount(): number {
+  return mics.filter(Boolean).length;
+}
+
 function micsActive(): boolean {
-  return mics.length > 0;
+  return micCount() > 0;
+}
+
+// ── Per-player mic controls (live, in-game) ─────────────────────────────────
+//
+// The banner edits the ACTIVE roster, and each change is pushed at the one
+// running mic that owns it. Gain and gate apply without a restart; only a
+// device swap has to tear its mic down and open a new one.
+
+/** Apply a patch to active-roster slot i and re-render. */
+function patchSlot(i: number, patch: Partial<PlayerSlot>): PlayerSlot | null {
+  const roster = activeRoster();
+  const slot = roster[i];
+  if (!slot) return null;
+  const next = { ...slot, ...patch };
+  setActiveRoster(roster.map((p, j) => (j === i ? next : p)));
+  return next;
+}
+
+function setPlayerGain(i: number, gain: number): void {
+  if (!patchSlot(i, { gain })) return;
+  mics[i]?.setGain(gain); // live — no restart
+  if (visible) renderOverlay();
+}
+
+function setPlayerSensitivity(i: number, value: number): void {
+  const n = Math.min(100, Math.max(0, Math.round(value)));
+  if (!patchSlot(i, { sensitivity: n })) return;
+  mics[i]?.setOptions({ rmsThreshold: sensitivityToThreshold(n) });
+  savePlayerSensitivities(activeRoster());
+  if (visible) renderOverlay();
+}
+
+async function setPlayerDevice(i: number, deviceId: string | undefined): Promise<void> {
+  const next = patchSlot(i, { deviceId });
+  if (!next) return;
+  if (mics.length) {
+    mics[i]?.stop();
+    mics[i] = await openMic(next); // a device swap is the one thing that restarts
+  }
+  if (visible) renderOverlay();
 }
 
 /**
@@ -271,12 +326,19 @@ function micsActive(): boolean {
  * marker/HUD colour is by slot index, matching the setup-screen dots.
  */
 function activePlayers(): PlayerInput[] {
-  return mics.map((m, i) => ({
-    id: `mic${i}`,
-    name: m.name,
-    color: PLAYER_COLORS[i % PLAYER_COLORS.length],
-    getPitchMidi: () => m.pitch.read()?.midi ?? null,
-  }));
+  const roster = activeRoster();
+  const out: PlayerInput[] = [];
+  mics.forEach((m, i) => {
+    const p = roster[i];
+    if (!m || !p) return;
+    out.push({
+      id: `mic${i}`,
+      name: p.name,
+      color: PLAYER_COLORS[i % PLAYER_COLORS.length],
+      getPitchMidi: () => m.read()?.midi ?? null,
+    });
+  });
+  return out;
 }
 
 /** "Sing again" from the result screen — restart the track from the top. */
@@ -295,24 +357,79 @@ function onReplay(): void {
 // immediately to a running mic. A property of the mic port — the view is untouched.
 
 const SENS_KEY = "singify:sensitivity";
+// Bumped whenever the sensitivity→RMS curve changes: the stored 0..100 number is
+// meaningless without the curve it was written against. v2 widened the gate's
+// quiet-end limit (0.05 → 0.12 RMS) so a genuinely loud room can be gated out.
+const SENS_SCALE_KEY = "singify:sensitivityScale";
+const SENS_SCALE = "v2";
+
+/** The v1 curve — kept ONLY to re-express an old stored value on the v2 one. */
+function v1Threshold(sensitivity: number): number {
+  const s = Math.min(100, Math.max(0, sensitivity));
+  return 0.05 * (0.003 / 0.05) ** (s / 100);
+}
 
 function loadSensitivity(): number {
   const v = Number(localStorage.getItem(SENS_KEY));
-  return Number.isFinite(v) && v >= 0 && v <= 100 ? v : 60;
+  if (!Number.isFinite(v) || v < 0 || v > 100) return 70;
+  if (localStorage.getItem(SENS_SCALE_KEY) === SENS_SCALE) return v;
+  // Migrate by GATE, not by number: convert the old slider value to the RMS it
+  // used to mean, then ask the new curve for the slider value that means it.
+  const migrated = Math.round(thresholdToSensitivity(v1Threshold(v)));
+  try {
+    localStorage.setItem(SENS_KEY, String(migrated));
+    localStorage.setItem(SENS_SCALE_KEY, SENS_SCALE);
+  } catch {
+    /* storage blocked — the in-memory value is migrated either way */
+  }
+  return migrated;
 }
 
+// The gate is PER PLAYER (each meter drags its own). This global is two things:
+// the default handed to a freshly added slot, and what the -/= hotkeys set —
+// they move everybody at once, which is the "the room got loud" case.
 let sensitivity = loadSensitivity();
+
+/** Per-slot gates, by roster index; a slot with no stored value takes the default. */
+const PLAYER_SENS_KEY = "singify:playerSens";
+
+function loadPlayerSensitivities(): number[] {
+  try {
+    const raw = JSON.parse(localStorage.getItem(PLAYER_SENS_KEY) ?? "[]");
+    return Array.isArray(raw) ? raw.filter((n) => typeof n === "number") : [];
+  } catch {
+    return [];
+  }
+}
+
+function savePlayerSensitivities(roster: PlayerSlot[]): void {
+  try {
+    localStorage.setItem(PLAYER_SENS_KEY, JSON.stringify(roster.map((p) => p.sensitivity)));
+  } catch {
+    /* storage blocked — the in-memory roster still holds the values */
+  }
+}
+
+/** The gate a newly created slot at index i starts from. */
+function defaultSensitivityFor(i: number): number {
+  return loadPlayerSensitivities()[i] ?? sensitivity;
+}
 
 function setSensitivity(next: number): void {
   sensitivity = Math.min(100, Math.max(0, Math.round(next)));
   try {
     localStorage.setItem(SENS_KEY, String(sensitivity));
+    localStorage.setItem(SENS_SCALE_KEY, SENS_SCALE);
   } catch {
     /* storage blocked — keep the in-memory value */
   }
   const t = sensitivityToThreshold(sensitivity);
-  for (const m of mics) m.pitch.setOptions({ rmsThreshold: t });
+  // -/= is the blunt instrument: every singer's gate moves together.
+  setActiveRoster(activeRoster().map((p) => ({ ...p, sensitivity })));
+  setupRoster = setupRoster.map((p) => ({ ...p, sensitivity }));
+  for (const m of mics) m?.setOptions({ rmsThreshold: t });
   for (const m of previewMics) m?.setOptions({ rmsThreshold: t });
+  savePlayerSensitivities(activeRoster());
   showReadout(`🎤 Sensitivity ${sensitivity}%`);
   if (visible) renderOverlay(); // move the gate marker on every live meter
 }
@@ -356,7 +473,7 @@ let overlay: HTMLDivElement | null = null;
 let root: { render(el: unknown): void; unmount(): void } | null = null;
 let currentSong: ParsedSong | null = null;
 let visible = false;
-// Which screen the overlay shows. "sing" is the karaoke surface (K / Quick Sing,
+// Which screen the overlay shows. "sing" is the karaoke surface (Q / Quick Sing,
 // today's behaviour); the rest are the session flow.
 type Screen = "home" | "sing" | "session-setup" | "round-end" | "session-result";
 // NB: named `activeScreen`, NOT `screen`. Spicetify loads this bundle as a classic
@@ -370,11 +487,19 @@ let activeScreen: Screen = "sing";
 // choice on the setup screen; lastRound + scoredTrackIds track round bookkeeping.
 let session: Session | null = null;
 let setupRounds = 5;
+/** A fresh roster slot: unity gain on the default mic, with slot i's saved gate. */
+function newSlot(i: number, name: string): PlayerSlot {
+  return { name, gain: 1, sensitivity: defaultSensitivityFor(i) };
+}
+
 // Versus roster chosen on the setup screen: each player + their mic device + gain.
-let setupRoster: PlayerSlot[] = [{ name: "You", gain: 1 }];
+let setupRoster: PlayerSlot[] = [newSlot(0, "You")];
 // Snapshot of the roster taken when a session starts (the setup screen can keep
 // changing after). Solo/Quick-Sing uses a lone default-device "You".
-let sessionRoster: PlayerSlot[] = [{ name: "You", gain: 1 }];
+let sessionRoster: PlayerSlot[] = [newSlot(0, "You")];
+// Solo / Quick-Sing has a roster too, so its single mic gets the same live
+// controls (gate, gain, device) the versus banner gives every player.
+let soloRoster: PlayerSlot[] = [newSlot(0, "You")];
 // Audio input devices for the setup mic picker (populated when it opens).
 let audioInputs: AudioInput[] = [];
 let lastRound: RoundResult | null = null;
@@ -397,15 +522,13 @@ let pickerCandidates: USDBSong[] | null = null;
 let pickPending: number | null = null;
 let pickError: string | null = null;
 
-// One live mic per active player (versus). Empty = mic off. Solo/Quick-Sing has
-// exactly one. `mics` is not a Window global (unlike `screen`), so it's safe at
-// module scope; see the activeScreen note above for why that matters.
-interface MicSlot {
-  name: string;
-  gain: number;
-  pitch: MicPitch;
-}
-let mics: MicSlot[] = [];
+// One entry per slot of the ACTIVE ROSTER, index-aligned to it; null means that
+// player's device failed to open while the others carried on. Empty = mic off.
+// Keeping the indices aligned is what lets a per-player control (gain, gate,
+// device) address one singer, and keeps colours pinned to roster position even
+// when a mic in the middle fails. `mics` is not a Window global (unlike
+// `screen`), so it's safe at module scope; see the activeScreen note above.
+let mics: (MicPitch | null)[] = [];
 // Live preview mics on the setup screen — one per roster slot — so you can tune
 // gain + gate against a moving meter BEFORE the session starts. Parallel to
 // setupRoster; stopped when the session begins or the setup screen is left.
@@ -489,7 +612,10 @@ function renderOverlay(): void {
         },
         onAddPlayer: () => {
           if (setupRoster.length >= 4) return;
-          setupRoster = [...setupRoster, { name: `P${setupRoster.length + 1}`, gain: 1 }];
+          setupRoster = [
+            ...setupRoster,
+            newSlot(setupRoster.length, `P${setupRoster.length + 1}`),
+          ];
           void startPreviewMic(setupRoster.length - 1);
           renderOverlay();
         },
@@ -502,8 +628,12 @@ function renderOverlay(): void {
         },
         devices: audioInputs,
         levelFor: previewLevel,
-        sensitivity,
-        onSensitivity: (n: number) => setSensitivity(n),
+        onSensitivity: (i: number, n: number) => {
+          setupRoster = setupRoster.map((q, j) => (j === i ? { ...q, sensitivity: n } : q));
+          previewMics[i]?.setOptions({ rmsThreshold: sensitivityToThreshold(n) });
+          savePlayerSensitivities(setupRoster);
+          renderOverlay();
+        },
         onStart: startSession,
         onCancel: () => {
           stopPreviews();
@@ -585,8 +715,28 @@ function renderOverlay(): void {
             "No karaoke chart for this track."
           );
 
+  // Live level meters ride over the karaoke surface in BOTH modes as one centred
+  // banner, so a singer can watch their level against the gate mid-song. A
+  // session adds its own HUD (round/total/buttons) beside it, top-left.
+  // Index-aligned to the active roster; a slot whose device failed is dropped so
+  // the banner only shows strips you can actually watch move.
+  const hudMics = activeRoster()
+    .map((p, i) => ({ ...p, index: i, pitch: mics[i] }))
+    .filter((e) => e.pitch)
+    .map((e) => ({ ...e, getLevel: () => e.pitch?.level() ?? 0 }));
+  const micBanner = hudMics.length
+    ? React.createElement(MicOverlay, {
+        mics: hudMics,
+        devices: audioInputs,
+        onGain: (i: number, gain: number) => setPlayerGain(hudMics[i]?.index ?? i, gain),
+        onSensitivity: (i: number, n: number) =>
+          setPlayerSensitivity(hudMics[i]?.index ?? i, n),
+        onDevice: (i: number, deviceId: string | undefined) =>
+          void setPlayerDevice(hudMics[i]?.index ?? i, deviceId),
+      })
+    : null;
+
   if (session) {
-    const hudMics = mics.map((m) => ({ name: m.name, getLevel: () => m.pitch.level() }));
     root.render(
       React.createElement(
         "div",
@@ -594,14 +744,27 @@ function renderOverlay(): void {
         React.createElement(SessionHud, {
           round: Math.min(session.rounds.length + 1, session.targetRounds),
           target: session.targetRounds,
-          sessionTotal: sessionTotal(),
-          mics: hudMics,
-          sensitivity,
-          onSensitivity: (n: number) => setSensitivity(n),
+          totals: sessionTotals(),
+          micsOn: micsActive(),
           onSkip: skipRound,
           onEnd: endSession,
+          autoSkip: autoSkipNoChart,
+          onAutoSkip: setAutoSkip,
           sourceName: session.playlistName,
         }),
+        micBanner,
+        singContent
+      )
+    );
+    return;
+  }
+
+  if (micBanner) {
+    root.render(
+      React.createElement(
+        "div",
+        { style: { position: "relative", height: "100vh" } },
+        micBanner,
         singContent
       )
     );
@@ -619,7 +782,7 @@ function setVisible(next: boolean): void {
   else stopPreviews(); // closing the overlay releases any setup preview mics
 }
 
-// K → the karaoke surface (Quick Sing); toggles closed if already there.
+// Q → the karaoke surface (Quick Sing); toggles closed if already there.
 function openSing(): void {
   if (visible && activeScreen === "sing") {
     setVisible(false);
@@ -629,7 +792,7 @@ function openSing(): void {
   setVisible(true);
 }
 
-// Topbar button → the session menu; toggles closed if already there.
+// K / Topbar button → the session menu; toggles closed if already there.
 function openHome(): void {
   if (visible && activeScreen === "home") {
     setVisible(false);
@@ -640,6 +803,13 @@ function openHome(): void {
 }
 
 // ── Sessions (multi-round) ───────────────────────────────────────────────────
+
+/** Per-player running totals across completed rounds, in roster order. */
+function sessionTotals(): { name: string; total: number }[] {
+  return session
+    ? summarize(session).players.map((p) => ({ name: p.player, total: p.total }))
+    : [];
+}
 
 /** Running score across the rounds completed so far (headline player). */
 function sessionTotal(): number {
@@ -688,7 +858,7 @@ async function startPreviewMic(i: number): Promise<void> {
     previewMics[i] = await startMicPitch({
       deviceId: p.deviceId,
       gain: p.gain,
-      rmsThreshold: sensitivityToThreshold(sensitivity),
+      rmsThreshold: sensitivityToThreshold(p.sensitivity),
     });
   } catch (err) {
     console.error(`[singify] preview mic for ${p.name} failed:`, err);
@@ -800,6 +970,31 @@ function continueSession(): void {
   }
 }
 
+// ── Auto-skip chartless tracks (sessions) ───────────────────────────────────
+//
+// A 79-track playlist is full of songs USDB has never seen. With this on a
+// session hops straight past them instead of parking on the no-chart card. Only
+// a genuine "nothing found" triggers it — a picker means we DID find candidates,
+// which is a choice worth stopping for.
+const AUTOSKIP_KEY = "singify:autoSkipNoChart";
+let autoSkipNoChart = localStorage.getItem(AUTOSKIP_KEY) === "1";
+// Without a cap, a long chartless stretch would race through the whole playlist
+// in seconds. After this many misses in a row, switch the toggle back off so the
+// stop is VISIBLE in the HUD rather than being invisible internal state.
+const AUTOSKIP_LIMIT = 8;
+let autoSkipStreak = 0;
+
+function setAutoSkip(on: boolean): void {
+  autoSkipNoChart = on;
+  autoSkipStreak = 0;
+  try {
+    localStorage.setItem(AUTOSKIP_KEY, on ? "1" : "0");
+  } catch {
+    /* storage blocked — keep the in-memory value */
+  }
+  if (visible) renderOverlay();
+}
+
 /** From the HUD "Skip" — don't count this song; play another. Slot stays open. */
 function skipRound(): void {
   try {
@@ -890,6 +1085,7 @@ async function onSongChange(): Promise<void> {
   pickPending = null;
   pickError = null;
   resolving = true; // chart lookup in flight
+  let noChart = false; // set when the lookup finds nothing at all (not a picker)
   if (visible) renderOverlay();
 
   try {
@@ -900,16 +1096,20 @@ async function onSongChange(): Promise<void> {
       res.status === "local"
     ) {
       currentSong = res.song;
+      autoSkipStreak = 0; // a hit ends the chartless run
     } else if (res.status === "needsPicker") {
       pickerQuery = { artist, title };
       pickerCandidates = res.candidates;
       if (!visible) {
         Spicetify.showNotification?.(
-          `Karaoke: ${res.candidates.length} matches for “${title}” — press K to choose`
+          `Karaoke: ${res.candidates.length} matches for “${title}” — press Q to choose`
         );
       }
     } else {
-      Spicetify.showNotification?.(`No karaoke chart for “${title}”`);
+      noChart = true;
+      if (!(session && autoSkipNoChart)) {
+        Spicetify.showNotification?.(`No karaoke chart for “${title}”`);
+      }
     }
   } catch (err) {
     console.error("[singify] resolve failed:", err);
@@ -928,6 +1128,20 @@ async function onSongChange(): Promise<void> {
   // In a session, playing a new song advances from the between-rounds screen
   // back to singing (the follow model — you queued up the next song).
   if (session && activeScreen === "round-end") activeScreen = "sing";
+
+  if (noChart && session && autoSkipNoChart) {
+    if (autoSkipStreak >= AUTOSKIP_LIMIT) {
+      Spicetify.showNotification?.(
+        `Auto-skip off — ${AUTOSKIP_LIMIT} tracks in a row had no chart`,
+        true
+      );
+      setAutoSkip(false);
+    } else {
+      autoSkipStreak++;
+      skipRound(); // the next songchange renders; nothing is recorded
+      return;
+    }
+  }
 
   if (visible) renderOverlay();
 }
@@ -1002,7 +1216,7 @@ async function main(): Promise<void> {
   Spicetify.Player.addEventListener("onplaypause", onPlayPause);
   Spicetify.Player.addEventListener("songchange", () => void onSongChange());
 
-  // Topbar entry point for sessions (K still goes straight to Quick Sing). Typed
+  // Topbar entry point for the menu — the same door as the K hotkey. Typed
   // loosely — Spicetify.Topbar isn't in our .d.ts and may be absent on old builds.
   const S = Spicetify as unknown as {
     Topbar?: {
@@ -1029,7 +1243,9 @@ async function main(): Promise<void> {
     if (typing) return;
 
     if (e.key === "k" || e.key === "K") {
-      openSing(); // Quick Sing the current track
+      openHome(); // the menu — same as the Topbar button
+    } else if (e.key === "q" || e.key === "Q") {
+      openSing(); // straight to Quick Sing on the current track
     } else if (e.key === "Escape") {
       if (visible) setVisible(false); // close the overlay
     } else if (e.key === "[") {

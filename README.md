@@ -75,10 +75,11 @@ USDB account needed. Free CC-licensed charts: [UltraStar-Deluxe/songs](https://g
 
 | Action | Spotify | Harness |
 | --- | --- | --- |
-| Toggle karaoke overlay | `K` | (always shown) |
+| Open the menu | `K` | — |
+| Quick Sing (karaoke overlay) | `Q` | (always shown) |
 | Nudge lyrics later / earlier | `[` / `]` (±20 ms) | −20 / +20 buttons |
 | Reset sync | `\` | ⟲ reset |
-| Choose among matches | picker overlay (press `K`) | "Picker demo →" toggle |
+| Choose among matches | picker overlay (press `Q`) | "Picker demo →" toggle |
 | Toggle mic (live pitch) | `M` | 🎤 Mic button |
 | Mic sensitivity − / + | `-` / `=` (±5%) | sensitivity slider |
 | Pitch diagnostics overlay | — | 🔬 Debug toggle |

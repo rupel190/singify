@@ -85,14 +85,32 @@ export interface FrameDebug {
   markerHit: boolean;
 }
 
-// Horizontal scale of the pitch lane: pixels per millisecond of song time.
-const PX_PER_MS = 0.18;
 // The "now" line sits this fraction from the left edge of the lane.
 const NOW_FRACTION = 0.25;
-const NOTE_HEIGHT = 14; // px
+// Horizontal scale is DERIVED from the measured lane, never hardcoded: what
+// should hold constant between a laptop and a 4K TV is how many seconds of song
+// are visible ahead of the now-line — so the zoom follows the width, not the
+// other way round. A fixed px/ms tuned on a 1200px lane draws 36px syllables on
+// a 3800px one, which is what made the chart read as scattered dashes.
+const LOOKAHEAD_MS = 4000; // seconds of song visible right of the now-line
+const FALLBACK_PX_PER_MS = 0.18; // only until the lane has been measured once
+// Vertical layout. A semitone gets AT MOST this many pixels: uncapped, the
+// song's range is stretched to fill whatever height the lane has, so a tall
+// panel flings a modest melody from floor to ceiling. Capping the spacing and
+// centring the used band keeps the melody reading as a line. Note thickness
+// follows the row spacing, so bars are as fat as they can be without merging.
+const MAX_PX_PER_SEMITONE = 40;
+const NOTE_FILL = 0.6; // note thickness as a fraction of its semitone row
+const MAX_NOTE_HEIGHT = 30;
+const MIN_NOTE_HEIGHT = 10;
 const LANE_VPAD = 24; // px of vertical padding inside the lane
 const HIT_TOLERANCE = 2; // semitones — Easy (Medium=1, Hard=0 later)
-const GUTTER = 120; // px — left axis reserved for pitch-name labels (Performous-style)
+// Left axis reserved for the pitch-name labels (Performous-style). DERIVED from
+// the label size, not a flat number: at 60px a 4-glyph name like "A♯-1" is ~150px
+// wide, so the old 120 let labels spill into the lane and crowd player 2's score
+// HUD in the bottom-left corner. Still far left of the now-line (25% of the lane).
+const AXIS_LABEL_SIZE = 60;
+const GUTTER = 12 + Math.round(AXIS_LABEL_SIZE * 2.6);
 const TRAIL_MS = 850; // how far back (ms) the sung-pitch trail reaches
 const TRAIL_MAX = 96; // ring-buffer cap (frames) — a safety bound on dot count
 
@@ -280,17 +298,28 @@ export function KaraokeView(props: KaraokeViewProps) {
 
   const [minPitch, maxPitch] = useMemo(() => getPitchRange(song), [song]);
   const pitchSpan = Math.max(1, maxPitch - minPitch);
-  const innerH = Math.max(NOTE_HEIGHT, lane.h - LANE_VPAD * 2);
+  const innerH = Math.max(MIN_NOTE_HEIGHT, lane.h - LANE_VPAD * 2);
+
+  // Row spacing first, then everything vertical follows from it: note thickness
+  // is a fraction of a row (so bars can never merge), and the band the melody
+  // occupies is centred in whatever height is left over.
+  const pxPerSemi = Math.min(MAX_PX_PER_SEMITONE, innerH / (pitchSpan + 1));
+  const noteH = Math.max(
+    MIN_NOTE_HEIGHT,
+    Math.min(MAX_NOTE_HEIGHT, Math.round(pxPerSemi * NOTE_FILL))
+  );
+  const bandH = pxPerSemi * pitchSpan; // vertical travel from lowest to highest
+  const bandTop = LANE_VPAD + Math.max(0, (innerH - bandH - noteH) / 2);
+  // One second of song in pixels — see LOOKAHEAD_MS.
+  const pxPerMs =
+    lane.w > 0 ? (lane.w * (1 - NOW_FRACTION)) / LOOKAHEAD_MS : FALLBACK_PX_PER_MS;
 
   const yForPitch = (pitch: number): number => {
     const t = (pitch - minPitch) / pitchSpan; // 0..1, low..high
-    return LANE_VPAD + (1 - t) * (innerH - NOTE_HEIGHT);
+    return bandTop + (1 - t) * bandH;
   };
   // Vertical centre of a note row (grid lines + axis labels align to this).
-  const yCenterForPitch = (pitch: number): number => yForPitch(pitch) + NOTE_HEIGHT / 2;
-
-  // Pitch-name axis labels — big, matched toward the lyric size.
-  const axisLabelSize = 60;
+  const yCenterForPitch = (pitch: number): number => yForPitch(pitch) + noteH / 2;
 
   // Labelled pitch rows for the left axis. Cap the row count to what the lane
   // height can hold without the (now large) labels colliding — so the vertical
@@ -299,12 +328,12 @@ export function KaraokeView(props: KaraokeViewProps) {
     const lo = Math.floor(minPitch);
     const hi = Math.ceil(maxPitch);
     const span = Math.max(1, hi - lo);
-    const maxRows = Math.max(2, Math.min(7, Math.floor(innerH / (axisLabelSize * 1.8))));
+    const maxRows = Math.max(2, Math.min(7, Math.floor(bandH / (AXIS_LABEL_SIZE * 1.8))));
     const step = Math.max(1, Math.ceil(span / (maxRows - 1)));
     const rows: number[] = [];
     for (let m = lo; m <= hi; m += step) rows.push(m);
     return rows;
-  }, [minPitch, maxPitch, innerH, axisLabelSize]);
+  }, [minPitch, maxPitch, bandH]);
 
   // Notes are positioned once by absolute time; only the track transform moves.
   const noteEls = useMemo(() => {
@@ -318,11 +347,11 @@ export function KaraokeView(props: KaraokeViewProps) {
             key={key++}
             style={{
               position: "absolute",
-              left: s.startMs * PX_PER_MS,
-              width: Math.max(3, s.durationMs * PX_PER_MS - 2),
+              left: s.startMs * pxPerMs,
+              width: Math.max(3, s.durationMs * pxPerMs - 2),
               top: yForPitch(s.pitch),
-              height: NOTE_HEIGHT,
-              borderRadius: NOTE_HEIGHT / 2,
+              height: noteH,
+              borderRadius: noteH / 2,
               background: s.type === "golden" ? COLORS.noteGolden : COLORS.noteNormal,
               boxShadow:
                 s.type === "golden" ? "0 0 8px rgba(230,180,34,0.6)" : "none",
@@ -333,20 +362,19 @@ export function KaraokeView(props: KaraokeViewProps) {
     }
     return els;
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [song, lane.h, minPitch, maxPitch]);
+  }, [song, lane.h, lane.w, minPitch, maxPitch]);
 
   const nowX = lane.w * NOW_FRACTION;
-  const trackTranslate = nowX - positionMs * PX_PER_MS;
+  const trackTranslate = nowX - positionMs * pxPerMs;
 
   // Map a (folded, smoothed) pitch to its Y centre on the lane. The fold + smooth
   // + hit test already ran in computeFrame (USDX UNote.pas:548-571 style — fold
   // into the target note's octave so a rising interval reads as rising, then
   // snap on a hit); here we just place it.
   const yForMarker = (pitch: number): number =>
-    LANE_VPAD +
-    (1 - Math.min(1, Math.max(0, (pitch - minPitch) / pitchSpan))) *
-      (innerH - NOTE_HEIGHT) +
-    NOTE_HEIGHT / 2;
+    bandTop +
+    (1 - Math.min(1, Math.max(0, (pitch - minPitch) / pitchSpan))) * bandH +
+    noteH / 2;
 
   // Zip the per-frame results back to their inputs (colour/name), in order.
   const rendered = frame.players
@@ -403,18 +431,31 @@ export function KaraokeView(props: KaraokeViewProps) {
         fontFamily:
           "var(--font-family, 'Spotify Circular', system-ui, sans-serif)",
         gap: 12,
-        // Extra headroom up top so the HUD + score readouts don't hug the edge;
-        // it comes out of the note lane (flex:1), which can spare it.
-        padding: fullscreen ? "52px 24px 20px" : 16,
+        // Headroom up top (clears Spotify's window chrome); the note highway then
+        // takes the FULL display width. It used to be capped at 1200px "to stay
+        // glanceable", but on a 4K panel that spent 30% of the screen and made
+        // every element read tiny — the cap was the reason things needed scaling.
+        padding: fullscreen ? "56px 28px 24px" : 16,
         boxSizing: "border-box",
       }}
     >
-      {/* ── Pitch lane ── */}
+      {/* ── Pitch lane ──
+          Sits in a growing box but only fills 75% of it, bottom-aligned: the
+          quarter it gives back is headroom at the top for the mic banner. */}
+      <div
+        style={{
+          flex: "1 1 auto",
+          minHeight: 0,
+          display: "flex",
+          flexDirection: "column",
+          justifyContent: "flex-end",
+        }}
+      >
       <div
         ref={laneRef}
         style={{
           position: "relative",
-          flex: "1 1 auto", // the note highway is the hero — it fills the stage
+          height: "75%",
           minHeight: 160,
           overflow: "hidden",
           borderRadius: 10,
@@ -440,8 +481,8 @@ export function KaraokeView(props: KaraokeViewProps) {
                 style={{
                   position: "absolute",
                   left: 10,
-                  top: y - axisLabelSize / 2,
-                  fontSize: axisLabelSize,
+                  top: y - AXIS_LABEL_SIZE / 2,
+                  fontSize: AXIS_LABEL_SIZE,
                   fontWeight: 600,
                   lineHeight: 1,
                   color: COLORS.axisLabel,
@@ -499,7 +540,7 @@ export function KaraokeView(props: KaraokeViewProps) {
           const eng = enginesRef.current.get(r.id);
           if (!eng) return null;
           return eng.trail.map((p, i) => {
-            const x = nowX + (p.ms - positionMs) * PX_PER_MS;
+            const x = nowX + (p.ms - positionMs) * pxPerMs;
             if (x < GUTTER + 4) return null; // don't paint under the label gutter
             const o = Math.max(0, 1 - (positionMs - p.ms) / TRAIL_MS);
             const size = 3 + o * 3;
@@ -552,29 +593,31 @@ export function KaraokeView(props: KaraokeViewProps) {
           );
         })}
 
-        {/* running score HUD per player — player 0 top-right, player 1 top-left,
-            each tinted its colour; the name shows only in multiplayer. */}
+        {/* running score HUD per player — anchored to the BOTTOM of the lane so
+            the top stays clear. Player order matches the mic banner above: slot 0
+            bottom-LEFT (past the pitch-label gutter), slot 1 bottom-right. Each
+            tinted its colour; name only in multiplayer. */}
         {rendered.map((r, i) =>
           r.score ? (
             <div
               key={r.id}
               style={{
                 position: "absolute",
-                top: 8,
-                [i === 0 ? "right" : "left"]: 12,
-                textAlign: i === 0 ? "right" : "left",
+                bottom: 12,
+                [i === 0 ? "left" : "right"]: i === 0 ? GUTTER + 28 : 16,
+                textAlign: i === 0 ? "left" : "right",
                 fontVariantNumeric: "tabular-nums",
                 pointerEvents: "none",
               }}
             >
               {rendered.length > 1 && (
-                <div style={{ fontSize: 22, fontWeight: 800, color: r.input.color, lineHeight: 1 }}>
+                <div style={{ fontSize: 54, fontWeight: 800, color: r.input.color, lineHeight: 1 }}>
                   {r.input.name}
                 </div>
               )}
               <div
                 style={{
-                  fontSize: 80,
+                  fontSize: 90,
                   fontWeight: 800,
                   lineHeight: 1,
                   color: rendered.length > 1 ? r.input.color : COLORS.nowLine,
@@ -583,12 +626,13 @@ export function KaraokeView(props: KaraokeViewProps) {
               >
                 {r.score.total.toLocaleString()}
               </div>
-              <div style={{ marginTop: 6, fontSize: 24, fontWeight: 600, color: "rgba(255,255,255,0.55)" }}>
+              <div style={{ marginTop: 10, fontSize: 48, fontWeight: 600, color: "rgba(255,255,255,0.55)" }}>
                 {r.score.notesSung}/{r.score.notesTotal} notes
               </div>
             </div>
           ) : null
         )}
+      </div>
       </div>
 
       {/* ── Lyric band (anchored at the bottom, like SingStar/UltraStar) ── */}

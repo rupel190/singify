@@ -25,12 +25,20 @@ export interface MicMeterProps {
   sensitivity: number;
   /** Drag callback with the new sensitivity (0..100); omit for a read-only meter. */
   onSensitivity?: (n: number) => void;
-  /** Optional caption above the bar (e.g. a player name). */
+  /**
+   * Optional caption above the bar — the player's name, nothing else. The gate
+   * reading deliberately does NOT live here: it is one shared number for every
+   * mic, so it is captioned once by the strip instead of repeated per bar.
+   */
   label?: string;
+  /** Caption colour (defaults to muted white); pass the player's tint in versus. */
+  labelColor?: string;
   width?: number | string;
   height?: number;
   /** Fill tint once the level clears the gate (defaults to green). */
   color?: string;
+  /** Caption font size (px). Scales with the bar for the big centred HUD. */
+  labelSize?: number;
 }
 
 export function MicMeter(props: MicMeterProps) {
@@ -44,6 +52,8 @@ export function MicMeter(props: MicMeterProps) {
     width = "100%",
     height = 16,
     color = "#1ed760",
+    labelSize = 12,
+    labelColor = "rgba(255,255,255,0.6)",
   } = props;
 
   // Poll the live level on its own rAF — one re-render per frame, cheap DOM.
@@ -92,21 +102,29 @@ export function MicMeter(props: MicMeterProps) {
   };
 
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 3, width }}>
+    <div
+      style={{
+        display: "flex",
+        flexDirection: "column",
+        gap: Math.max(3, labelSize / 4),
+        width,
+        minWidth: 0,
+      }}
+    >
       {label != null && (
         <div
           style={{
-            display: "flex",
-            justifyContent: "space-between",
-            fontSize: 12,
+            fontSize: labelSize,
             fontWeight: 700,
-            color: "rgba(255,255,255,0.6)",
+            color: labelColor,
+            lineHeight: 1.1,
+            // One line, clipped — a long name must never reflow the bar below it.
+            whiteSpace: "nowrap",
+            overflow: "hidden",
+            textOverflow: "ellipsis",
           }}
         >
-          <span>{label}</span>
-          <span style={{ color: "rgba(255,255,255,0.4)", fontVariantNumeric: "tabular-nums" }}>
-            gate {Math.round(sensitivity)}%
-          </span>
+          {label}
         </div>
       )}
       <div

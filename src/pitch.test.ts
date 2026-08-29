@@ -65,15 +65,15 @@ describe("rms + mic sensitivity", () => {
   });
 
   test("sensitivity maps monotonically to an RMS gate (higher = lower gate)", () => {
-    expect(sensitivityToThreshold(0)).toBeCloseTo(0.05, 5); // least sensitive
+    expect(sensitivityToThreshold(0)).toBeCloseTo(0.12, 5); // least sensitive
     expect(sensitivityToThreshold(100)).toBeCloseTo(0.003, 5); // most sensitive
     expect(sensitivityToThreshold(20)).toBeGreaterThan(sensitivityToThreshold(80));
-    expect(sensitivityToThreshold(60)).toBeLessThan(0.011); // ~ the old default gate
-    expect(sensitivityToThreshold(60)).toBeGreaterThan(0.008);
+    expect(sensitivityToThreshold(70)).toBeLessThan(0.011); // ~ the old default gate
+    expect(sensitivityToThreshold(70)).toBeGreaterThan(0.008);
   });
 
   test("sensitivity clamps out-of-range input", () => {
-    expect(sensitivityToThreshold(-50)).toBeCloseTo(0.05, 5);
+    expect(sensitivityToThreshold(-50)).toBeCloseTo(0.12, 5);
     expect(sensitivityToThreshold(999)).toBeCloseTo(0.003, 5);
   });
 

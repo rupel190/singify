@@ -24,7 +24,14 @@ import {
   type PlayerInput,
 } from "../src/karaoke-view";
 import { SongPicker } from "../src/song-picker";
-import { SessionSetup, NoChartInSession, SessionResultScreen } from "../src/session-view";
+import {
+  SessionSetup,
+  SessionHud,
+  MicOverlay,
+  NoChartInSession,
+  SessionResultScreen,
+  type PlayerSlot,
+} from "../src/session-view";
 import type { PlaylistRef } from "../src/playlist-source";
 import {
   createSession,
@@ -329,9 +336,20 @@ function App() {
     { uri: "spotify:playlist:3", name: "Power Ballads (feat. way too many key changes)", count: 40 },
     { uri: "spotify:playlist:4", name: "Shower Setlist", count: null },
   ];
+  const MOCK_DEVICES = [
+    { deviceId: "default", label: "Built-in Microphone" },
+    { deviceId: "usb", label: "USB Podcast Mic" },
+    { deviceId: "headset", label: "Gaming Headset" },
+  ];
   const [plLoading, setPlLoading] = React.useState(false);
   const [setupRounds, setSetupRounds] = React.useState(5);
-  const [setupPlayers, setSetupPlayers] = React.useState<string[]>(["You"]);
+  const [setupRoster, setSetupRoster] = React.useState<PlayerSlot[]>([
+    { name: "You", gain: 1, sensitivity: 70 },
+  ]);
+  // Fullscreen in-game overlay (SessionHud + KaraokeView) — the exact Spotify
+  // stage, so its layout can be tuned in-browser. ?screen=ingame opens straight in.
+  const [inGame, setInGame] = React.useState(params.get("screen") === "ingame");
+  const [autoSkip, setAutoSkip] = React.useState(false);
   const [sessionMsg, setSessionMsg] = React.useState<string | null>(null);
   // A mock 2-player hotseat result, built with the real session helpers.
   const demoSummary = React.useMemo(() => {
@@ -478,6 +496,31 @@ function App() {
       ? [{ id: "mic0", name: "You", color: PLAYER_COLORS[0], getPitchMidi: getLivePitchMidi }]
       : [];
 
+  // For the in-game overlay demo, always render at least one singer so the HUD +
+  // score have something to show even with no mic and 2P off.
+  const gamePlayers: PlayerInput[] =
+    players.length > 0
+      ? players
+      : [{ id: "you", name: "You", color: PLAYER_COLORS[0], getPitchMidi: singerA }];
+
+  // Synthetic levels for the in-game meters — the harness has no live mic here,
+  // so the banner still moves and can be eyeballed at its real size.
+  const [hudSlots, setHudSlots] = React.useState<PlayerSlot[]>([]);
+  React.useEffect(() => {
+    setHudSlots((prev) =>
+      gamePlayers.map(
+        (p, i) => prev[i] ?? { name: p.name, gain: 1, sensitivity: sensitivity }
+      )
+    );
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [gamePlayers.length]);
+  const hudMics = hudSlots.map((p) => ({
+    ...p,
+    getLevel: () => 0.02 + 0.025 * Math.abs(Math.sin(performance.now() / 300 + p.name.length)),
+  }));
+  const patchHud = (i: number, patch: Partial<PlayerSlot>) =>
+    setHudSlots((r) => r.map((q, j) => (j === i ? { ...q, ...patch } : q)));
+
   React.useEffect(() => {
     let raf = 0;
     const tick = () => {
@@ -498,6 +541,7 @@ function App() {
   const pos = getBaseMs(); // transport reflects real playback; offset only shifts the view
 
   return (
+    <>
     <div style={{ maxWidth: 960, margin: "24px auto", padding: "0 16px" }}>
       <div
         style={{
@@ -598,6 +642,21 @@ function App() {
           }}
         >
           {twoPlayer ? "👥 2P demo ✓" : "👥 2P demo"}
+        </button>
+        <button
+          onClick={() => { play(); setIsPlaying(true); setInGame(true); }}
+          title="Open the fullscreen in-game stage (SessionHud + KaraokeView) — the exact Spotify layout"
+          style={{
+            background: "#8b5cf6",
+            color: "#fff",
+            border: 0,
+            borderRadius: 20,
+            padding: "8px 14px",
+            font: "700 13px system-ui",
+            cursor: "pointer",
+          }}
+        >
+          🎮 In-game
         </button>
         <button
           onClick={() => setShowDebug((v) => !v)}
@@ -854,8 +913,31 @@ function App() {
                 }
                 rounds={setupRounds}
                 onRounds={setSetupRounds}
-                players={setupPlayers}
-                onPlayers={setSetupPlayers}
+                players={setupRoster}
+                onName={(i, name) =>
+                  setSetupRoster((r) => r.map((p, j) => (j === i ? { ...p, name } : p)))
+                }
+                onDevice={(i, deviceId) =>
+                  setSetupRoster((r) => r.map((p, j) => (j === i ? { ...p, deviceId } : p)))
+                }
+                onGain={(i, gain) =>
+                  setSetupRoster((r) => r.map((p, j) => (j === i ? { ...p, gain } : p)))
+                }
+                onAddPlayer={() =>
+                  setSetupRoster((r) =>
+                    r.length < 4
+                      ? [...r, { name: `P${r.length + 1}`, gain: 1, sensitivity: 70 }]
+                      : r
+                  )
+                }
+                onRemovePlayer={(i) =>
+                  setSetupRoster((r) => (r.length > 1 ? r.filter((_, j) => j !== i) : r))
+                }
+                devices={MOCK_DEVICES}
+                levelFor={(i) => 0.015 + 0.02 * Math.abs(Math.sin(performance.now() / 300 + i))}
+                onSensitivity={(i, n) =>
+                  setSetupRoster((r) => r.map((q, j) => (j === i ? { ...q, sensitivity: n } : q)))
+                }
                 onStart={() => setSessionMsg(`▶ Would start free-play session: ${setupRounds} rounds`)}
                 onCancel={() => { setSessionMsg(null); setMode("karaoke"); }}
                 micOn={micOn}
@@ -865,6 +947,47 @@ function App() {
         </div>
       )}
     </div>
+
+    {inGame && (
+      <div
+        style={{
+          position: "fixed",
+          inset: 0,
+          zIndex: 100,
+          background: "rgba(10,10,14,0.94)",
+          backdropFilter: "blur(6px)",
+        }}
+      >
+        <div style={{ position: "relative", height: "100vh" }}>
+          <SessionHud
+            round={1}
+            target={5}
+            totals={hudMics.map((m, i) => ({ name: m.name, total: 12800 - i * 3400 }))}
+            micsOn={hudMics.length > 0}
+            onSkip={() => seek(0)}
+            onEnd={() => setInGame(false)}
+            autoSkip={autoSkip}
+            onAutoSkip={setAutoSkip}
+            sourceName="Karaoke Bangers"
+          />
+          <MicOverlay
+            mics={hudMics}
+            devices={[]}
+            onGain={(i, gain) => patchHud(i, { gain })}
+            onSensitivity={(i, n) => patchHud(i, { sensitivity: n })}
+            onDevice={(i, deviceId) => patchHud(i, { deviceId })}
+          />
+          <KaraokeView song={song} getPositionMs={getPositionMs} players={gamePlayers} fullscreen />
+        </div>
+        <button
+          onClick={() => setInGame(false)}
+          style={{ position: "fixed", top: 10, right: 12, zIndex: 110, ...stepBtn }}
+        >
+          ✕ exit in-game
+        </button>
+      </div>
+    )}
+    </>
   );
 }
 

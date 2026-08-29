@@ -2,6 +2,7 @@
  * session-view.tsx — the session screens (pure views; the adapter drives state).
  *
  *   SessionSetup        — choose round count + confirm mic, then Start
+ *   MicStrip / MicOverlay — live mic level meters (in-session HUD + solo)
  *   SessionHud          — compact overlay during a round (progress, total, mics)
  *   RoundEnd            — between rounds: the round you just finished + what's next
  *   SessionResultScreen — the big aggregate finish (per-round leaderboard + total)
@@ -18,9 +19,12 @@ import { MicMeter } from "./mic-meter";
 const ACCENT = "#1ed760";
 const GOLD = "#e6b422";
 
-/** One live mic for the in-game HUD meter: its display name + a level getter. */
-export interface HudMic {
-  name: string;
+/**
+ * One live mic as the in-game banner sees it: the player's whole roster slot
+ * (name, device, gain, gate) plus a live level getter. Same shape the setup
+ * screen edits, so both surfaces drive the identical set of controls.
+ */
+export interface HudMic extends PlayerSlot {
   getLevel: () => number; // current post-gain RMS (0..~0.4)
 }
 
@@ -33,6 +37,7 @@ export interface PlayerSlot {
   name: string;
   deviceId?: string;
   gain: number; // input-gain multiplier (1 = unity)
+  sensitivity: number; // 0..100 → this player's OWN detection gate
 }
 
 function stars(n: number): string {
@@ -65,9 +70,8 @@ export function SessionSetup(props: {
   devices: AudioInput[];
   /** Live input level (0..~0.4) for player i's preview mic — drives the meter. */
   levelFor: (i: number) => number;
-  /** Shared detection gate as 0..100 sensitivity, drawn on every meter. */
-  sensitivity: number;
-  onSensitivity: (n: number) => void;
+  /** Each player drags their OWN gate; the index says whose. */
+  onSensitivity: (i: number, n: number) => void;
 }) {
   const React = Spicetify.React;
   const {
@@ -88,7 +92,6 @@ export function SessionSetup(props: {
     onRemovePlayer,
     devices,
     levelFor,
-    sensitivity,
     onSensitivity,
   } = props;
 
@@ -115,7 +118,7 @@ export function SessionSetup(props: {
   };
 
   return (
-    <Center>
+    <Center zoom={3}>
       <div style={{ fontSize: 34, fontWeight: 800 }}>New Session</div>
       <div
         style={{
@@ -233,15 +236,15 @@ export function SessionSetup(props: {
                 <div style={{ flex: "1 1 auto", minWidth: 0 }}>
                   <MicMeter
                     getLevel={() => levelFor(i)}
-                    sensitivity={sensitivity}
-                    onSensitivity={onSensitivity}
+                    sensitivity={p.sensitivity}
+                    onSensitivity={(n) => onSensitivity(i, n)}
                     color={PLAYER_COLORS[i % PLAYER_COLORS.length]}
                     height={14}
                   />
                 </div>
                 <div
                   style={{ display: "flex", alignItems: "center", gap: 6, flexShrink: 0 }}
-                  title="Input gain — moves this mic's level against the shared gate"
+                  title="Input gain — where this mic's level sits on the meter"
                 >
                   <span style={{ fontSize: 12, color: "rgba(255,255,255,0.4)" }}>gain</span>
                   <input
@@ -401,104 +404,261 @@ function PlaceholderRow(props: { text: string }) {
   );
 }
 
-// ── In-round HUD ─────────────────────────────────────────────────────────────
+// ── Mic meters (shared by the session HUD and solo Quick Sing) ───────────────
 
-export function SessionHud(props: {
-  round: number;
-  target: number;
-  sessionTotal: number;
-  /** Live mics — each gets a level+gate meter in the HUD. */
+/** Banner geometry: one player strip's target width and its caption size. */
+const BAR_W = 600;
+const BAR_LABEL = 48;
+
+/**
+ * The in-game mic banner — one strip per live singer, centred across the top of
+ * the stage: level meter with that player's OWN gate handle, an input-gain
+ * slider, and a device picker. Every control is live; gain and gate apply to the
+ * running mic instantly, and changing the device restarts only that one mic.
+ *
+ * Gate and gain overlap on purpose (a gate is reachable by moving either), and
+ * both are here because they answer different questions in a noisy room: gain
+ * puts your voice in the readable middle of the bar, the gate says where the
+ * line sits once it's there.
+ */
+export function MicOverlay(props: {
   mics: HudMic[];
-  /** Shared detection gate as 0..100 sensitivity, drawn on every meter. */
-  sensitivity: number;
-  onSensitivity: (n: number) => void;
-  onSkip: () => void;
-  onEnd: () => void;
-  /** Source playlist name, shown when the session is playlist-sourced. */
-  sourceName?: string | null;
+  devices: AudioInput[];
+  onGain: (i: number, gain: number) => void;
+  onSensitivity: (i: number, sensitivity: number) => void;
+  onDevice: (i: number, deviceId: string | undefined) => void;
 }) {
   const React = Spicetify.React;
-  const { round, target, sessionTotal, mics, sensitivity, onSensitivity, onSkip, onEnd, sourceName } =
-    props;
-  const btn: React.CSSProperties = {
-    padding: "5px 12px",
-    borderRadius: 8,
-    fontSize: 13,
+  const { mics, devices, onGain, onSensitivity, onDevice } = props;
+  // Width comes from the roster, never from the content: with equal flex
+  // columns inside, a content-sized pill would collapse onto the labels.
+  const n = Math.max(1, mics.length);
+  const wanted = n * BAR_W + (n - 1) * BAR_LABEL + 56;
+  const readout: React.CSSProperties = {
+    fontSize: 26,
     fontWeight: 700,
-    cursor: "pointer",
-    border: "1px solid rgba(255,255,255,0.14)",
-    background: "rgba(0,0,0,0.4)",
-    color: "#fff",
+    color: "rgba(255,255,255,0.45)",
+    fontVariantNumeric: "tabular-nums",
   };
   return (
     <div
       style={{
         position: "absolute",
-        top: 18,
-        left: 16,
+        top: 24,
+        left: "50%",
+        transform: "translateX(-50%)",
+        width: `min(94vw, ${wanted}px)`,
         zIndex: 6,
-        display: "flex",
-        alignItems: "center",
-        gap: 14,
-        padding: "8px 14px",
-        borderRadius: 12,
+        padding: "18px 28px",
+        borderRadius: 22,
         background: "rgba(8,8,12,0.72)",
         border: "1px solid rgba(255,255,255,0.1)",
         color: "#fff",
         fontFamily: "var(--font-family, 'Spotify Circular', system-ui, sans-serif)",
       }}
     >
-      <div style={{ display: "flex", flexDirection: "column", lineHeight: 1.1 }}>
-        {sourceName && (
+      <div style={{ display: "flex", gap: BAR_LABEL, alignItems: "flex-start", width: "100%" }}>
+        {mics.map((m, i) => {
+          const tint = PLAYER_COLORS[i % PLAYER_COLORS.length];
+          return (
+            // `flex: 1 1 0` = equal columns sized by the banner, not by their
+            // own contents, so a long device name can't shove the other singer.
+            <div
+              key={i}
+              style={{ flex: "1 1 0", minWidth: 0, display: "flex", flexDirection: "column", gap: 10 }}
+            >
+              <MicMeter
+                getLevel={m.getLevel}
+                sensitivity={m.sensitivity}
+                onSensitivity={(n2) => onSensitivity(i, n2)}
+                label={mics.length > 1 ? m.name : "🎤"}
+                labelColor={tint}
+                color={tint}
+                height={64}
+                labelSize={BAR_LABEL}
+              />
+              <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+                <span style={readout}>gate {Math.round(m.sensitivity)}%</span>
+                <span style={{ ...readout, marginLeft: "auto" }}>
+                  gain {Math.round(m.gain * 100)}%
+                </span>
+              </div>
+              <input
+                type="range"
+                min={25}
+                max={300}
+                value={Math.round(m.gain * 100)}
+                onChange={(e) => onGain(i, Number((e.target as HTMLInputElement).value) / 100)}
+                title="Input gain"
+                style={{ width: "100%" }}
+              />
+              <select
+                value={m.deviceId ?? ""}
+                onChange={(e) => onDevice(i, (e.target as HTMLSelectElement).value || undefined)}
+                title="Input device — switching restarts this mic only"
+                style={{
+                  width: "100%",
+                  minWidth: 0,
+                  background: "rgba(0,0,0,0.35)",
+                  border: "1px solid rgba(255,255,255,0.12)",
+                  borderRadius: 10,
+                  color: "#fff",
+                  fontSize: 26,
+                  padding: "8px 10px",
+                }}
+              >
+                <option value="">Default mic</option>
+                {devices.map((d) => (
+                  <option key={d.deviceId} value={d.deviceId}>
+                    {d.label}
+                  </option>
+                ))}
+              </select>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+// ── In-round HUD ─────────────────────────────────────────────────────────────
+
+export function SessionHud(props: {
+  round: number;
+  target: number;
+  /** Running total per player across COMPLETED rounds, in roster order. */
+  totals: { name: string; total: number }[];
+  /** Whether any mic is live; the controls themselves are in MicOverlay. */
+  micsOn: boolean;
+  onSkip: () => void;
+  onEnd: () => void;
+  /** Hop past tracks with no chart instead of parking on the no-chart card. */
+  autoSkip: boolean;
+  onAutoSkip: (on: boolean) => void;
+  /** Source playlist name, shown when the session is playlist-sourced. */
+  sourceName?: string | null;
+}) {
+  const React = Spicetify.React;
+  const { round, target, totals, micsOn, onSkip, onEnd, autoSkip, onAutoSkip, sourceName } =
+    props;
+  const btn: React.CSSProperties = {
+    padding: "16px 40px",
+    borderRadius: 26,
+    fontSize: 52,
+    fontWeight: 700,
+    cursor: "pointer",
+    border: "1px solid rgba(255,255,255,0.14)",
+    background: "rgba(0,0,0,0.4)",
+    color: "#fff",
+  };
+  // 4× type in the old single row would have stretched across the whole stage
+  // and collided with the centred mic banner, so the HUD stacks instead.
+  return (
+    <div
+      style={{
+        position: "absolute",
+        top: 52,
+        left: 16,
+        zIndex: 6,
+        display: "flex",
+        flexDirection: "column",
+        alignItems: "flex-start",
+        gap: 18,
+        padding: "24px 34px",
+        borderRadius: 34,
+        background: "rgba(8,8,12,0.72)",
+        border: "1px solid rgba(255,255,255,0.1)",
+        color: "#fff",
+        fontFamily: "var(--font-family, 'Spotify Circular', system-ui, sans-serif)",
+      }}
+    >
+      <div style={{ display: "flex", alignItems: "center", gap: 28 }}>
+        <div style={{ display: "flex", flexDirection: "column", lineHeight: 1.1 }}>
+          {sourceName && (
+            <span
+              style={{
+                fontSize: 40,
+                fontWeight: 700,
+                letterSpacing: 0.5,
+                color: "rgba(255,255,255,0.5)",
+                maxWidth: 620,
+                overflow: "hidden",
+                textOverflow: "ellipsis",
+                whiteSpace: "nowrap",
+              }}
+            >
+              {sourceName}
+            </span>
+          )}
+          <span style={{ fontSize: 72, fontWeight: 800 }}>
+            Round <span style={{ color: ACCENT }}>{round}</span>/{target}
+          </span>
+        </div>
+        {/* Banked total per singer — the in-progress song is NOT in here; that
+            number lives at the bottom of the lane and only lands when the song
+            ends. Labelled, because an unlabelled figure beside a round counter
+            reads as a mystery. */}
+        <div style={{ display: "flex", flexDirection: "column", lineHeight: 1.05 }}>
           <span
             style={{
-              fontSize: 11,
+              fontSize: 40,
               fontWeight: 700,
               letterSpacing: 0.5,
               color: "rgba(255,255,255,0.5)",
-              maxWidth: 180,
-              overflow: "hidden",
-              textOverflow: "ellipsis",
-              whiteSpace: "nowrap",
             }}
           >
-            {sourceName}
+            total
           </span>
-        )}
-        <span style={{ fontSize: 18, fontWeight: 800 }}>
-          Round <span style={{ color: ACCENT }}>{round}</span>/{target}
-        </span>
-      </div>
-      <div style={{ fontSize: 18, fontWeight: 800, fontVariantNumeric: "tabular-nums" }}>
-        {sessionTotal.toLocaleString()}
-      </div>
-      {/* Per-mic level meters with the shared gate — drag any to tune live. */}
-      <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
-        {mics.length === 0 ? (
-          <span style={{ fontSize: 13, fontWeight: 700, color: "rgba(255,255,255,0.4)" }}>
+          {totals.map((t, i) => {
+            const tint = PLAYER_COLORS[i % PLAYER_COLORS.length];
+            return (
+              <div key={i} style={{ display: "flex", alignItems: "baseline", gap: 14 }}>
+                {totals.length > 1 && (
+                  <span style={{ fontSize: 40, fontWeight: 800, color: tint }}>{t.name}</span>
+                )}
+                <span
+                  style={{
+                    fontSize: 72,
+                    fontWeight: 800,
+                    fontVariantNumeric: "tabular-nums",
+                    color: totals.length > 1 ? tint : "#fff",
+                  }}
+                >
+                  {t.total.toLocaleString()}
+                </span>
+              </div>
+            );
+          })}
+        </div>
+        {/* The meters themselves are the centred MicOverlay banner; the HUD only
+            says whether anything is live at all. */}
+        {!micsOn && (
+          <span style={{ fontSize: 52, fontWeight: 700, color: "rgba(255,255,255,0.4)" }}>
             🎤 off
           </span>
-        ) : (
-          mics.map((m, i) => (
-            <div key={i} style={{ width: 132 }}>
-              <MicMeter
-                getLevel={m.getLevel}
-                sensitivity={sensitivity}
-                onSensitivity={onSensitivity}
-                label={mics.length > 1 ? m.name : "🎤"}
-                color={PLAYER_COLORS[i % PLAYER_COLORS.length]}
-                height={12}
-              />
-            </div>
-          ))
         )}
       </div>
-      <button style={btn} onClick={onSkip}>
-        Skip
-      </button>
-      <button style={btn} onClick={onEnd}>
-        End
-      </button>
+      <div style={{ display: "flex", gap: 18 }}>
+        <button style={btn} onClick={onSkip}>
+          Skip
+        </button>
+        <button style={btn} onClick={onEnd}>
+          End
+        </button>
+        <button
+          style={{
+            ...btn,
+            borderColor: autoSkip ? ACCENT : "rgba(255,255,255,0.14)",
+            background: autoSkip ? `${ACCENT}1f` : "rgba(0,0,0,0.4)",
+            color: autoSkip ? ACCENT : "#fff",
+          }}
+          onClick={() => onAutoSkip(!autoSkip)}
+          title="Skip tracks with no karaoke chart automatically, instead of stopping on them"
+        >
+          {autoSkip ? "☑" : "☐"} Auto-skip
+        </button>
+      </div>
     </div>
   );
 }
@@ -521,7 +681,7 @@ export function NoChartInSession(props: {
   const React = Spicetify.React;
   const { title, artist, onSkip, onReChoose, searched } = props;
   return (
-    <Center>
+    <Center zoom={3}>
       <div style={{ fontSize: 40 }}>🎤</div>
       <div style={{ fontSize: 26, fontWeight: 800 }}>
         {searched ? "No karaoke chart for this track" : "Looking for a chart…"}
@@ -815,8 +975,9 @@ export function SessionResultScreen(props: {
 
 // ── shared bits ──────────────────────────────────────────────────────────────
 
-function Center(props: { children: unknown }) {
+function Center(props: { children: unknown; gap?: number; zoom?: number }) {
   const React = Spicetify.React;
+  const zoom = props.zoom ?? 1;
   return (
     <div
       style={{
@@ -824,8 +985,14 @@ function Center(props: { children: unknown }) {
         flexDirection: "column",
         alignItems: "center",
         justifyContent: "center",
-        gap: 10,
-        height: "100vh",
+        gap: props.gap ?? 10,
+        // One number scales a whole screen — type, padding, controls, gaps —
+        // instead of hand-multiplying every size and missing some. Unlike
+        // transform: scale, `zoom` participates in layout, which is why 100vh
+        // has to be divided back out or the box would be `zoom` screens tall.
+        zoom: zoom === 1 ? undefined : zoom,
+        height: zoom === 1 ? "100vh" : `calc(100vh / ${zoom})`,
+        overflowY: "auto",
         color: "#fff",
         textAlign: "center",
         fontFamily: "var(--font-family, 'Spotify Circular', system-ui, sans-serif)",
