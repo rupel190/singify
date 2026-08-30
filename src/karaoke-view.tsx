@@ -133,7 +133,7 @@ const LANE_VPAD = 24; // px of vertical padding inside the lane
 // Pitch-name axis label: 60 is the CAP for a full-height solo lane. Stacked
 // lanes are shorter, so each Lane scales its own label size down from this (and
 // derives its gutter from that), so the names don't dwarf the tiny note bars.
-const AXIS_LABEL_MAX = 60;
+const AXIS_LABEL_MAX = 40;
 const TRAIL_MS = 850; // how far back (ms) the sung-pitch trail reaches
 const TRAIL_MAX = 96; // ring-buffer cap (frames) — a safety bound on dot count
 // Marker and trail are sized as MULTIPLES of the note height rather than in
@@ -468,7 +468,7 @@ function Lane(props: {
           >
             {score.total.toLocaleString()}
           </div>
-          <div style={{ marginTop: 6, fontSize: 34, fontWeight: 600, color: "rgba(255,255,255,0.55)" }}>
+          <div style={{ marginTop: 6, fontSize: 42, fontWeight: 600, color: "rgba(255,255,255,0.55)" }}>
             {score.notesSung}/{score.notesTotal} notes
           </div>
         </div>
