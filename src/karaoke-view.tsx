@@ -123,19 +123,17 @@ const FALLBACK_PX_PER_MS = 0.18; // only until the lane has been measured once
 // panel flings a modest melody from floor to ceiling. Capping the spacing and
 // centring the used band keeps the melody reading as a line. Note thickness
 // follows the row spacing, so bars are as fat as they can be without merging.
-const MAX_PX_PER_SEMITONE = 40;
+const MAX_PX_PER_SEMITONE = 58;
 const NOTE_FILL = 0.9; // note thickness as a fraction of its semitone row
-const MAX_NOTE_HEIGHT = 45;
+const MAX_NOTE_HEIGHT = 66;
 const MIN_NOTE_HEIGHT = 10;
 const LANE_VPAD = 24; // px of vertical padding inside the lane
 // Pitch hit-band is now DERIVED from props.difficulty (toleranceSemitones),
 // synced between scoring and the visual snap. This is the easy-mode value.
-// Left axis reserved for the pitch-name labels (Performous-style). DERIVED from
-// the label size, not a flat number: at 60px a 4-glyph name like "A♯-1" is ~150px
-// wide, so the old 120 let labels spill into the lane and crowd player 2's score
-// HUD in the bottom-left corner. Still far left of the now-line (25% of the lane).
-const AXIS_LABEL_SIZE = 60;
-const GUTTER = 12 + Math.round(AXIS_LABEL_SIZE * 2.6);
+// Pitch-name axis label: 60 is the CAP for a full-height solo lane. Stacked
+// lanes are shorter, so each Lane scales its own label size down from this (and
+// derives its gutter from that), so the names don't dwarf the tiny note bars.
+const AXIS_LABEL_MAX = 60;
 const TRAIL_MS = 850; // how far back (ms) the sung-pitch trail reaches
 const TRAIL_MAX = 96; // ring-buffer cap (frames) — a safety bound on dot count
 // Marker and trail are sized as MULTIPLES of the note height rather than in
@@ -289,6 +287,10 @@ function Lane(props: {
   const noteH = Math.max(MIN_NOTE_HEIGHT, Math.min(MAX_NOTE_HEIGHT, Math.round(pxPerSemi * NOTE_FILL)));
   const bandH = pxPerSemi * pitchSpan;
   const bandTop = LANE_VPAD + Math.max(0, (innerH - bandH - noteH) / 2);
+  // Axis label + gutter scale with THIS lane's height, so a short stacked lane
+  // gets small labels instead of the full-height 60px (which dwarfed the bars).
+  const labelSize = Math.max(13, Math.min(AXIS_LABEL_MAX, Math.round(lane.h * 0.13)));
+  const gutter = 12 + Math.round(labelSize * 2.6);
   const pxPerMs = lane.w > 0 ? (lane.w * (1 - NOW_FRACTION)) / LOOKAHEAD_MS : FALLBACK_PX_PER_MS;
 
   const yForPitch = (pitch: number): number => bandTop + (1 - (pitch - minPitch) / pitchSpan) * bandH;
@@ -300,12 +302,12 @@ function Lane(props: {
     const lo = Math.floor(minPitch);
     const hi = Math.ceil(maxPitch);
     const span = Math.max(1, hi - lo);
-    const maxRows = Math.max(2, Math.min(7, Math.floor(bandH / (AXIS_LABEL_SIZE * 1.8))));
+    const maxRows = Math.max(2, Math.min(7, Math.floor(bandH / (labelSize * 1.8))));
     const step = Math.max(1, Math.ceil(span / (maxRows - 1)));
     const rows: number[] = [];
     for (let m = lo; m <= hi; m += step) rows.push(m);
     return rows;
-  }, [minPitch, maxPitch, bandH]);
+  }, [minPitch, maxPitch, bandH, labelSize]);
 
   // SingStar model: the target notes take a MUTED shade of the player's colour
   // (so each lane reads as that singer's), and the live marker below is the
@@ -360,13 +362,13 @@ function Lane(props: {
         const y = yCenterForPitch(m);
         return (
           <div key={`row${m}`}>
-            <div style={{ position: "absolute", left: GUTTER, right: 0, top: y, height: 1, background: COLORS.gridLine }} />
+            <div style={{ position: "absolute", left: gutter, right: 0, top: y, height: 1, background: COLORS.gridLine }} />
             <div
               style={{
                 position: "absolute",
                 left: 10,
-                top: y - AXIS_LABEL_SIZE / 2,
-                fontSize: AXIS_LABEL_SIZE,
+                top: y - labelSize / 2,
+                fontSize: labelSize,
                 fontWeight: 600,
                 lineHeight: 1,
                 color: COLORS.axisLabel,
@@ -385,7 +387,7 @@ function Lane(props: {
           left: 0,
           top: 0,
           bottom: 0,
-          width: GUTTER + 20,
+          width: gutter + 20,
           background: `linear-gradient(to right, ${COLORS.laneBg}, transparent)`,
           pointerEvents: "none",
         }}
@@ -393,10 +395,10 @@ function Lane(props: {
       <div style={{ position: "absolute", inset: 0, transform: `translateX(${trackTranslate}px)`, willChange: "transform" }}>
         {noteEls}
       </div>
-      <div style={{ position: "absolute", top: 0, bottom: 0, left: nowX + nowLineNudge, width: 2, background: COLORS.nowLine, boxShadow: `0 0 10px ${COLORS.nowLine}` }} />
+      <div style={{ position: "absolute", top: 0, bottom: 0, left: nowX + nowLineNudge, width: 3, background: COLORS.nowLine, boxShadow: `0 0 10px ${COLORS.nowLine}` }} />
       {trail.map((pt, i) => {
         const x = nowX + (pt.ms - positionMs) * pxPerMs;
-        if (x < GUTTER + 4) return null;
+        if (x < gutter + 4) return null;
         const o = Math.max(0, 1 - (positionMs - pt.ms) / TRAIL_MS);
         const size = noteH * (TRAIL_DOT_MIN + o * (TRAIL_DOT_MAX - TRAIL_DOT_MIN));
         const ty = yForMarker(pt.pitch);
@@ -446,7 +448,7 @@ function Lane(props: {
           style={{
             position: "absolute",
             bottom: 10,
-            left: GUTTER + 16,
+            left: gutter + 16,
             textAlign: "left",
             fontVariantNumeric: "tabular-nums",
             pointerEvents: "none",
