@@ -98,7 +98,7 @@ export interface MicPitchOptions extends Omit<DetectOptions, "sampleRate"> {
    * direct-monitor knob instead.
    */
   monitor?: boolean;
-  /** Initial monitor loudness, 0..1 (default 0.8). Independent of `gain`. */
+  /** Initial monitor loudness, 0..1 (default 0.05 — quiet; feedback-safe). Independent of `gain`. */
   monitorGain?: number;
   /**
    * Initial monitor OUTPUT device (a deviceId from enumerateOutputs()); omitted
@@ -119,7 +119,7 @@ export async function startMicPitch(opts: MicPitchOptions = {}): Promise<MicPitc
     deviceId,
     gain = 1,
     monitor = false,
-    monitorGain = 0.8,
+    monitorGain = 0.05,
     outputDeviceId,
     ...detectOpts
   } = opts;

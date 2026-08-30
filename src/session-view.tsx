@@ -121,7 +121,7 @@ export function SessionSetup(props: {
   };
 
   return (
-    <Center zoom={3}>
+    <Center zoom={1.5}>
       <div style={{ fontSize: 34, fontWeight: 800 }}>New Session</div>
       <div
         style={{
@@ -536,7 +536,7 @@ export function MicOverlay(props: {
               {/* ── Monitor: hear this mic out an output while singing ── */}
               {(() => {
                 const on = !!m.monitor;
-                const vol = Math.round((m.monitorGain ?? 0.8) * 100);
+                const vol = Math.round((m.monitorGain ?? 0.05) * 100);
                 return (
                   <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
                     <div style={{ display: "flex", alignItems: "center", gap: 12 }}>

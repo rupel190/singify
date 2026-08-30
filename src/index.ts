@@ -249,7 +249,7 @@ async function openMic(p: PlayerSlot): Promise<MicPitch | null> {
     gain: p.gain,
     rmsThreshold: sensitivityToThreshold(p.sensitivity),
     monitor: !!p.monitor,
-    monitorGain: p.monitorGain ?? 0.8,
+    monitorGain: p.monitorGain ?? 0.05,
     outputDeviceId: p.outputDeviceId,
   };
   try {
@@ -590,7 +590,7 @@ function newSlot(i: number, name: string): PlayerSlot {
     sensitivity:
       typeof saved?.sensitivity === "number" ? saved.sensitivity : defaultSensitivityFor(i),
     monitor: !!saved?.monitor,
-    monitorGain: typeof saved?.monitorGain === "number" ? saved.monitorGain : 0.8,
+    monitorGain: typeof saved?.monitorGain === "number" ? saved.monitorGain : 0.05,
     outputDeviceId: saved?.outputDeviceId,
   };
 }

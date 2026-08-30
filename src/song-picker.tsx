@@ -55,6 +55,12 @@ export function SongPicker(props: SongPickerProps) {
         minHeight: 360,
         padding: 20,
         boxSizing: "border-box",
+        // Triple the whole picker in one value (multiplies with the root
+        // UI_SCALE). Percentages resolve in the zoomed space, so width/height
+        // 100% still mean "fill" — the card scrolls its own list if it outgrows
+        // the shrunken viewport.
+        zoom: 3,
+        overflowY: "auto",
         background: C.scrim,
         fontFamily: "var(--font-family, 'Spotify Circular', system-ui, sans-serif)",
       }}
