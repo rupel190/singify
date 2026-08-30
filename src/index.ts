@@ -468,26 +468,27 @@ function loadDifficulty(): Difficulty {
 }
 let difficulty: Difficulty = loadDifficulty();
 
-// Hit-line position — the green "now" bar, as a fraction from the lane's left
-// edge. PURELY VISUAL: it slides the line + markers sideways so the user can
-// place the hit point where it feels right; it does NOT change note timing (the
-// lyric offset owns sync). Nudged with , and . ; persisted globally.
-const NOWLINE_KEY = "singify:nowLine";
-const NOWLINE_STEP = 0.01;
-const NOWLINE_DEFAULT = 0.25;
-function loadNowFraction(): number {
+// Green hit-LINE nudge, in PIXELS. PURELY COSMETIC: slides ONLY the green line
+// (not the markers, notes, or timing) so it lines up with where a note visually
+// meets the marker. The lyric offset owns actual sync. Nudged with , and . ;
+// persisted globally.
+const NOWLINE_KEY = "singify:nowLinePx";
+const NOWLINE_STEP = 4; // px per press
+const NOWLINE_MAX = 200; // px either side
+function loadNowLineNudge(): number {
   const v = Number(localStorage.getItem(NOWLINE_KEY));
-  return Number.isFinite(v) && v >= 0.1 && v <= 0.6 ? v : NOWLINE_DEFAULT;
+  return Number.isFinite(v) && Math.abs(v) <= NOWLINE_MAX ? v : 0;
 }
-let nowFraction = loadNowFraction();
-function setNowFraction(next: number): void {
-  nowFraction = Math.min(0.6, Math.max(0.1, Math.round(next * 100) / 100));
+let nowLineNudge = loadNowLineNudge();
+function setNowLineNudge(next: number): void {
+  nowLineNudge = Math.min(NOWLINE_MAX, Math.max(-NOWLINE_MAX, Math.round(next)));
   try {
-    localStorage.setItem(NOWLINE_KEY, String(nowFraction));
+    localStorage.setItem(NOWLINE_KEY, String(nowLineNudge));
   } catch {
     /* storage blocked — keep the in-memory value */
   }
-  showReadout(`Hit-line ${Math.round(nowFraction * 100)}%`);
+  const sign = nowLineNudge > 0 ? "+" : "";
+  showReadout(`Hit-line ${sign}${nowLineNudge}px`);
   if (visible) renderOverlay();
 }
 function setDifficulty(next: Difficulty): void {
@@ -860,7 +861,7 @@ function renderOverlay(): void {
         onComplete: session ? onRoundComplete : undefined, // sessions record + advance
         resetToken: scoreResetToken,
         difficulty,
-        nowFraction,
+        nowLineNudge,
         fullscreen: true,
       })
     : pickerCandidates
@@ -1489,9 +1490,9 @@ async function main(): Promise<void> {
     } else if (e.key === "=") {
       setSensitivity(sensitivity + 5); // more sensitive (quiet room)
     } else if (e.key === ",") {
-      setNowFraction(nowFraction - NOWLINE_STEP); // hit-line a touch left
+      setNowLineNudge(nowLineNudge - NOWLINE_STEP); // green line a touch left
     } else if (e.key === ".") {
-      setNowFraction(nowFraction + NOWLINE_STEP); // hit-line a touch right
+      setNowLineNudge(nowLineNudge + NOWLINE_STEP); // green line a touch right
     }
   });
 

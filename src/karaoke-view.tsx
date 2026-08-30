@@ -93,10 +93,12 @@ export interface KaraokeViewProps {
    */
   difficulty?: Difficulty;
   /**
-   * Where the "now" hit-line sits, as a fraction from the lane's left edge
-   * (default 0.25). Cosmetic — repositions the line + markers, not note timing.
+   * Cosmetic pixel nudge for the green hit-LINE ONLY (default 0). Slides just the
+   * line left/right so it visually lines up with where a note meets the marker;
+   * markers, notes and timing are untouched. NOT a sync control — the lyric
+   * offset owns timing.
    */
-  nowFraction?: number;
+  nowLineNudge?: number;
   fullscreen?: boolean;
 }
 
@@ -240,7 +242,7 @@ interface Engine {
 function Lane(props: {
   song: ParsedSong;
   positionMs: number;
-  nowFraction: number;
+  nowLineNudge: number;
   player: { id: string; name: string; color: string } | null;
   markerPitch: number | null;
   markerHit: boolean;
@@ -250,7 +252,7 @@ function Lane(props: {
 }) {
   const React = Spicetify.React;
   const { useRef, useMemo } = React;
-  const { song, positionMs, nowFraction, player, markerPitch, markerHit, score, trail, multiplayer } =
+  const { song, positionMs, nowLineNudge, player, markerPitch, markerHit, score, trail, multiplayer } =
     props;
 
   const laneRef = useRef<HTMLDivElement | null>(null);
@@ -309,7 +311,7 @@ function Lane(props: {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [song, lane.h, lane.w, minPitch, maxPitch]);
 
-  const nowX = lane.w * nowFraction;
+  const nowX = lane.w * NOW_FRACTION;
   const trackTranslate = nowX - positionMs * pxPerMs;
   const markerColor = markerHit ? COLORS.nowLine : player?.color ?? COLORS.livePitch;
   const markerSize = Math.round(noteH * MARKER_SCALE);
@@ -356,7 +358,7 @@ function Lane(props: {
       <div style={{ position: "absolute", inset: 0, transform: `translateX(${trackTranslate}px)`, willChange: "transform" }}>
         {noteEls}
       </div>
-      <div style={{ position: "absolute", top: 0, bottom: 0, left: nowX, width: 2, background: COLORS.nowLine, boxShadow: `0 0 10px ${COLORS.nowLine}` }} />
+      <div style={{ position: "absolute", top: 0, bottom: 0, left: nowX + nowLineNudge, width: 2, background: COLORS.nowLine, boxShadow: `0 0 10px ${COLORS.nowLine}` }} />
       {trail.map((pt, i) => {
         const x = nowX + (pt.ms - positionMs) * pxPerMs;
         if (x < GUTTER + 4) return null;
@@ -439,7 +441,7 @@ export function KaraokeView(props: KaraokeViewProps) {
   const { useRef, useMemo, useCallback, useEffect } = React;
   const { song, getPositionMs, onReplay, fullscreen } = props;
   const difficulty: Difficulty = props.difficulty ?? "easy";
-  const nowFraction = props.nowFraction ?? NOW_FRACTION;
+  const nowLineNudge = props.nowLineNudge ?? 0;
   // Read via refs so the rAF loop and engineFor keep stable identities — only the
   // reset effect (below) reacts to a difficulty change, rebuilding the engines.
   const difficultyRef = useRef(difficulty);
@@ -628,7 +630,7 @@ export function KaraokeView(props: KaraokeViewProps) {
               key={e?.id ?? `lane${i}`}
               song={song}
               positionMs={positionMs}
-              nowFraction={nowFraction}
+              nowLineNudge={nowLineNudge}
               player={e ? { id: e.id, name: e.input.name, color: e.input.color } : null}
               markerPitch={e?.markerPitch ?? null}
               markerHit={e?.markerHit ?? false}

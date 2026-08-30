@@ -43,7 +43,7 @@ export interface MicMeterProps {
 
 export function MicMeter(props: MicMeterProps) {
   const React = Spicetify.React;
-  const { useState, useEffect, useRef, useCallback } = React;
+  const { useEffect, useRef, useCallback } = React;
   const {
     getLevel,
     sensitivity,
@@ -56,21 +56,26 @@ export function MicMeter(props: MicMeterProps) {
     labelColor = "rgba(255,255,255,0.6)",
   } = props;
 
-  // Poll the live level on its own rAF — one re-render per frame, cheap DOM.
-  const [level, setLevel] = useState(0);
+  // Drive the fill via a REF, not React state — updating a style each frame
+  // avoids a full re-render per meter per frame, so the bar stays smooth even
+  // while the note lanes are re-rendering hard. The CSS width transition then
+  // glides between frames, so a dropped frame doesn't show as a stutter.
   const raf = useRef(0);
+  const fillRef = useRef<HTMLDivElement | null>(null);
+  const gateFrac = rmsToMeter(sensitivityToThreshold(sensitivity));
   useEffect(() => {
     const tick = () => {
-      setLevel(getLevel());
+      const el = fillRef.current;
+      if (el) {
+        const lv = rmsToMeter(getLevel());
+        el.style.width = `${lv * 100}%`;
+        el.style.background = lv >= gateFrac ? color : "rgba(255,255,255,0.22)";
+      }
       raf.current = requestAnimationFrame(tick);
     };
     raf.current = requestAnimationFrame(tick);
     return () => cancelAnimationFrame(raf.current);
-  }, [getLevel]);
-
-  const levelFrac = rmsToMeter(level);
-  const gateFrac = rmsToMeter(sensitivityToThreshold(sensitivity));
-  const passing = levelFrac >= gateFrac;
+  }, [getLevel, gateFrac, color]);
 
   // Drag → set the gate. A bar fraction maps to an RMS (meterToRms), then to the
   // sensitivity value the app persists (thresholdToSensitivity).
@@ -142,15 +147,17 @@ export function MicMeter(props: MicMeterProps) {
           touchAction: "none",
         }}
       >
-        {/* live level fill — muted until it clears the gate, then goes live. */}
+        {/* live level fill — muted until it clears the gate, then goes live.
+            Width/colour are driven imperatively via fillRef each frame. */}
         <div
+          ref={fillRef}
           style={{
             position: "absolute",
             left: 0,
             top: 0,
             bottom: 0,
-            width: `${levelFrac * 100}%`,
-            background: passing ? color : "rgba(255,255,255,0.22)",
+            width: "0%",
+            background: "rgba(255,255,255,0.22)",
             transition: "width 55ms linear, background 90ms linear",
           }}
         />
