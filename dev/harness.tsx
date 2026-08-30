@@ -1028,10 +1028,22 @@ function App() {
             <div style={{ minWidth: 0, display: "flex", justifyContent: "flex-end" }}>
           <MicOverlay
             mics={hudMics}
-            devices={[]}
+            devices={[
+              { deviceId: "mic-a", label: "Logitech USB Mic" },
+              { deviceId: "mic-b", label: "Built-in Microphone" },
+            ]}
+            outputs={[
+              { deviceId: "out-a", label: "Headphones (USB)" },
+              { deviceId: "out-b", label: "Built-in Speakers" },
+              { deviceId: "out-c", label: "HDMI TV" },
+            ]}
+            routingSupported={true}
             onGain={(i, gain) => patchHud(i, { gain })}
             onSensitivity={(i, n) => patchHud(i, { sensitivity: n })}
             onDevice={(i, deviceId) => patchHud(i, { deviceId })}
+            onMonitor={(i, on) => patchHud(i, { monitor: on })}
+            onMonitorGain={(i, gain) => patchHud(i, { monitorGain: gain })}
+            onOutput={(i, deviceId) => patchHud(i, { outputDeviceId: deviceId })}
           />
             </div>
           </div>

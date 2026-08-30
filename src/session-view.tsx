@@ -12,7 +12,7 @@
 
 import type { RoundResult, SessionSummary, SessionTrack } from "./session";
 import type { PlaylistRef } from "./playlist-source";
-import type { AudioInput } from "./mic";
+import type { AudioInput, AudioOutput } from "./mic";
 import { PLAYER_COLORS } from "./karaoke-view";
 import { MicMeter } from "./mic-meter";
 
@@ -38,6 +38,9 @@ export interface PlayerSlot {
   deviceId?: string;
   gain: number; // input-gain multiplier (1 = unity)
   sensitivity: number; // 0..100 → this player's OWN detection gate
+  monitor?: boolean; // hear this mic out an output device while singing
+  monitorGain?: number; // monitor loudness 0..1 (independent of `gain`)
+  outputDeviceId?: string; // which output the monitor plays to (undefined = default)
 }
 
 function stars(n: number): string {
@@ -424,12 +427,40 @@ const BAR_LABEL = 48;
 export function MicOverlay(props: {
   mics: HudMic[];
   devices: AudioInput[];
+  /** Output devices for the monitor picker; empty hides it (or routing unsupported). */
+  outputs: AudioOutput[];
+  /** False when the engine can't route to a chosen output — monitor still works on default. */
+  routingSupported: boolean;
   onGain: (i: number, gain: number) => void;
   onSensitivity: (i: number, sensitivity: number) => void;
   onDevice: (i: number, deviceId: string | undefined) => void;
+  onMonitor: (i: number, on: boolean) => void;
+  onMonitorGain: (i: number, gain: number) => void;
+  onOutput: (i: number, deviceId: string | undefined) => void;
 }) {
   const React = Spicetify.React;
-  const { mics, devices, onGain, onSensitivity, onDevice } = props;
+  const {
+    mics,
+    devices,
+    outputs,
+    routingSupported,
+    onGain,
+    onSensitivity,
+    onDevice,
+    onMonitor,
+    onMonitorGain,
+    onOutput,
+  } = props;
+  const selectStyle: React.CSSProperties = {
+    width: "100%",
+    minWidth: 0,
+    background: "rgba(0,0,0,0.35)",
+    border: "1px solid rgba(255,255,255,0.12)",
+    borderRadius: 10,
+    color: "#fff",
+    fontSize: 26,
+    padding: "8px 10px",
+  };
   // Width comes from the roster, never from the content: with equal flex
   // columns inside, a content-sized pill would collapse onto the labels.
   const n = Math.max(1, mics.length);
@@ -492,16 +523,7 @@ export function MicOverlay(props: {
                 value={m.deviceId ?? ""}
                 onChange={(e) => onDevice(i, (e.target as HTMLSelectElement).value || undefined)}
                 title="Input device — switching restarts this mic only"
-                style={{
-                  width: "100%",
-                  minWidth: 0,
-                  background: "rgba(0,0,0,0.35)",
-                  border: "1px solid rgba(255,255,255,0.12)",
-                  borderRadius: 10,
-                  color: "#fff",
-                  fontSize: 26,
-                  padding: "8px 10px",
-                }}
+                style={selectStyle}
               >
                 <option value="">Default mic</option>
                 {devices.map((d) => (
@@ -510,6 +532,66 @@ export function MicOverlay(props: {
                   </option>
                 ))}
               </select>
+
+              {/* ── Monitor: hear this mic out an output while singing ── */}
+              {(() => {
+                const on = !!m.monitor;
+                const vol = Math.round((m.monitorGain ?? 0.8) * 100);
+                return (
+                  <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+                    <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+                      <button
+                        onClick={() => onMonitor(i, !on)}
+                        title="Play this mic back out an output device (use headphones to avoid feedback)"
+                        style={{
+                          fontSize: 26,
+                          fontWeight: 700,
+                          padding: "8px 14px",
+                          borderRadius: 10,
+                          cursor: "pointer",
+                          border: `1px solid ${on ? tint : "rgba(255,255,255,0.14)"}`,
+                          background: on ? `${tint}22` : "rgba(0,0,0,0.35)",
+                          color: on ? tint : "#fff",
+                          whiteSpace: "nowrap",
+                        }}
+                      >
+                        {on ? "🔊 Monitor" : "🔇 Monitor"}
+                      </button>
+                      <span style={{ ...readout, marginLeft: "auto" }}>{vol}%</span>
+                    </div>
+                    <input
+                      type="range"
+                      min={0}
+                      max={100}
+                      value={vol}
+                      disabled={!on}
+                      onChange={(e) =>
+                        onMonitorGain(i, Number((e.target as HTMLInputElement).value) / 100)
+                      }
+                      title="Monitor volume"
+                      style={{ width: "100%", opacity: on ? 1 : 0.4 }}
+                    />
+                    {routingSupported && (
+                      <select
+                        value={m.outputDeviceId ?? ""}
+                        disabled={!on}
+                        onChange={(e) =>
+                          onOutput(i, (e.target as HTMLSelectElement).value || undefined)
+                        }
+                        title="Monitor output device"
+                        style={{ ...selectStyle, opacity: on ? 1 : 0.4 }}
+                      >
+                        <option value="">Default output</option>
+                        {outputs.map((d) => (
+                          <option key={d.deviceId} value={d.deviceId}>
+                            {d.label}
+                          </option>
+                        ))}
+                      </select>
+                    )}
+                  </div>
+                );
+              })()}
             </div>
           );
         })}

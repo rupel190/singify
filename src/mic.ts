@@ -32,6 +32,21 @@ export interface MicPitch {
   /** Live-adjust input gain — a per-mic "level" knob (see MicPitchOptions.gain). */
   setGain(gain: number): void;
   /**
+   * Monitoring — hear this mic out a speaker/headphone while singing. The tap is
+   * pre-scoring-gain, so monitor level and scoring gain move independently. Off
+   * by default (feedback + latency; see MicPitchOptions.monitor).
+   */
+  setMonitor(on: boolean): void;
+  /** Monitor loudness, 0..1 (0 = silent). Independent of the scoring gain. */
+  setMonitorGain(gain: number): void;
+  /**
+   * Route the monitor to a specific OUTPUT device (a deviceId from
+   * enumerateOutputs()); undefined = the system default. Resolves once the sink
+   * has switched. A no-op beyond the default when the engine lacks setSinkId
+   * (see outputRoutingSupported()).
+   */
+  setOutputDevice(deviceId: string | undefined): Promise<void>;
+  /**
    * What the browser ACTUALLY applied for the three DSP stages — which can
    * differ from what we requested (the constraints are advisory). Any of these
    * being on can fade a held note; this is how you find out which.
@@ -74,6 +89,23 @@ export interface MicPitchOptions extends Omit<DetectOptions, "sampleRate"> {
    * sensitivity setting.
    */
   gain?: number;
+  /**
+   * Start with monitoring on (default FALSE). Monitoring plays this mic back out
+   * an output device so the singer hears themselves. Off by default for two
+   * reasons: software monitoring adds a full capture→playback round trip
+   * (30–100 ms) that reads as slapback and can hurt pitch, and mic + speakers in
+   * one room is a feedback path. Best paired with headphones, or a hardware
+   * direct-monitor knob instead.
+   */
+  monitor?: boolean;
+  /** Initial monitor loudness, 0..1 (default 0.8). Independent of `gain`. */
+  monitorGain?: number;
+  /**
+   * Initial monitor OUTPUT device (a deviceId from enumerateOutputs()); omitted
+   * = the system default. Ignored beyond the default when the engine can't route
+   * (see outputRoutingSupported()).
+   */
+  outputDeviceId?: string;
 }
 
 export async function startMicPitch(opts: MicPitchOptions = {}): Promise<MicPitch> {
@@ -86,6 +118,9 @@ export async function startMicPitch(opts: MicPitchOptions = {}): Promise<MicPitc
     autoGainControl = false,
     deviceId,
     gain = 1,
+    monitor = false,
+    monitorGain = 0.8,
+    outputDeviceId,
     ...detectOpts
   } = opts;
 
@@ -114,13 +149,58 @@ export async function startMicPitch(opts: MicPitchOptions = {}): Promise<MicPitc
   gainNode.gain.value = Math.max(0, gain);
   const analyser = ctx.createAnalyser();
   analyser.fftSize = fftSize;
-  // source → gain → analyser ONLY. Never connect to ctx.destination, or the mic
-  // loops back out the speakers.
+  // Scoring path: source → gain → analyser ONLY. The analyser never reaches
+  // ctx.destination, so scoring alone is silent — monitoring is a SEPARATE tap
+  // added below, which is the only thing that ever makes sound.
   source.connect(gainNode);
   gainNode.connect(analyser);
 
-  const buf = new Float32Array(analyser.fftSize);
   let stopped = false;
+
+  // ── Monitor tap (opt-in) ───────────────────────────────────────────────────
+  // A second branch off `source` — BEFORE the scoring gain — so monitor loudness
+  // and scoring level are independent knobs. It feeds a MediaStreamDestination
+  // wired to a hidden <audio> element, because HTMLMediaElement.setSinkId is the
+  // broadly-supported way to send audio to a CHOSEN output device (per player).
+  // Built lazily the first time monitoring is switched on, then reused.
+  let monitorNode: GainNode | null = null;
+  let sinkStream: MediaStreamAudioDestinationNode | null = null;
+  let sinkEl: HTMLAudioElement | null = null;
+  let monOn = monitor;
+  let monLevel = clamp01(monitorGain);
+  let outId = outputDeviceId;
+
+  const applyMonitorGain = () => {
+    if (monitorNode) monitorNode.gain.value = monOn ? monLevel : 0;
+  };
+
+  const ensureMonitorChain = () => {
+    if (monitorNode || stopped) return;
+    monitorNode = ctx.createGain();
+    applyMonitorGain();
+    source.connect(monitorNode); // tap pre-scoring-gain
+    sinkStream = ctx.createMediaStreamDestination();
+    monitorNode.connect(sinkStream);
+    sinkEl = new Audio();
+    sinkEl.autoplay = true;
+    sinkEl.srcObject = sinkStream.stream;
+    void routeSink();
+    void sinkEl.play().catch((err) => console.error("[singify] monitor play failed:", err));
+  };
+
+  const routeSink = async (): Promise<void> => {
+    const el = sinkEl as (HTMLAudioElement & { setSinkId?: (id: string) => Promise<void> }) | null;
+    if (!el?.setSinkId) return; // engine can't route — stays on the default output
+    try {
+      await el.setSinkId(outId ?? "");
+    } catch (err) {
+      console.error("[singify] monitor setSinkId failed:", err);
+    }
+  };
+
+  if (monOn) ensureMonitorChain();
+
+  const buf = new Float32Array(analyser.fftSize);
   // Detection options that can be tuned live (mic sensitivity = rmsThreshold).
   let liveOpts: LiveDetectOptions = { ...detectOpts };
 
@@ -143,15 +223,51 @@ export async function startMicPitch(opts: MicPitchOptions = {}): Promise<MicPitc
     setGain(g: number) {
       gainNode.gain.value = Math.max(0, g);
     },
+    setMonitor(on: boolean) {
+      monOn = on;
+      if (on) ensureMonitorChain();
+      applyMonitorGain();
+    },
+    setMonitorGain(g: number) {
+      monLevel = clamp01(g);
+      applyMonitorGain();
+    },
+    async setOutputDevice(id: string | undefined) {
+      outId = id;
+      ensureMonitorChain(); // a device pick implies wanting to hear it
+      await routeSink();
+    },
     stop() {
       if (stopped) return;
       stopped = true;
       source.disconnect();
       gainNode.disconnect();
+      if (monitorNode) monitorNode.disconnect();
+      if (sinkStream) sinkStream.disconnect();
+      if (sinkEl) {
+        sinkEl.pause();
+        sinkEl.srcObject = null;
+      }
       for (const t of stream.getTracks()) t.stop();
       void ctx.close();
     },
   };
+}
+
+function clamp01(n: number): number {
+  return Math.min(1, Math.max(0, n));
+}
+
+/**
+ * Whether this engine can route the monitor to a chosen output device. When
+ * false, monitoring still works but only out the system default — the UI should
+ * hide the per-player output picker.
+ */
+export function outputRoutingSupported(): boolean {
+  return (
+    typeof HTMLMediaElement !== "undefined" &&
+    typeof (HTMLMediaElement.prototype as { setSinkId?: unknown }).setSinkId === "function"
+  );
 }
 
 /** One selectable audio input, for a per-player mic picker. */
@@ -178,6 +294,33 @@ export async function enumerateInputs(): Promise<AudioInput[]> {
       .map((d, i) => ({ deviceId: d.deviceId, label: d.label || `Microphone ${i + 1}` }));
   } catch (err) {
     console.error("[singify] enumerateInputs failed:", err);
+    return [];
+  }
+}
+
+/** One selectable audio OUTPUT device, for the per-player monitor picker. */
+export interface AudioOutput {
+  deviceId: string;
+  label: string;
+}
+
+/**
+ * List available audio OUTPUT devices for the per-player monitor picker. Same
+ * label-privacy rule as enumerateInputs (call after a mic grant). The deviceIds
+ * returned here are what MicPitch.setOutputDevice / setSinkId accept. Returns []
+ * when the API is unavailable; an engine with no setSinkId (outputRoutingSupported()
+ * === false) can still monitor, just only out the system default.
+ */
+export async function enumerateOutputs(): Promise<AudioOutput[]> {
+  const md = navigator.mediaDevices;
+  if (!md?.enumerateDevices) return [];
+  try {
+    const devices = await md.enumerateDevices();
+    return devices
+      .filter((d) => d.kind === "audiooutput")
+      .map((d, i) => ({ deviceId: d.deviceId, label: d.label || `Output ${i + 1}` }));
+  } catch (err) {
+    console.error("[singify] enumerateOutputs failed:", err);
     return [];
   }
 }

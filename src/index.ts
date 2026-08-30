@@ -49,7 +49,15 @@ import {
   currentContextPlaylist,
   type PlaylistRef,
 } from "./playlist-source";
-import { startMicPitch, enumerateInputs, type MicPitch, type AudioInput } from "./mic";
+import {
+  startMicPitch,
+  enumerateInputs,
+  enumerateOutputs,
+  outputRoutingSupported,
+  type MicPitch,
+  type AudioInput,
+  type AudioOutput,
+} from "./mic";
 import { resolveForTrack, confirmPick } from "./resolver-client";
 import { sensitivityToThreshold, thresholdToSensitivity } from "./pitch";
 import { UI_SCALE } from "./ui-scale";
@@ -237,7 +245,13 @@ function setActiveRoster(next: PlayerSlot[]): void {
 
 /** Open one mic for roster slot i, or null if its device won't open. */
 async function openMic(p: PlayerSlot): Promise<MicPitch | null> {
-  const opts = { gain: p.gain, rmsThreshold: sensitivityToThreshold(p.sensitivity) };
+  const opts = {
+    gain: p.gain,
+    rmsThreshold: sensitivityToThreshold(p.sensitivity),
+    monitor: !!p.monitor,
+    monitorGain: p.monitorGain ?? 0.8,
+    outputDeviceId: p.outputDeviceId,
+  };
   try {
     return await startMicPitch({ deviceId: p.deviceId, ...opts });
   } catch (err) {
@@ -330,6 +344,25 @@ async function setPlayerDevice(i: number, deviceId: string | undefined): Promise
     mics[i]?.stop();
     mics[i] = await openMic(next); // a device swap is the one thing that restarts
   }
+  if (visible) renderOverlay();
+}
+
+function setPlayerMonitor(i: number, on: boolean): void {
+  if (!patchSlot(i, { monitor: on })) return;
+  mics[i]?.setMonitor(on); // live — no restart
+  if (visible) renderOverlay();
+}
+
+function setPlayerMonitorGain(i: number, gain: number): void {
+  const g = Math.min(1, Math.max(0, gain));
+  if (!patchSlot(i, { monitorGain: g })) return;
+  mics[i]?.setMonitorGain(g);
+  if (visible) renderOverlay();
+}
+
+function setPlayerOutput(i: number, deviceId: string | undefined): void {
+  if (!patchSlot(i, { outputDeviceId: deviceId })) return;
+  void mics[i]?.setOutputDevice(deviceId); // switches the sink; no restart
   if (visible) renderOverlay();
 }
 
@@ -441,7 +474,15 @@ function loadMicSlots(): Partial<PlayerSlot>[] {
 function saveMicSlots(roster: PlayerSlot[]): void {
   const merged = loadMicSlots();
   roster.forEach((p, i) => {
-    merged[i] = { name: p.name, deviceId: p.deviceId, gain: p.gain, sensitivity: p.sensitivity };
+    merged[i] = {
+      name: p.name,
+      deviceId: p.deviceId,
+      gain: p.gain,
+      sensitivity: p.sensitivity,
+      monitor: p.monitor,
+      monitorGain: p.monitorGain,
+      outputDeviceId: p.outputDeviceId,
+    };
   });
   try {
     localStorage.setItem(MIC_SLOTS_KEY, JSON.stringify(merged));
@@ -548,6 +589,9 @@ function newSlot(i: number, name: string): PlayerSlot {
     gain: typeof saved?.gain === "number" ? saved.gain : 1,
     sensitivity:
       typeof saved?.sensitivity === "number" ? saved.sensitivity : defaultSensitivityFor(i),
+    monitor: !!saved?.monitor,
+    monitorGain: typeof saved?.monitorGain === "number" ? saved.monitorGain : 0.8,
+    outputDeviceId: saved?.outputDeviceId,
   };
 }
 
@@ -561,6 +605,10 @@ let sessionRoster: PlayerSlot[] = [newSlot(0, "P1")];
 let soloRoster: PlayerSlot[] = [newSlot(0, "P1")];
 // Audio input devices for the setup mic picker (populated when it opens).
 let audioInputs: AudioInput[] = [];
+// Output devices for the per-player monitor picker, and whether this engine can
+// actually route to a chosen one (else monitoring only reaches the default out).
+let audioOutputs: AudioOutput[] = [];
+const monitorRoutingSupported = outputRoutingSupported();
 let lastRound: RoundResult | null = null;
 let scoredTrackIds = new Set<string>(); // one round per distinct track per session
 // Playlist picker on the setup screen: the user's playlists + load state.
@@ -811,11 +859,18 @@ function renderOverlay(): void {
     ? React.createElement(MicOverlay, {
         mics: hudMics,
         devices: audioInputs,
+        outputs: audioOutputs,
+        routingSupported: monitorRoutingSupported,
         onGain: (i: number, gain: number) => setPlayerGain(hudMics[i]?.index ?? i, gain),
         onSensitivity: (i: number, n: number) =>
           setPlayerSensitivity(hudMics[i]?.index ?? i, n),
         onDevice: (i: number, deviceId: string | undefined) =>
           void setPlayerDevice(hudMics[i]?.index ?? i, deviceId),
+        onMonitor: (i: number, on: boolean) => setPlayerMonitor(hudMics[i]?.index ?? i, on),
+        onMonitorGain: (i: number, gain: number) =>
+          setPlayerMonitorGain(hudMics[i]?.index ?? i, gain),
+        onOutput: (i: number, deviceId: string | undefined) =>
+          setPlayerOutput(hudMics[i]?.index ?? i, deviceId),
       })
     : null;
 
@@ -956,6 +1011,7 @@ async function loadDevices(): Promise<void> {
     console.error("[singify] mic permission for device list denied:", err);
   }
   audioInputs = await enumerateInputs();
+  audioOutputs = await enumerateOutputs();
   if (activeScreen === "session-setup") {
     renderOverlay();
     void startPreviews(); // live meters need a running mic per slot
