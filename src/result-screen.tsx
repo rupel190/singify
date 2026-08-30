@@ -36,6 +36,11 @@ export function ResultScreen(props: ResultScreenProps) {
         width: "100%",
         height: "100%",
         minHeight: fullscreen ? "100%" : 360,
+        // 2.5× the whole end screen (fullscreen only); it multiplies with the
+        // root UI_SCALE. Percentages resolve in the zoomed space, so height 100%
+        // still fills — overflow scrolls it if it outgrows the viewport.
+        zoom: fullscreen ? 2.5 : 1,
+        overflowY: "auto",
         gap: 10,
         color: "#fff",
         fontFamily:
