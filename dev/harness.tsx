@@ -352,6 +352,7 @@ function App() {
   // stage, so its layout can be tuned in-browser. ?screen=ingame opens straight in.
   const [inGame, setInGame] = React.useState(params.get("screen") === "ingame");
   const [autoSkip, setAutoSkip] = React.useState(false);
+  const [resetToken, setResetToken] = React.useState(0);
   const [sessionMsg, setSessionMsg] = React.useState<string | null>(null);
   // A mock 2-player hotseat result, built with the real session helpers.
   const demoSummary = React.useMemo(() => {
@@ -991,6 +992,11 @@ function App() {
             micsOn={hudMics.length > 0}
             onSkip={() => seek(0)}
             onEnd={() => setInGame(false)}
+            onResetScores={() => setResetToken((n) => n + 1)}
+            onRestartSong={() => {
+              seek(0);
+              setResetToken((n) => n + 1);
+            }}
             autoSkip={autoSkip}
             onAutoSkip={setAutoSkip}
             sourceName="Karaoke Bangers"
@@ -1012,7 +1018,13 @@ function App() {
           />
             </div>
           </div>
-          <KaraokeView song={song} getPositionMs={getPositionMs} players={gamePlayers} fullscreen />
+          <KaraokeView
+            song={song}
+            getPositionMs={getPositionMs}
+            players={gamePlayers}
+            resetToken={resetToken}
+            fullscreen
+          />
         </div>
         <button
           onClick={() => setInGame(false)}

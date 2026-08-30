@@ -75,6 +75,12 @@ export interface KaraokeViewProps {
    * (solo Quick Sing), the view shows its own per-song ResultScreen.
    */
   onComplete?: (scores: PlayerRoundScore[]) => void;
+  /**
+   * Bump to start a fresh scored attempt WITHOUT changing the song or the
+   * roster — the host's "reset scores" control. Every player's engine is
+   * dropped, exactly as a new song or a changed roster would do it.
+   */
+  resetToken?: number;
   fullscreen?: boolean;
 }
 
@@ -100,8 +106,8 @@ const FALLBACK_PX_PER_MS = 0.18; // only until the lane has been measured once
 // centring the used band keeps the melody reading as a line. Note thickness
 // follows the row spacing, so bars are as fat as they can be without merging.
 const MAX_PX_PER_SEMITONE = 40;
-const NOTE_FILL = 0.6; // note thickness as a fraction of its semitone row
-const MAX_NOTE_HEIGHT = 30;
+const NOTE_FILL = 0.9; // note thickness as a fraction of its semitone row
+const MAX_NOTE_HEIGHT = 45;
 const MIN_NOTE_HEIGHT = 10;
 const LANE_VPAD = 24; // px of vertical padding inside the lane
 const HIT_TOLERANCE = 2; // semitones — Easy (Medium=1, Hard=0 later)
@@ -250,7 +256,7 @@ export function KaraokeView(props: KaraokeViewProps) {
     enginesRef.current.clear();
     lastMsRef.current = 0;
     completedRef.current = false;
-  }, [song, idsKey]);
+  }, [song, idsKey, props.resetToken]);
 
   // The one per-frame computation, run once per active player. Scoring samples
   // the RAW pitch; the marker folds the raw pitch to the target note FIRST, then

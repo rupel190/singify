@@ -566,6 +566,10 @@ export function SessionHud(props: {
   micsOn: boolean;
   onSkip: () => void;
   onEnd: () => void;
+  /** Drop every player's running score and start the song's scoring over. */
+  onResetScores: () => void;
+  /** Seek back to 0 and score from the top. */
+  onRestartSong: () => void;
   /** Hop past tracks with no chart instead of parking on the no-chart card. */
   autoSkip: boolean;
   onAutoSkip: (on: boolean) => void;
@@ -573,8 +577,19 @@ export function SessionHud(props: {
   sourceName?: string | null;
 }) {
   const React = Spicetify.React;
-  const { round, target, totals, micsOn, onSkip, onEnd, autoSkip, onAutoSkip, sourceName } =
-    props;
+  const {
+    round,
+    target,
+    totals,
+    micsOn,
+    onSkip,
+    onEnd,
+    onResetScores,
+    onRestartSong,
+    autoSkip,
+    onAutoSkip,
+    sourceName,
+  } = props;
   const btn: React.CSSProperties = {
     padding: "16px 40px",
     borderRadius: 26,
@@ -669,12 +684,24 @@ export function SessionHud(props: {
           </span>
         )}
       </div>
-      <div style={{ display: "flex", gap: 18 }}>
+      {/* Wraps, because five buttons at this type size outrun the HUD's column
+          on a narrower screen. */}
+      <div style={{ display: "flex", gap: 18, flexWrap: "wrap" }}>
         <button style={btn} onClick={onSkip}>
           Skip
         </button>
         <button style={btn} onClick={onEnd}>
           End
+        </button>
+        <button style={btn} onClick={onRestartSong} title="Play this song from the top">
+          ⟲ Restart
+        </button>
+        <button
+          style={btn}
+          onClick={onResetScores}
+          title="Clear every singer's score and keep playing"
+        >
+          ↺ Scores
         </button>
         <button
           style={{

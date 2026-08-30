@@ -354,6 +354,26 @@ function activePlayers(): PlayerInput[] {
   return out;
 }
 
+// Bumped to start a fresh scored attempt in place. KaraokeView drops every
+// player's engine when this changes, the same way a new song does — which is
+// what makes "reset scores" work without touching playback.
+let scoreResetToken = 0;
+
+/** HUD "↺ Scores" — clear every singer's running score, keep the music going. */
+function resetScores(): void {
+  scoreResetToken++;
+  showReadout("↺ Scores reset");
+  if (visible) renderOverlay();
+}
+
+/** HUD "⟲ Restart" — back to the top of the song, scoring from zero. */
+function restartSong(): void {
+  onReplay(); // seek(0); the view would reset on the jump anyway...
+  scoreResetToken++; // ...but bump too, so the score clears even if the seek lags
+  showReadout("⟲ Song restarted");
+  if (visible) renderOverlay();
+}
+
 /** "Sing again" from the result screen — restart the track from the top. */
 function onReplay(): void {
   try {
@@ -743,6 +763,7 @@ function renderOverlay(): void {
         players: activePlayers(), // one entry per live mic — N in a versus session
         onReplay,
         onComplete: session ? onRoundComplete : undefined, // sessions record + advance
+        resetToken: scoreResetToken,
         fullscreen: true,
       })
     : pickerCandidates
@@ -816,6 +837,8 @@ function renderOverlay(): void {
         micsOn: micsActive(),
         onSkip: skipRound,
         onEnd: endSession,
+        onResetScores: resetScores,
+        onRestartSong: restartSong,
         autoSkip: autoSkipNoChart,
         onAutoSkip: setAutoSkip,
         sourceName: session.playlistName,
