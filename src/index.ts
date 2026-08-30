@@ -60,6 +60,7 @@ import {
 } from "./mic";
 import { resolveForTrack, confirmPick } from "./resolver-client";
 import { sensitivityToThreshold, thresholdToSensitivity } from "./pitch";
+import type { Difficulty } from "./scoring";
 import { UI_SCALE } from "./ui-scale";
 import { parse, type ParsedSong } from "./ultrastar-parser";
 import type { USDBSong } from "./usdb";
@@ -456,6 +457,27 @@ function loadSensitivity(): number {
 // they move everybody at once, which is the "the room got loud" case.
 let sensitivity = loadSensitivity();
 
+// Scoring difficulty — the pitch tolerance for scoring AND the visual hit-snap
+// (easy ±2, medium ±1, hard ±0 semitones). Global + persisted; applies to solo
+// and sessions alike. Rap/"freestyle" notes are pitch-agnostic, so they're
+// unaffected at any difficulty.
+const DIFFICULTY_KEY = "singify:difficulty";
+function loadDifficulty(): Difficulty {
+  const v = localStorage.getItem(DIFFICULTY_KEY);
+  return v === "medium" || v === "hard" ? v : "easy";
+}
+let difficulty: Difficulty = loadDifficulty();
+function setDifficulty(next: Difficulty): void {
+  difficulty = next;
+  try {
+    localStorage.setItem(DIFFICULTY_KEY, next);
+  } catch {
+    /* storage blocked — keep the in-memory value */
+  }
+  showReadout(`Difficulty: ${next}`);
+  if (visible) renderOverlay();
+}
+
 // Every slot's mic settings — name, device, gain, gate — saved by ROSTER INDEX,
 // so a new slot i restores whatever slot i last used. Indexed rather than kept
 // as one roster blob so editing solo (one slot) can't wipe player 2's setup.
@@ -721,6 +743,8 @@ function renderOverlay(): void {
           setupRounds = n;
           renderOverlay();
         },
+        difficulty,
+        onDifficulty: setDifficulty,
         players: setupRoster,
         onName: (i: number, name: string) => {
           setupRoster = setupRoster.map((p, j) => (j === i ? { ...p, name } : p));
@@ -812,6 +836,7 @@ function renderOverlay(): void {
         onReplay,
         onComplete: session ? onRoundComplete : undefined, // sessions record + advance
         resetToken: scoreResetToken,
+        difficulty,
         fullscreen: true,
       })
     : pickerCandidates

@@ -44,6 +44,7 @@ import {
 import type { ScoreState } from "../src/scoring";
 import { startMicPitch, type MicPitch, type AppliedProcessing } from "../src/mic";
 import { sensitivityToThreshold } from "../src/pitch";
+import type { Difficulty } from "../src/scoring";
 
 const SENS_KEY = "singify:sensitivity";
 function loadSensitivity(): number {
@@ -345,6 +346,7 @@ function App() {
   ];
   const [plLoading, setPlLoading] = React.useState(false);
   const [setupRounds, setSetupRounds] = React.useState(5);
+  const [difficulty, setDifficulty] = React.useState<Difficulty>("easy");
   const [setupRoster, setSetupRoster] = React.useState<PlayerSlot[]>([
     { name: "P1", gain: 1, sensitivity: 70 },
   ]);
@@ -933,6 +935,8 @@ function App() {
                 }
                 rounds={setupRounds}
                 onRounds={setSetupRounds}
+                difficulty={difficulty}
+                onDifficulty={setDifficulty}
                 players={setupRoster}
                 onName={(i, name) =>
                   setSetupRoster((r) => r.map((p, j) => (j === i ? { ...p, name } : p)))
@@ -1052,6 +1056,7 @@ function App() {
             getPositionMs={getPositionMs}
             players={gamePlayers}
             resetToken={resetToken}
+            difficulty={difficulty}
             fullscreen
           />
         </div>

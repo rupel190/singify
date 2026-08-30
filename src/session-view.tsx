@@ -13,6 +13,7 @@
 import type { RoundResult, SessionSummary, SessionTrack } from "./session";
 import type { PlaylistRef } from "./playlist-source";
 import type { AudioInput, AudioOutput } from "./mic";
+import type { Difficulty } from "./scoring";
 import { PLAYER_COLORS } from "./karaoke-view";
 import { MicMeter } from "./mic-meter";
 
@@ -59,6 +60,9 @@ export function SessionSetup(props: {
   // Free-play mode — sing N songs off whatever's queued.
   rounds: number;
   onRounds: (n: number) => void;
+  /** Scoring difficulty — pitch tolerance for scoring + the visual hit-snap. */
+  difficulty: Difficulty;
+  onDifficulty: (d: Difficulty) => void;
   onStart: () => void;
   onCancel: () => void;
   micOn: boolean;
@@ -84,6 +88,8 @@ export function SessionSetup(props: {
     current,
     rounds,
     onRounds,
+    difficulty,
+    onDifficulty,
     onStart,
     onCancel,
     micOn,
@@ -377,6 +383,39 @@ export function SessionSetup(props: {
               </button>
             ))
           )}
+        </div>
+
+        <div style={{ ...sectionLabel, marginTop: 8 }}>Difficulty</div>
+        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+          {(["easy", "medium", "hard"] as Difficulty[]).map((d) => {
+            const on = difficulty === d;
+            return (
+              <button
+                key={d}
+                onClick={() => onDifficulty(d)}
+                title={
+                  d === "easy"
+                    ? "±2 semitones — forgiving"
+                    : d === "medium"
+                      ? "±1 semitone"
+                      : "±0 — exact pitch (rap/spoken notes are never pitch-scored)"
+                }
+                style={{
+                  padding: "8px 16px",
+                  borderRadius: 12,
+                  fontSize: 20,
+                  fontWeight: 800,
+                  textTransform: "capitalize",
+                  cursor: "pointer",
+                  border: `1px solid ${on ? ACCENT : "rgba(255,255,255,0.12)"}`,
+                  background: on ? `${ACCENT}22` : "rgba(255,255,255,0.04)",
+                  color: on ? ACCENT : "#fff",
+                }}
+              >
+                {d}
+              </button>
+            );
+          })}
         </div>
 
         <div style={{ ...sectionLabel, marginTop: 8 }}>Or free play</div>

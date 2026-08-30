@@ -25,7 +25,13 @@ import {
   type Syllable,
 } from "./ultrastar-parser";
 import { foldSmoothHit, createPitchSmoother } from "./pitch";
-import { createScoreKeeper, gradeForScore, type ScoreState } from "./scoring";
+import {
+  createScoreKeeper,
+  gradeForScore,
+  toleranceSemitones,
+  type ScoreState,
+  type Difficulty,
+} from "./scoring";
 import { ResultScreen } from "./result-screen";
 
 /**
@@ -81,6 +87,11 @@ export interface KaraokeViewProps {
    * dropped, exactly as a new song or a changed roster would do it.
    */
   resetToken?: number;
+  /**
+   * Pitch tolerance for BOTH scoring and the visual hit-snap: easy ±2, medium
+   * ±1, hard ±0 semitones. Default "easy". Changing it starts a fresh attempt.
+   */
+  difficulty?: Difficulty;
   fullscreen?: boolean;
 }
 
@@ -110,7 +121,8 @@ const NOTE_FILL = 0.9; // note thickness as a fraction of its semitone row
 const MAX_NOTE_HEIGHT = 45;
 const MIN_NOTE_HEIGHT = 10;
 const LANE_VPAD = 24; // px of vertical padding inside the lane
-const HIT_TOLERANCE = 2; // semitones — Easy (Medium=1, Hard=0 later)
+// Pitch hit-band is now DERIVED from props.difficulty (toleranceSemitones),
+// synced between scoring and the visual snap. This is the easy-mode value.
 // Left axis reserved for the pitch-name labels (Performous-style). DERIVED from
 // the label size, not a flat number: at 60px a 4-glyph name like "A♯-1" is ~150px
 // wide, so the old 120 let labels spill into the lane and crowd player 2's score
@@ -217,6 +229,13 @@ export function KaraokeView(props: KaraokeViewProps) {
   const React = Spicetify.React;
   const { useRef, useMemo, useCallback, useEffect } = React;
   const { song, getPositionMs, onReplay, fullscreen } = props;
+  const difficulty: Difficulty = props.difficulty ?? "easy";
+  // Read via refs so the rAF loop and engineFor keep stable identities — only the
+  // reset effect (below) reacts to a difficulty change, rebuilding the engines.
+  const difficultyRef = useRef(difficulty);
+  difficultyRef.current = difficulty;
+  const hitTolRef = useRef(toleranceSemitones(difficulty));
+  hitTolRef.current = toleranceSemitones(difficulty);
 
   // The active singers. Empty = play-along (no scoring); one = solo/hotseat;
   // two = versus. Memoised on identity so the frame loop isn't rebuilt each render.
@@ -231,7 +250,11 @@ export function KaraokeView(props: KaraokeViewProps) {
     (id: string): Engine => {
       let e = enginesRef.current.get(id);
       if (!e) {
-        e = { keeper: createScoreKeeper(song), smoother: createPitchSmoother(), trail: [] };
+        e = {
+          keeper: createScoreKeeper(song, difficultyRef.current),
+          smoother: createPitchSmoother(),
+          trail: [],
+        };
         enginesRef.current.set(id, e);
       }
       return e;
@@ -256,7 +279,7 @@ export function KaraokeView(props: KaraokeViewProps) {
     enginesRef.current.clear();
     lastMsRef.current = 0;
     completedRef.current = false;
-  }, [song, idsKey, props.resetToken]);
+  }, [song, idsKey, props.resetToken, difficulty]);
 
   // The one per-frame computation, run once per active player. Scoring samples
   // the RAW pitch; the marker folds the raw pitch to the target note FIRST, then
@@ -284,7 +307,7 @@ export function KaraokeView(props: KaraokeViewProps) {
         eng.keeper.sample(ms, rawMidi);
         const score = eng.keeper.read();
 
-        const { pitch, hit } = foldSmoothHit(eng.smoother, rawMidi, target, HIT_TOLERANCE);
+        const { pitch, hit } = foldSmoothHit(eng.smoother, rawMidi, target, hitTolRef.current);
         if (pitch != null) {
           const buf = eng.trail;
           buf.push({ ms, pitch, hit });
