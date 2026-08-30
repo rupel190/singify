@@ -346,7 +346,7 @@ function App() {
   const [plLoading, setPlLoading] = React.useState(false);
   const [setupRounds, setSetupRounds] = React.useState(5);
   const [setupRoster, setSetupRoster] = React.useState<PlayerSlot[]>([
-    { name: "You", gain: 1, sensitivity: 70 },
+    { name: "P1", gain: 1, sensitivity: 70 },
   ]);
   // Fullscreen in-game overlay (SessionHud + KaraokeView) — the exact Spotify
   // stage, so its layout can be tuned in-browser. ?screen=ingame opens straight in.
@@ -496,7 +496,7 @@ function App() {
         { id: "sam", name: "Sam", color: PLAYER_COLORS[1], getPitchMidi: singerB },
       ]
     : micOn
-      ? [{ id: "mic0", name: "You", color: PLAYER_COLORS[0], getPitchMidi: getLivePitchMidi }]
+      ? [{ id: "mic0", name: "P1", color: PLAYER_COLORS[0], getPitchMidi: getLivePitchMidi }]
       : [];
 
   // For the in-game overlay demo, always render at least one singer so the HUD +
@@ -504,7 +504,7 @@ function App() {
   const gamePlayers: PlayerInput[] =
     players.length > 0
       ? players
-      : [{ id: "you", name: "You", color: PLAYER_COLORS[0], getPitchMidi: singerA }];
+      : [{ id: "you", name: "P1", color: PLAYER_COLORS[0], getPitchMidi: singerA }];
 
   // Synthetic levels for the in-game meters — the harness has no live mic here,
   // so the banner still moves and can be eyeballed at its real size.
@@ -1011,10 +1011,22 @@ function App() {
             <div style={{ minWidth: 0, display: "flex", justifyContent: "flex-end" }}>
           <MicOverlay
             mics={hudMics}
-            devices={[]}
+            devices={[
+              { deviceId: "mic-a", label: "Logitech USB Mic" },
+              { deviceId: "mic-b", label: "Built-in Microphone" },
+            ]}
+            outputs={[
+              { deviceId: "out-a", label: "Headphones (USB)" },
+              { deviceId: "out-b", label: "Built-in Speakers" },
+              { deviceId: "out-c", label: "HDMI TV" },
+            ]}
+            routingSupported={true}
             onGain={(i, gain) => patchHud(i, { gain })}
             onSensitivity={(i, n) => patchHud(i, { sensitivity: n })}
             onDevice={(i, deviceId) => patchHud(i, { deviceId })}
+            onMonitor={(i, on) => patchHud(i, { monitor: on })}
+            onMonitorGain={(i, gain) => patchHud(i, { monitorGain: gain })}
+            onOutput={(i, deviceId) => patchHud(i, { outputDeviceId: deviceId })}
           />
             </div>
           </div>

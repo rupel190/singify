@@ -606,45 +606,62 @@ export function KaraokeView(props: KaraokeViewProps) {
           );
         })}
 
-        {/* running score HUD per player — anchored to the BOTTOM of the lane so
-            the top stays clear. Player order matches the mic banner above: slot 0
-            bottom-LEFT (past the pitch-label gutter), slot 1 bottom-right. Each
-            tinted its colour; name only in multiplayer. */}
-        {rendered.map((r, i) =>
-          r.score ? (
-            <div
-              key={r.id}
-              style={{
-                position: "absolute",
-                bottom: 12,
-                [i === 0 ? "left" : "right"]: i === 0 ? GUTTER + 28 : 16,
-                textAlign: i === 0 ? "left" : "right",
-                fontVariantNumeric: "tabular-nums",
-                pointerEvents: "none",
-              }}
-            >
-              {rendered.length > 1 && (
-                <div style={{ fontSize: 54, fontWeight: 800, color: r.input.color, lineHeight: 1 }}>
-                  {r.input.name}
-                </div>
-              )}
+        {/* running score HUD per player — spread evenly across the BOTTOM of the
+            lane (space-between), P1 at the left past the pitch-label gutter through
+            PN at the right, matching the mic banner's left→right order. Sits above
+            the lyric band, which is its own row below the lane. Each tinted its
+            colour; name only in multiplayer. */}
+        <div
+          style={{
+            position: "absolute",
+            left: GUTTER + 16,
+            right: 16,
+            bottom: 12,
+            display: "flex",
+            justifyContent: "space-between",
+            alignItems: "flex-end",
+            gap: 24,
+            pointerEvents: "none",
+          }}
+        >
+          {rendered.map((r) =>
+            r.score ? (
               <div
-                style={{
-                  fontSize: 90,
-                  fontWeight: 800,
-                  lineHeight: 1,
-                  color: rendered.length > 1 ? r.input.color : COLORS.nowLine,
-                  textShadow: "0 1px 6px rgba(0,0,0,0.5)",
-                }}
+                key={r.id}
+                style={{ textAlign: "center", fontVariantNumeric: "tabular-nums", minWidth: 0 }}
               >
-                {r.score.total.toLocaleString()}
+                {rendered.length > 1 && (
+                  <div
+                    style={{ fontSize: 54, fontWeight: 800, color: r.input.color, lineHeight: 1 }}
+                  >
+                    {r.input.name}
+                  </div>
+                )}
+                <div
+                  style={{
+                    fontSize: 90,
+                    fontWeight: 800,
+                    lineHeight: 1,
+                    color: rendered.length > 1 ? r.input.color : COLORS.nowLine,
+                    textShadow: "0 1px 6px rgba(0,0,0,0.5)",
+                  }}
+                >
+                  {r.score.total.toLocaleString()}
+                </div>
+                <div
+                  style={{
+                    marginTop: 10,
+                    fontSize: 48,
+                    fontWeight: 600,
+                    color: "rgba(255,255,255,0.55)",
+                  }}
+                >
+                  {r.score.notesSung}/{r.score.notesTotal} notes
+                </div>
               </div>
-              <div style={{ marginTop: 10, fontSize: 48, fontWeight: 600, color: "rgba(255,255,255,0.55)" }}>
-                {r.score.notesSung}/{r.score.notesTotal} notes
-              </div>
-            </div>
-          ) : null
-        )}
+            ) : null
+          )}
+        </div>
       </div>
       </div>
 

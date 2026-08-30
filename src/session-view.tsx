@@ -12,7 +12,7 @@
 
 import type { RoundResult, SessionSummary, SessionTrack } from "./session";
 import type { PlaylistRef } from "./playlist-source";
-import type { AudioInput } from "./mic";
+import type { AudioInput, AudioOutput } from "./mic";
 import { PLAYER_COLORS } from "./karaoke-view";
 import { MicMeter } from "./mic-meter";
 
@@ -38,6 +38,9 @@ export interface PlayerSlot {
   deviceId?: string;
   gain: number; // input-gain multiplier (1 = unity)
   sensitivity: number; // 0..100 → this player's OWN detection gate
+  monitor?: boolean; // hear this mic out an output device while singing
+  monitorGain?: number; // monitor loudness 0..1 (independent of `gain`)
+  outputDeviceId?: string; // which output the monitor plays to (undefined = default)
 }
 
 function stars(n: number): string {
@@ -424,12 +427,40 @@ const BAR_LABEL = 48;
 export function MicOverlay(props: {
   mics: HudMic[];
   devices: AudioInput[];
+  /** Output devices for the monitor picker; empty hides it (or routing unsupported). */
+  outputs: AudioOutput[];
+  /** False when the engine can't route to a chosen output — monitor still works on default. */
+  routingSupported: boolean;
   onGain: (i: number, gain: number) => void;
   onSensitivity: (i: number, sensitivity: number) => void;
   onDevice: (i: number, deviceId: string | undefined) => void;
+  onMonitor: (i: number, on: boolean) => void;
+  onMonitorGain: (i: number, gain: number) => void;
+  onOutput: (i: number, deviceId: string | undefined) => void;
 }) {
   const React = Spicetify.React;
-  const { mics, devices, onGain, onSensitivity, onDevice } = props;
+  const {
+    mics,
+    devices,
+    outputs,
+    routingSupported,
+    onGain,
+    onSensitivity,
+    onDevice,
+    onMonitor,
+    onMonitorGain,
+    onOutput,
+  } = props;
+  const selectStyle: React.CSSProperties = {
+    width: "100%",
+    minWidth: 0,
+    background: "rgba(0,0,0,0.35)",
+    border: "1px solid rgba(255,255,255,0.12)",
+    borderRadius: 10,
+    color: "#fff",
+    fontSize: 26,
+    padding: "8px 10px",
+  };
   // Width comes from the roster, never from the content: with equal flex
   // columns inside, a content-sized pill would collapse onto the labels.
   const n = Math.max(1, mics.length);
@@ -492,16 +523,7 @@ export function MicOverlay(props: {
                 value={m.deviceId ?? ""}
                 onChange={(e) => onDevice(i, (e.target as HTMLSelectElement).value || undefined)}
                 title="Input device — switching restarts this mic only"
-                style={{
-                  width: "100%",
-                  minWidth: 0,
-                  background: "rgba(0,0,0,0.35)",
-                  border: "1px solid rgba(255,255,255,0.12)",
-                  borderRadius: 10,
-                  color: "#fff",
-                  fontSize: 26,
-                  padding: "8px 10px",
-                }}
+                style={selectStyle}
               >
                 <option value="">Default mic</option>
                 {devices.map((d) => (
@@ -510,6 +532,66 @@ export function MicOverlay(props: {
                   </option>
                 ))}
               </select>
+
+              {/* ── Monitor: hear this mic out an output while singing ── */}
+              {(() => {
+                const on = !!m.monitor;
+                const vol = Math.round((m.monitorGain ?? 0.8) * 100);
+                return (
+                  <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+                    <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+                      <button
+                        onClick={() => onMonitor(i, !on)}
+                        title="Play this mic back out an output device (use headphones to avoid feedback)"
+                        style={{
+                          fontSize: 26,
+                          fontWeight: 700,
+                          padding: "8px 14px",
+                          borderRadius: 10,
+                          cursor: "pointer",
+                          border: `1px solid ${on ? tint : "rgba(255,255,255,0.14)"}`,
+                          background: on ? `${tint}22` : "rgba(0,0,0,0.35)",
+                          color: on ? tint : "#fff",
+                          whiteSpace: "nowrap",
+                        }}
+                      >
+                        {on ? "🔊 Monitor" : "🔇 Monitor"}
+                      </button>
+                      <span style={{ ...readout, marginLeft: "auto" }}>{vol}%</span>
+                    </div>
+                    <input
+                      type="range"
+                      min={0}
+                      max={100}
+                      value={vol}
+                      disabled={!on}
+                      onChange={(e) =>
+                        onMonitorGain(i, Number((e.target as HTMLInputElement).value) / 100)
+                      }
+                      title="Monitor volume"
+                      style={{ width: "100%", opacity: on ? 1 : 0.4 }}
+                    />
+                    {routingSupported && (
+                      <select
+                        value={m.outputDeviceId ?? ""}
+                        disabled={!on}
+                        onChange={(e) =>
+                          onOutput(i, (e.target as HTMLSelectElement).value || undefined)
+                        }
+                        title="Monitor output device"
+                        style={{ ...selectStyle, opacity: on ? 1 : 0.4 }}
+                      >
+                        <option value="">Default output</option>
+                        {outputs.map((d) => (
+                          <option key={d.deviceId} value={d.deviceId}>
+                            {d.label}
+                          </option>
+                        ))}
+                      </select>
+                    )}
+                  </div>
+                );
+              })()}
             </div>
           );
         })}
@@ -590,10 +672,15 @@ export function SessionHud(props: {
     onAutoSkip,
     sourceName,
   } = props;
+  // 3+ players add a total line per singer AND wrap the button row, so the box
+  // grows down into the note lane. Shrink the whole HUD once it's that crowded —
+  // it never needed the full 2-player size, and this keeps it above the lane.
+  const k = totals.length > 2 ? 0.62 : 1;
+  const px = (n: number) => Math.round(n * k);
   const btn: React.CSSProperties = {
-    padding: "16px 40px",
-    borderRadius: 26,
-    fontSize: 52,
+    padding: `${px(16)}px ${px(40)}px`,
+    borderRadius: px(26),
+    fontSize: px(52),
     fontWeight: 700,
     cursor: "pointer",
     border: "1px solid rgba(255,255,255,0.14)",
@@ -609,21 +696,21 @@ export function SessionHud(props: {
         display: "flex",
         flexDirection: "column",
         alignItems: "flex-start",
-        gap: 18,
-        padding: "24px 34px",
-        borderRadius: 34,
+        gap: px(18),
+        padding: `${px(24)}px ${px(34)}px`,
+        borderRadius: px(34),
         background: "rgba(8,8,12,0.72)",
         border: "1px solid rgba(255,255,255,0.1)",
         color: "#fff",
         fontFamily: "var(--font-family, 'Spotify Circular', system-ui, sans-serif)",
       }}
     >
-      <div style={{ display: "flex", alignItems: "center", gap: 28 }}>
+      <div style={{ display: "flex", alignItems: "center", gap: px(28) }}>
         <div style={{ display: "flex", flexDirection: "column", lineHeight: 1.1 }}>
           {sourceName && (
             <span
               style={{
-                fontSize: 40,
+                fontSize: px(40),
                 fontWeight: 700,
                 letterSpacing: 0.5,
                 color: "rgba(255,255,255,0.5)",
@@ -636,7 +723,7 @@ export function SessionHud(props: {
               {sourceName}
             </span>
           )}
-          <span style={{ fontSize: 72, fontWeight: 800 }}>
+          <span style={{ fontSize: px(72), fontWeight: 800 }}>
             Round <span style={{ color: ACCENT }}>{round}</span>/{target}
           </span>
         </div>
@@ -647,7 +734,7 @@ export function SessionHud(props: {
         <div style={{ display: "flex", flexDirection: "column", lineHeight: 1.05 }}>
           <span
             style={{
-              fontSize: 40,
+              fontSize: px(40),
               fontWeight: 700,
               letterSpacing: 0.5,
               color: "rgba(255,255,255,0.5)",
@@ -658,13 +745,13 @@ export function SessionHud(props: {
           {totals.map((t, i) => {
             const tint = PLAYER_COLORS[i % PLAYER_COLORS.length];
             return (
-              <div key={i} style={{ display: "flex", alignItems: "baseline", gap: 14 }}>
+              <div key={i} style={{ display: "flex", alignItems: "baseline", gap: px(14) }}>
                 {totals.length > 1 && (
-                  <span style={{ fontSize: 40, fontWeight: 800, color: tint }}>{t.name}</span>
+                  <span style={{ fontSize: px(40), fontWeight: 800, color: tint }}>{t.name}</span>
                 )}
                 <span
                   style={{
-                    fontSize: 72,
+                    fontSize: px(72),
                     fontWeight: 800,
                     fontVariantNumeric: "tabular-nums",
                     color: totals.length > 1 ? tint : "#fff",
@@ -679,14 +766,14 @@ export function SessionHud(props: {
         {/* The meters themselves are the centred MicOverlay banner; the HUD only
             says whether anything is live at all. */}
         {!micsOn && (
-          <span style={{ fontSize: 52, fontWeight: 700, color: "rgba(255,255,255,0.4)" }}>
+          <span style={{ fontSize: px(52), fontWeight: 700, color: "rgba(255,255,255,0.4)" }}>
             🎤 off
           </span>
         )}
       </div>
       {/* Wraps, because five buttons at this type size outrun the HUD's column
           on a narrower screen. */}
-      <div style={{ display: "flex", gap: 18, flexWrap: "wrap" }}>
+      <div style={{ display: "flex", gap: px(18), flexWrap: "wrap" }}>
         <button style={btn} onClick={onSkip}>
           Skip
         </button>

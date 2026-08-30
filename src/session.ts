@@ -12,7 +12,7 @@
 
 import { gradeForScore, type Grade, type ScoreState } from "./scoring";
 
-export const DEFAULT_PLAYER = "You";
+export const DEFAULT_PLAYER = "P1";
 
 /** One track in a playlist-sourced session's round list. */
 export interface SessionTrack {
@@ -37,7 +37,7 @@ export interface RoundResult {
 
 export interface Session {
   targetRounds: number;
-  players: string[]; // ["You"] for now
+  players: string[]; // ["P1"] for solo
   rounds: RoundResult[];
   /**
    * Ordered round source. When set, the session plays through these tracks in
