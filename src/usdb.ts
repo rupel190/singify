@@ -81,10 +81,13 @@ export async function login(username: string, password: string): Promise<boolean
 /**
  * Returns true if we currently have a live session.
  */
+/** The banner USDB serves in place of content once the session cookie lapses. */
+const LOGGED_OUT = /You are not logged in/i;
+
 export async function isLoggedIn(): Promise<boolean> {
   if (!sessionCookie) return false;
   const res = await fetch(`${BASE}/?link=browse`, { headers: cookieHeader() });
-  return !(await res.text()).includes("You are not logged in");
+  return !LOGGED_OUT.test(await res.text());
 }
 
 // ── Search ─────────────────────────────────────────────────────────────────
@@ -166,6 +169,15 @@ export async function search(opts: SearchOptions): Promise<SearchResult> {
  * Exported for unit testing against captured markup (this is what rots).
  */
 export function parseSearchHtml(html: string, currentPage: number): SearchResult {
+  // A lapsed cookie doesn't error — USDB just serves the logged-out page, which
+  // scrapes to zero rows and reads exactly like "this song has no chart". That
+  // false negative is worse than a failure, so detect it and raise instead. The
+  // message carries "session expired" because that's what the resolver maps to
+  // SessionExpiredError, which is what makes the helper re-login and retry.
+  if (LOGGED_OUT.test(html)) {
+    throw new Error("USDB session expired — the search page came back logged out");
+  }
+
   const songs: USDBSong[] = [];
 
   // ── Pagination ── "There are  N  results on  M page(s)"

@@ -66,8 +66,14 @@ const DASH_NOISE = new RegExp(
   "i"
 );
 
-// feat. / ft. / featuring — everything from here on is a guest credit.
-const FEAT = /\s*[\(\[]?\s*(?:feat\.?|ft\.?|featuring)\s+.*$/i;
+// feat. / ft. / featuring — everything from here on is a guest credit. The
+// optional leading dash matters: Spotify writes the credit as a DASH suffix
+// ("Aufstehn! - feat. CeeLo Green"), and without eating that dash the strip
+// leaves "aufstehn! -" behind, which USDB finds nothing for.
+const FEAT = /\s*(?:[-–—]\s*)?[\(\[]?\s*(?:feat\.?|ft\.?|featuring)\s+.*$/i;
+
+// Any separator left dangling at the end once a suffix has been cut away.
+const TRAILING_SEP = /[\s\-–—:,]+$/;
 
 function collapse(s: string): string {
   return s.replace(/\s+/g, " ").trim();
@@ -86,6 +92,7 @@ export function cleanTitle(title: string): string {
   t = t.replace(FEAT, "");
   t = stripNoiseParens(t);
   t = t.replace(DASH_NOISE, "");
+  t = t.replace(TRAILING_SEP, "");
   return collapse(t).toLowerCase();
 }
 
@@ -97,6 +104,7 @@ export function cleanArtist(artist: string): string {
   let a = artist;
   a = a.replace(FEAT, "");
   a = a.split(/\s*,\s*|\s+(?:&|x|vs\.?|with)\s+/i)[0] ?? a;
+  a = a.replace(TRAILING_SEP, "");
   return collapse(a).toLowerCase();
 }
 

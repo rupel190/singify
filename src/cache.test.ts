@@ -33,6 +33,14 @@ describe("cleanTitle", () => {
     expect(cleanTitle("Umbrella feat. Jay-Z")).toBe("umbrella");
   });
 
+  test("strips a DASH-form feat. credit, dash and all", () => {
+    // Spotify's own spelling. Leaving the dash behind ("aufstehn! -") made USDB
+    // return nothing at all for a chart that is definitely there.
+    expect(cleanTitle("Aufstehn! - feat. CeeLo Green")).toBe("aufstehn!");
+    expect(cleanTitle("Sunday Morning - ft. Jane Doe")).toBe("sunday morning");
+    expect(cleanArtist("Seeed - feat. CeeLo Green")).toBe("seeed");
+  });
+
   test("strips remaster / radio edit noise parens", () => {
     expect(cleanTitle("Bohemian Rhapsody (Remastered 2011)")).toBe(
       "bohemian rhapsody"

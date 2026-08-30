@@ -64,10 +64,7 @@ export async function resolveForTrack(
 
   // 2. Search USDB with a cleaned query
   const cleaned = sanitizeQuery(title, artist);
-  const { songs } = await usdb.search({
-    artist: cleaned.artist,
-    title: cleaned.title,
-  });
+  const { songs } = await searchUSDB(cleaned);
 
   if (songs.length === 0) return { status: "notFound" };
 
@@ -99,10 +96,7 @@ export async function searchForTrack(
   title: string
 ): Promise<ResolveResult> {
   const cleaned = sanitizeQuery(title, artist);
-  const { songs } = await usdb.search({
-    artist: cleaned.artist,
-    title: cleaned.title,
-  });
+  const { songs } = await searchUSDB(cleaned);
   if (songs.length === 0) return { status: "notFound" };
   const ranked = songs
     .map((s) => ({ song: s, score: scoreCandidate(s, cleaned) }))
@@ -121,6 +115,26 @@ export async function confirmPick(
   return downloadAndCache(spotifyTrackId, candidate);
 }
 
+/**
+ * Re-throw a lapsed-session failure as the typed error the credential-holding
+ * layer retries on. Both the search and the download path can hit it.
+ */
+function mapSessionError(err: unknown): never {
+  if (err instanceof Error && /session expired/i.test(err.message)) {
+    throw new SessionExpiredError();
+  }
+  throw err;
+}
+
+/** usdb.search, with a lapsed session surfaced as SessionExpiredError. */
+async function searchUSDB(cleaned: { artist: string; title: string }) {
+  try {
+    return await usdb.search({ artist: cleaned.artist, title: cleaned.title });
+  } catch (err) {
+    return mapSessionError(err);
+  }
+}
+
 async function downloadAndCache(
   spotifyTrackId: string,
   candidate: USDBSong
@@ -129,10 +143,7 @@ async function downloadAndCache(
   try {
     txt = await usdb.downloadTxt(candidate.id);
   } catch (err) {
-    if (err instanceof Error && /session expired/i.test(err.message)) {
-      throw new SessionExpiredError();
-    }
-    throw err;
+    return mapSessionError(err);
   }
 
   await saveSong(

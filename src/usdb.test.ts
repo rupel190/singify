@@ -53,6 +53,18 @@ describe("parseSearchHtml", () => {
   });
 });
 
+describe("parseSearchHtml session expiry", () => {
+  test("a logged-out page throws instead of scraping to zero results", () => {
+    const html = "<html><body><p>You are not logged in</p></body></html>";
+    expect(() => parseSearchHtml(html, 1)).toThrow(/session expired/i);
+  });
+
+  test("a genuinely empty result set is still zero results, not an error", () => {
+    const html = "<html><body><table></table>on 1 page(s)</body></html>";
+    expect(parseSearchHtml(html, 1).songs).toHaveLength(0);
+  });
+});
+
 describe("extractTextarea", () => {
   test("pulls the chart out of the textarea, unescapes, strips the lead newline", () => {
     const html = `<html><body><textarea name="txt" rows="30">
