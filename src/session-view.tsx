@@ -590,10 +590,15 @@ export function SessionHud(props: {
     onAutoSkip,
     sourceName,
   } = props;
+  // 3+ players add a total line per singer AND wrap the button row, so the box
+  // grows down into the note lane. Shrink the whole HUD once it's that crowded —
+  // it never needed the full 2-player size, and this keeps it above the lane.
+  const k = totals.length > 2 ? 0.62 : 1;
+  const px = (n: number) => Math.round(n * k);
   const btn: React.CSSProperties = {
-    padding: "16px 40px",
-    borderRadius: 26,
-    fontSize: 52,
+    padding: `${px(16)}px ${px(40)}px`,
+    borderRadius: px(26),
+    fontSize: px(52),
     fontWeight: 700,
     cursor: "pointer",
     border: "1px solid rgba(255,255,255,0.14)",
@@ -609,21 +614,21 @@ export function SessionHud(props: {
         display: "flex",
         flexDirection: "column",
         alignItems: "flex-start",
-        gap: 18,
-        padding: "24px 34px",
-        borderRadius: 34,
+        gap: px(18),
+        padding: `${px(24)}px ${px(34)}px`,
+        borderRadius: px(34),
         background: "rgba(8,8,12,0.72)",
         border: "1px solid rgba(255,255,255,0.1)",
         color: "#fff",
         fontFamily: "var(--font-family, 'Spotify Circular', system-ui, sans-serif)",
       }}
     >
-      <div style={{ display: "flex", alignItems: "center", gap: 28 }}>
+      <div style={{ display: "flex", alignItems: "center", gap: px(28) }}>
         <div style={{ display: "flex", flexDirection: "column", lineHeight: 1.1 }}>
           {sourceName && (
             <span
               style={{
-                fontSize: 40,
+                fontSize: px(40),
                 fontWeight: 700,
                 letterSpacing: 0.5,
                 color: "rgba(255,255,255,0.5)",
@@ -636,7 +641,7 @@ export function SessionHud(props: {
               {sourceName}
             </span>
           )}
-          <span style={{ fontSize: 72, fontWeight: 800 }}>
+          <span style={{ fontSize: px(72), fontWeight: 800 }}>
             Round <span style={{ color: ACCENT }}>{round}</span>/{target}
           </span>
         </div>
@@ -647,7 +652,7 @@ export function SessionHud(props: {
         <div style={{ display: "flex", flexDirection: "column", lineHeight: 1.05 }}>
           <span
             style={{
-              fontSize: 40,
+              fontSize: px(40),
               fontWeight: 700,
               letterSpacing: 0.5,
               color: "rgba(255,255,255,0.5)",
@@ -658,13 +663,13 @@ export function SessionHud(props: {
           {totals.map((t, i) => {
             const tint = PLAYER_COLORS[i % PLAYER_COLORS.length];
             return (
-              <div key={i} style={{ display: "flex", alignItems: "baseline", gap: 14 }}>
+              <div key={i} style={{ display: "flex", alignItems: "baseline", gap: px(14) }}>
                 {totals.length > 1 && (
-                  <span style={{ fontSize: 40, fontWeight: 800, color: tint }}>{t.name}</span>
+                  <span style={{ fontSize: px(40), fontWeight: 800, color: tint }}>{t.name}</span>
                 )}
                 <span
                   style={{
-                    fontSize: 72,
+                    fontSize: px(72),
                     fontWeight: 800,
                     fontVariantNumeric: "tabular-nums",
                     color: totals.length > 1 ? tint : "#fff",
@@ -679,14 +684,14 @@ export function SessionHud(props: {
         {/* The meters themselves are the centred MicOverlay banner; the HUD only
             says whether anything is live at all. */}
         {!micsOn && (
-          <span style={{ fontSize: 52, fontWeight: 700, color: "rgba(255,255,255,0.4)" }}>
+          <span style={{ fontSize: px(52), fontWeight: 700, color: "rgba(255,255,255,0.4)" }}>
             🎤 off
           </span>
         )}
       </div>
       {/* Wraps, because five buttons at this type size outrun the HUD's column
           on a narrower screen. */}
-      <div style={{ display: "flex", gap: 18, flexWrap: "wrap" }}>
+      <div style={{ display: "flex", gap: px(18), flexWrap: "wrap" }}>
         <button style={btn} onClick={onSkip}>
           Skip
         </button>

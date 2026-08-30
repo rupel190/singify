@@ -20,7 +20,7 @@ import type { ScoreState } from "./scoring";
 function score(total: number, sung = 10, notesTotal = 10): ScoreState {
   return { total, notesSung: sung, notesTotal } as ScoreState;
 }
-function round(title: string, total: number, player = "You"): RoundResult {
+function round(title: string, total: number, player = "P1"): RoundResult {
   return { title, artist: "A", scores: [{ player, total, grade: "A" as never, notesSung: 0, notesTotal: 0 }] };
 }
 
@@ -28,7 +28,7 @@ describe("session state", () => {
   test("createSession clamps rounds to >= 1 and defaults the player", () => {
     const s = createSession(0);
     expect(s.targetRounds).toBe(1);
-    expect(s.players).toEqual(["You"]);
+    expect(s.players).toEqual(["P1"]);
     expect(s.rounds).toEqual([]);
   });
 
@@ -146,7 +146,7 @@ describe("hotseat roster + rotation", () => {
   test("single player is never multiplayer; active player is that one", () => {
     const s = createSession(3);
     expect(isMultiplayer(s)).toBe(false);
-    expect(activePlayer(s)).toBe("You");
+    expect(activePlayer(s)).toBe("P1");
   });
 
   test("activePlayer rotates through the roster by rounds recorded", () => {
@@ -191,7 +191,7 @@ describe("summarize", () => {
     const sum = summarize(s);
     expect(sum.players[0].total).toBe(18000);
     expect(sum.players[0].avg).toBe(6000);
-    expect(sum.bestRound).toEqual({ title: "B", player: "You", total: 9000 });
+    expect(sum.bestRound).toEqual({ title: "B", player: "P1", total: 9000 });
   });
 
   test("is multiplayer-shaped: a column per player", () => {

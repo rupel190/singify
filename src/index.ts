@@ -224,7 +224,7 @@ function punchSync(): void {
 // M toggles the mics. Each player's read() is polled by <KaraokeView> every
 // frame via its own getPitchMidi; all the analysis is the pure detectPitch().
 
-/** The roster whose mics we run: a versus session's players, or solo's "You". */
+/** The roster whose mics we run: a versus session's players, or solo's "P1". */
 function activeRoster(): PlayerSlot[] {
   return session ? sessionRoster : soloRoster;
 }
@@ -552,13 +552,13 @@ function newSlot(i: number, name: string): PlayerSlot {
 }
 
 // Versus roster chosen on the setup screen: each player + their mic device + gain.
-let setupRoster: PlayerSlot[] = [newSlot(0, "You")];
+let setupRoster: PlayerSlot[] = [newSlot(0, "P1")];
 // Snapshot of the roster taken when a session starts (the setup screen can keep
-// changing after). Solo/Quick-Sing uses a lone default-device "You".
-let sessionRoster: PlayerSlot[] = [newSlot(0, "You")];
+// changing after). Solo/Quick-Sing uses a lone default-device "P1".
+let sessionRoster: PlayerSlot[] = [newSlot(0, "P1")];
 // Solo / Quick-Sing has a roster too, so its single mic gets the same live
 // controls (gate, gain, device) the versus banner gives every player.
-let soloRoster: PlayerSlot[] = [newSlot(0, "You")];
+let soloRoster: PlayerSlot[] = [newSlot(0, "P1")];
 // Audio input devices for the setup mic picker (populated when it opens).
 let audioInputs: AudioInput[] = [];
 let lastRound: RoundResult | null = null;

@@ -346,7 +346,7 @@ function App() {
   const [plLoading, setPlLoading] = React.useState(false);
   const [setupRounds, setSetupRounds] = React.useState(5);
   const [setupRoster, setSetupRoster] = React.useState<PlayerSlot[]>([
-    { name: "You", gain: 1, sensitivity: 70 },
+    { name: "P1", gain: 1, sensitivity: 70 },
   ]);
   // Fullscreen in-game overlay (SessionHud + KaraokeView) — the exact Spotify
   // stage, so its layout can be tuned in-browser. ?screen=ingame opens straight in.
@@ -488,23 +488,40 @@ function App() {
     return t == null ? null : t + 0.6 + Math.sin(getPositionMs() / 140) * 1.1; // sharp + wobbly
   }, []);
 
-  // The players handed to KaraokeView: two synthetic in demo mode, else the
-  // single real mic (when on). This is the harness's "mic port" adapter.
-  const players: PlayerInput[] = twoPlayer
-    ? [
-        { id: "alex", name: "Alex", color: PLAYER_COLORS[0], getPitchMidi: singerA },
-        { id: "sam", name: "Sam", color: PLAYER_COLORS[1], getPitchMidi: singerB },
-      ]
-    : micOn
-      ? [{ id: "mic0", name: "You", color: PLAYER_COLORS[0], getPitchMidi: getLivePitchMidi }]
-      : [];
+  // Demo singer factory: a synthetic getter that tracks the chart with a
+  // per-player pitch offset, so N fake singers stay visually distinct. Lets the
+  // versus layout (2–4 lanes, score corners) be eyeballed without hardware —
+  // ?players=N (2–4), or the "2P demo" toggle for the classic pair.
+  const demoSinger = React.useCallback(
+    (seed: number) => (): number | null => {
+      const t = targetPitchAt(songRef.current, getPositionMs());
+      return t == null ? null : t + seed * 0.5 + Math.sin(getPositionMs() / 140 + seed) * 0.8;
+    },
+    []
+  );
+  const demoCount = Math.min(4, Math.max(0, Number(params.get("players") ?? (twoPlayer ? 2 : 0))));
+  const DEMO_NAMES = ["Alex", "Sam", "Kim", "Lou"];
+
+  // The players handed to KaraokeView: N synthetic in demo mode, else the single
+  // real mic (when on). This is the harness's "mic port" adapter.
+  const players: PlayerInput[] =
+    demoCount > 0
+      ? Array.from({ length: demoCount }, (_, i) => ({
+          id: `demo${i}`,
+          name: DEMO_NAMES[i] ?? `P${i + 1}`,
+          color: PLAYER_COLORS[i % PLAYER_COLORS.length],
+          getPitchMidi: i === 0 ? singerA : i === 1 ? singerB : demoSinger(i),
+        }))
+      : micOn
+        ? [{ id: "mic0", name: "P1", color: PLAYER_COLORS[0], getPitchMidi: getLivePitchMidi }]
+        : [];
 
   // For the in-game overlay demo, always render at least one singer so the HUD +
   // score have something to show even with no mic and 2P off.
   const gamePlayers: PlayerInput[] =
     players.length > 0
       ? players
-      : [{ id: "you", name: "You", color: PLAYER_COLORS[0], getPitchMidi: singerA }];
+      : [{ id: "you", name: "P1", color: PLAYER_COLORS[0], getPitchMidi: singerA }];
 
   // Synthetic levels for the in-game meters — the harness has no live mic here,
   // so the banner still moves and can be eyeballed at its real size.
