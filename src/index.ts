@@ -114,7 +114,7 @@ function onPlayPause(): void {
 
 const OFFSET_PREFIX = "singify:offset:"; // per track: singify:offset:<uri>
 const DEFAULT_OFFSET_KEY = "singify:offsetMs"; // baseline for untuned tracks (+ legacy global)
-const OFFSET_STEP = 20; // ms per nudge
+const OFFSET_STEP = 10; // ms per nudge
 
 function readNum(key: string): number | null {
   const raw = localStorage.getItem(key);
@@ -467,6 +467,29 @@ function loadDifficulty(): Difficulty {
   return v === "medium" || v === "hard" ? v : "easy";
 }
 let difficulty: Difficulty = loadDifficulty();
+
+// Hit-line position — the green "now" bar, as a fraction from the lane's left
+// edge. PURELY VISUAL: it slides the line + markers sideways so the user can
+// place the hit point where it feels right; it does NOT change note timing (the
+// lyric offset owns sync). Nudged with , and . ; persisted globally.
+const NOWLINE_KEY = "singify:nowLine";
+const NOWLINE_STEP = 0.01;
+const NOWLINE_DEFAULT = 0.25;
+function loadNowFraction(): number {
+  const v = Number(localStorage.getItem(NOWLINE_KEY));
+  return Number.isFinite(v) && v >= 0.1 && v <= 0.6 ? v : NOWLINE_DEFAULT;
+}
+let nowFraction = loadNowFraction();
+function setNowFraction(next: number): void {
+  nowFraction = Math.min(0.6, Math.max(0.1, Math.round(next * 100) / 100));
+  try {
+    localStorage.setItem(NOWLINE_KEY, String(nowFraction));
+  } catch {
+    /* storage blocked — keep the in-memory value */
+  }
+  showReadout(`Hit-line ${Math.round(nowFraction * 100)}%`);
+  if (visible) renderOverlay();
+}
 function setDifficulty(next: Difficulty): void {
   difficulty = next;
   try {
@@ -837,6 +860,7 @@ function renderOverlay(): void {
         onComplete: session ? onRoundComplete : undefined, // sessions record + advance
         resetToken: scoreResetToken,
         difficulty,
+        nowFraction,
         fullscreen: true,
       })
     : pickerCandidates
@@ -1447,9 +1471,9 @@ async function main(): Promise<void> {
     } else if (e.key === "Escape") {
       if (visible) setVisible(false); // close the overlay
     } else if (e.key === "[") {
-      setOffset(offsetMs - OFFSET_STEP); // lyrics 20 ms later
+      setOffset(offsetMs - OFFSET_STEP); // lyrics 10 ms later
     } else if (e.key === "]") {
-      setOffset(offsetMs + OFFSET_STEP); // lyrics 20 ms earlier
+      setOffset(offsetMs + OFFSET_STEP); // lyrics 10 ms earlier
     } else if (e.key === "\\") {
       setOffset(0); // reset sync
     } else if (e.key === "m" || e.key === "M") {
@@ -1464,6 +1488,10 @@ async function main(): Promise<void> {
       setSensitivity(sensitivity - 5); // less sensitive (noisy room)
     } else if (e.key === "=") {
       setSensitivity(sensitivity + 5); // more sensitive (quiet room)
+    } else if (e.key === ",") {
+      setNowFraction(nowFraction - NOWLINE_STEP); // hit-line a touch left
+    } else if (e.key === ".") {
+      setNowFraction(nowFraction + NOWLINE_STEP); // hit-line a touch right
     }
   });
 

@@ -77,11 +77,12 @@ USDB account needed. Free CC-licensed charts: [UltraStar-Deluxe/songs](https://g
 | --- | --- | --- |
 | Open the menu | `K` | — |
 | Quick Sing (karaoke overlay) | `Q` | (always shown) |
-| Nudge lyrics later / earlier | `[` / `]` (±20 ms) | −20 / +20 buttons |
+| Nudge lyrics later / earlier | `[` / `]` (±10 ms) | −10 / +10 buttons |
 | Reset sync | `\` | ⟲ reset |
 | Choose among matches | picker overlay (press `Q`) | "Picker demo →" toggle |
 | Toggle mic (live pitch) | `M` | 🎤 Mic button |
 | Mic sensitivity − / + | `-` / `=` (±5%) | sensitivity slider |
+| Hit-line nudge ◂ / ▸ | `,` / `.` (visual only) | — |
 | Pitch diagnostics overlay | — | 🔬 Debug toggle |
 
 The **offset** shifts the whole karaoke timeline against the audio (positive =

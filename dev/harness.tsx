@@ -77,7 +77,7 @@ const MOCK_CANDIDATES: USDBSong[] = [
 
 // ── Synthetic playback clock ─────────────────────────────────────────────────
 
-const OFFSET_STEP = 20; // ms per nudge — matches the Spotify adapter
+const OFFSET_STEP = 10; // ms per nudge — matches the Spotify adapter
 
 let posMs = 0;
 let anchor = performance.now();
