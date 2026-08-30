@@ -92,6 +92,11 @@ export interface KaraokeViewProps {
    * ±1, hard ±0 semitones. Default "easy". Changing it starts a fresh attempt.
    */
   difficulty?: Difficulty;
+  /**
+   * Where the "now" hit-line sits, as a fraction from the lane's left edge
+   * (default 0.25). Cosmetic — repositions the line + markers, not note timing.
+   */
+  nowFraction?: number;
   fullscreen?: boolean;
 }
 
@@ -225,11 +230,216 @@ interface Engine {
   trail: { ms: number; pitch: number; hit: boolean }[];
 }
 
+/**
+ * One player's note highway — a self-measuring row. Versus stacks several (one
+ * per singer); solo / play-along renders exactly one. Each Lane owns its OWN
+ * geometry (measured from its own height), so stacked rows each size their notes
+ * to the space they got. All lanes share the song + clock, so notes scroll in
+ * lockstep; only the marker/trail/score differ per player.
+ */
+function Lane(props: {
+  song: ParsedSong;
+  positionMs: number;
+  nowFraction: number;
+  player: { id: string; name: string; color: string } | null;
+  markerPitch: number | null;
+  markerHit: boolean;
+  score: ScoreState | null;
+  trail: { ms: number; pitch: number; hit: boolean }[];
+  multiplayer: boolean;
+}) {
+  const React = Spicetify.React;
+  const { useRef, useMemo } = React;
+  const { song, positionMs, nowFraction, player, markerPitch, markerHit, score, trail, multiplayer } =
+    props;
+
+  const laneRef = useRef<HTMLDivElement | null>(null);
+  const lane = useSize(laneRef);
+
+  const [minPitch, maxPitch] = useMemo(() => getPitchRange(song), [song]);
+  const pitchSpan = Math.max(1, maxPitch - minPitch);
+  const innerH = Math.max(MIN_NOTE_HEIGHT, lane.h - LANE_VPAD * 2);
+
+  const pxPerSemi = Math.min(MAX_PX_PER_SEMITONE, innerH / (pitchSpan + 1));
+  const noteH = Math.max(MIN_NOTE_HEIGHT, Math.min(MAX_NOTE_HEIGHT, Math.round(pxPerSemi * NOTE_FILL)));
+  const bandH = pxPerSemi * pitchSpan;
+  const bandTop = LANE_VPAD + Math.max(0, (innerH - bandH - noteH) / 2);
+  const pxPerMs = lane.w > 0 ? (lane.w * (1 - NOW_FRACTION)) / LOOKAHEAD_MS : FALLBACK_PX_PER_MS;
+
+  const yForPitch = (pitch: number): number => bandTop + (1 - (pitch - minPitch) / pitchSpan) * bandH;
+  const yCenterForPitch = (pitch: number): number => yForPitch(pitch) + noteH / 2;
+  const yForMarker = (pitch: number): number =>
+    bandTop + (1 - Math.min(1, Math.max(0, (pitch - minPitch) / pitchSpan))) * bandH + noteH / 2;
+
+  const pitchRows = useMemo(() => {
+    const lo = Math.floor(minPitch);
+    const hi = Math.ceil(maxPitch);
+    const span = Math.max(1, hi - lo);
+    const maxRows = Math.max(2, Math.min(7, Math.floor(bandH / (AXIS_LABEL_SIZE * 1.8))));
+    const step = Math.max(1, Math.ceil(span / (maxRows - 1)));
+    const rows: number[] = [];
+    for (let m = lo; m <= hi; m += step) rows.push(m);
+    return rows;
+  }, [minPitch, maxPitch, bandH]);
+
+  const noteEls = useMemo(() => {
+    const els: JSX.Element[] = [];
+    let key = 0;
+    for (const line of song.lines) {
+      for (const sy of line.syllables) {
+        if (sy.type === "freestyle") continue;
+        els.push(
+          <div
+            key={key++}
+            style={{
+              position: "absolute",
+              left: sy.startMs * pxPerMs,
+              width: Math.max(3, sy.durationMs * pxPerMs - 2),
+              top: yForPitch(sy.pitch),
+              height: noteH,
+              borderRadius: noteH / 2,
+              background: sy.type === "golden" ? COLORS.noteGolden : COLORS.noteNormal,
+              boxShadow: sy.type === "golden" ? "0 0 8px rgba(230,180,34,0.6)" : "none",
+            }}
+          />
+        );
+      }
+    }
+    return els;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [song, lane.h, lane.w, minPitch, maxPitch]);
+
+  const nowX = lane.w * nowFraction;
+  const trackTranslate = nowX - positionMs * pxPerMs;
+  const markerColor = markerHit ? COLORS.nowLine : player?.color ?? COLORS.livePitch;
+  const markerSize = Math.round(noteH * MARKER_SCALE);
+
+  return (
+    <div
+      ref={laneRef}
+      style={{ position: "relative", flex: "1 1 0", minHeight: 0, overflow: "hidden", borderRadius: 10, background: COLORS.laneBg }}
+    >
+      {pitchRows.map((m) => {
+        const y = yCenterForPitch(m);
+        return (
+          <div key={`row${m}`}>
+            <div style={{ position: "absolute", left: GUTTER, right: 0, top: y, height: 1, background: COLORS.gridLine }} />
+            <div
+              style={{
+                position: "absolute",
+                left: 10,
+                top: y - AXIS_LABEL_SIZE / 2,
+                fontSize: AXIS_LABEL_SIZE,
+                fontWeight: 600,
+                lineHeight: 1,
+                color: COLORS.axisLabel,
+                fontVariantNumeric: "tabular-nums",
+                pointerEvents: "none",
+              }}
+            >
+              {midiToName(m)}
+            </div>
+          </div>
+        );
+      })}
+      <div
+        style={{
+          position: "absolute",
+          left: 0,
+          top: 0,
+          bottom: 0,
+          width: GUTTER + 20,
+          background: `linear-gradient(to right, ${COLORS.laneBg}, transparent)`,
+          pointerEvents: "none",
+        }}
+      />
+      <div style={{ position: "absolute", inset: 0, transform: `translateX(${trackTranslate}px)`, willChange: "transform" }}>
+        {noteEls}
+      </div>
+      <div style={{ position: "absolute", top: 0, bottom: 0, left: nowX, width: 2, background: COLORS.nowLine, boxShadow: `0 0 10px ${COLORS.nowLine}` }} />
+      {trail.map((pt, i) => {
+        const x = nowX + (pt.ms - positionMs) * pxPerMs;
+        if (x < GUTTER + 4) return null;
+        const o = Math.max(0, 1 - (positionMs - pt.ms) / TRAIL_MS);
+        const size = noteH * (TRAIL_DOT_MIN + o * (TRAIL_DOT_MAX - TRAIL_DOT_MIN));
+        const ty = yForMarker(pt.pitch);
+        return (
+          <div
+            key={i}
+            style={{
+              position: "absolute",
+              left: x - size / 2,
+              top: ty - size / 2,
+              width: size,
+              height: size,
+              borderRadius: "50%",
+              background: pt.hit ? COLORS.nowLine : player?.color ?? COLORS.livePitch,
+              opacity: o * 0.75,
+              pointerEvents: "none",
+            }}
+          />
+        );
+      })}
+      {markerPitch != null && (
+        <div
+          style={{
+            position: "absolute",
+            left: nowX - markerSize / 2,
+            top: yForMarker(markerPitch) - markerSize / 2,
+            width: markerSize,
+            height: markerSize,
+            borderRadius: "50%",
+            background: markerColor,
+            boxShadow: markerHit
+              ? `0 0 ${markerSize * 1.2}px ${markerColor}, 0 0 ${markerSize / 2}px ${markerColor}`
+              : `0 0 ${markerSize * 0.7}px ${markerColor}`,
+            transform: markerHit ? "scale(1.3)" : "scale(1)",
+            transition: "top 60ms linear, transform 110ms ease, box-shadow 110ms ease, background 90ms ease",
+            pointerEvents: "none",
+            zIndex: 3,
+          }}
+        />
+      )}
+      {score && (
+        <div
+          style={{
+            position: "absolute",
+            bottom: 10,
+            left: GUTTER + 16,
+            textAlign: "left",
+            fontVariantNumeric: "tabular-nums",
+            pointerEvents: "none",
+          }}
+        >
+          {multiplayer && player && (
+            <div style={{ fontSize: 40, fontWeight: 800, color: player.color, lineHeight: 1 }}>{player.name}</div>
+          )}
+          <div
+            style={{
+              fontSize: 66,
+              fontWeight: 800,
+              lineHeight: 1,
+              color: multiplayer && player ? player.color : COLORS.nowLine,
+              textShadow: "0 1px 6px rgba(0,0,0,0.5)",
+            }}
+          >
+            {score.total.toLocaleString()}
+          </div>
+          <div style={{ marginTop: 6, fontSize: 34, fontWeight: 600, color: "rgba(255,255,255,0.55)" }}>
+            {score.notesSung}/{score.notesTotal} notes
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 export function KaraokeView(props: KaraokeViewProps) {
   const React = Spicetify.React;
   const { useRef, useMemo, useCallback, useEffect } = React;
   const { song, getPositionMs, onReplay, fullscreen } = props;
   const difficulty: Difficulty = props.difficulty ?? "easy";
+  const nowFraction = props.nowFraction ?? NOW_FRACTION;
   // Read via refs so the rAF loop and engineFor keep stable identities — only the
   // reset effect (below) reacts to a difficulty change, rebuilding the engines.
   const difficultyRef = useRef(difficulty);
@@ -328,93 +538,17 @@ export function KaraokeView(props: KaraokeViewProps) {
 
   const frame = useFrame(getPositionMs, computeFrame);
   const positionMs = frame.ms;
-  const laneRef = useRef<HTMLDivElement | null>(null);
-  const lane = useSize(laneRef);
 
-  const [minPitch, maxPitch] = useMemo(() => getPitchRange(song), [song]);
-  const pitchSpan = Math.max(1, maxPitch - minPitch);
-  const innerH = Math.max(MIN_NOTE_HEIGHT, lane.h - LANE_VPAD * 2);
-
-  // Row spacing first, then everything vertical follows from it: note thickness
-  // is a fraction of a row (so bars can never merge), and the band the melody
-  // occupies is centred in whatever height is left over.
-  const pxPerSemi = Math.min(MAX_PX_PER_SEMITONE, innerH / (pitchSpan + 1));
-  const noteH = Math.max(
-    MIN_NOTE_HEIGHT,
-    Math.min(MAX_NOTE_HEIGHT, Math.round(pxPerSemi * NOTE_FILL))
-  );
-  const bandH = pxPerSemi * pitchSpan; // vertical travel from lowest to highest
-  const bandTop = LANE_VPAD + Math.max(0, (innerH - bandH - noteH) / 2);
-  // One second of song in pixels — see LOOKAHEAD_MS.
-  const pxPerMs =
-    lane.w > 0 ? (lane.w * (1 - NOW_FRACTION)) / LOOKAHEAD_MS : FALLBACK_PX_PER_MS;
-
-  const yForPitch = (pitch: number): number => {
-    const t = (pitch - minPitch) / pitchSpan; // 0..1, low..high
-    return bandTop + (1 - t) * bandH;
-  };
-  // Vertical centre of a note row (grid lines + axis labels align to this).
-  const yCenterForPitch = (pitch: number): number => yForPitch(pitch) + noteH / 2;
-
-  // Labelled pitch rows for the left axis. Cap the row count to what the lane
-  // height can hold without the (now large) labels colliding — so the vertical
-  // spacing stays comfortable on any screen size.
-  const pitchRows = useMemo(() => {
-    const lo = Math.floor(minPitch);
-    const hi = Math.ceil(maxPitch);
-    const span = Math.max(1, hi - lo);
-    const maxRows = Math.max(2, Math.min(7, Math.floor(bandH / (AXIS_LABEL_SIZE * 1.8))));
-    const step = Math.max(1, Math.ceil(span / (maxRows - 1)));
-    const rows: number[] = [];
-    for (let m = lo; m <= hi; m += step) rows.push(m);
-    return rows;
-  }, [minPitch, maxPitch, bandH]);
-
-  // Notes are positioned once by absolute time; only the track transform moves.
-  const noteEls = useMemo(() => {
-    const els: JSX.Element[] = [];
-    let key = 0;
-    for (const line of song.lines) {
-      for (const s of line.syllables) {
-        if (s.type === "freestyle") continue;
-        els.push(
-          <div
-            key={key++}
-            style={{
-              position: "absolute",
-              left: s.startMs * pxPerMs,
-              width: Math.max(3, s.durationMs * pxPerMs - 2),
-              top: yForPitch(s.pitch),
-              height: noteH,
-              borderRadius: noteH / 2,
-              background: s.type === "golden" ? COLORS.noteGolden : COLORS.noteNormal,
-              boxShadow:
-                s.type === "golden" ? "0 0 8px rgba(230,180,34,0.6)" : "none",
-            }}
-          />
-        );
-      }
-    }
-    return els;
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [song, lane.h, lane.w, minPitch, maxPitch]);
-
-  const nowX = lane.w * NOW_FRACTION;
-  const trackTranslate = nowX - positionMs * pxPerMs;
-
-  // Map a (folded, smoothed) pitch to its Y centre on the lane. The fold + smooth
-  // + hit test already ran in computeFrame (USDX UNote.pas:548-571 style — fold
-  // into the target note's octave so a rising interval reads as rising, then
-  // snap on a hit); here we just place it.
-  const yForMarker = (pitch: number): number =>
-    bandTop +
-    (1 - Math.min(1, Math.max(0, (pitch - minPitch) / pitchSpan))) * bandH +
-    noteH / 2;
 
   // Zip the per-frame results back to their inputs (colour/name), in order.
   const rendered = frame.players
     .map((pf, i) => ({ ...pf, input: players[i] }))
     .filter((r) => r.input);
+
+  // One lane per singer; play-along (no players) still shows one empty highway,
+  // so `null` marks that placeholder row.
+  const laneEntries: (typeof rendered[number] | null)[] =
+    rendered.length > 0 ? rendered : [null];
 
   // Once playback passes the song's end (and someone was scoring), the attempt
   // is done. Fire onComplete once with every player's score, then either hand
@@ -474,220 +608,37 @@ export function KaraokeView(props: KaraokeViewProps) {
         boxSizing: "border-box",
       }}
     >
-      {/* ── Pitch lane ──
-          Sits in a growing box but only fills 75% of it, bottom-aligned: the
-          quarter it gives back is headroom at the top for the mic banner. */}
-      <div
-        style={{
-          flex: "1 1 auto",
-          minHeight: 0,
-          display: "flex",
-          flexDirection: "column",
-          justifyContent: "flex-end",
-        }}
-      >
-      <div
-        ref={laneRef}
-        style={{
-          position: "relative",
-          height: "75%",
-          minHeight: 160,
-          overflow: "hidden",
-          borderRadius: 10,
-          background: COLORS.laneBg,
-        }}
-      >
-        {/* pitch-name axis: a grid line + note label per row (Performous-style) */}
-        {pitchRows.map((m) => {
-          const y = yCenterForPitch(m);
-          return (
-            <div key={`row${m}`}>
-              <div
-                style={{
-                  position: "absolute",
-                  left: GUTTER,
-                  right: 0,
-                  top: y,
-                  height: 1,
-                  background: COLORS.gridLine,
-                }}
-              />
-              <div
-                style={{
-                  position: "absolute",
-                  left: 10,
-                  top: y - AXIS_LABEL_SIZE / 2,
-                  fontSize: AXIS_LABEL_SIZE,
-                  fontWeight: 600,
-                  lineHeight: 1,
-                  color: COLORS.axisLabel,
-                  fontVariantNumeric: "tabular-nums",
-                  pointerEvents: "none",
-                }}
-              >
-                {midiToName(m)}
-              </div>
-            </div>
-          );
-        })}
-        {/* soft fade on the left so labels stay legible over scrolling notes/art */}
+      {/* ── Pitch lanes ──
+          One stacked highway per singer (versus); solo / play-along is a single
+          row. The growing box fills 75% of its space, bottom-aligned, leaving
+          headroom up top for the mic banner. Each Lane measures itself, so N
+          rows each size their notes to the height they got. */}
+      <div style={{ flex: "1 1 auto", minHeight: 0, display: "flex", flexDirection: "column", justifyContent: "flex-end" }}>
         <div
           style={{
-            position: "absolute",
-            left: 0,
-            top: 0,
-            bottom: 0,
-            width: GUTTER + 20,
-            background: `linear-gradient(to right, ${COLORS.laneBg}, transparent)`,
-            pointerEvents: "none",
-          }}
-        />
-
-        {/* moving note track */}
-        <div
-          style={{
-            position: "absolute",
-            inset: 0,
-            transform: `translateX(${trackTranslate}px)`,
-            willChange: "transform",
-          }}
-        >
-          {noteEls}
-        </div>
-
-        {/* fixed "now" line */}
-        <div
-          style={{
-            position: "absolute",
-            top: 0,
-            bottom: 0,
-            left: nowX,
-            width: 2,
-            background: COLORS.nowLine,
-            boxShadow: `0 0 10px ${COLORS.nowLine}`,
-          }}
-        />
-
-        {/* sung-pitch trail, per player: recent samples pinned to the notes they
-            were sung against (x = now-line offset by age), fading with age. Each
-            player's dots take their own colour; a hit still flashes green. */}
-        {rendered.map((r) => {
-          const eng = enginesRef.current.get(r.id);
-          if (!eng) return null;
-          return eng.trail.map((p, i) => {
-            const x = nowX + (p.ms - positionMs) * pxPerMs;
-            if (x < GUTTER + 4) return null; // don't paint under the label gutter
-            const o = Math.max(0, 1 - (positionMs - p.ms) / TRAIL_MS);
-            const size = noteH * (TRAIL_DOT_MIN + o * (TRAIL_DOT_MAX - TRAIL_DOT_MIN));
-            const ty = yForMarker(p.pitch);
-            return (
-              <div
-                key={`${r.id}-${i}`}
-                style={{
-                  position: "absolute",
-                  left: x - size / 2,
-                  top: ty - size / 2,
-                  width: size,
-                  height: size,
-                  borderRadius: "50%",
-                  background: p.hit ? COLORS.nowLine : r.input.color,
-                  opacity: o * 0.75,
-                  pointerEvents: "none",
-                }}
-              />
-            );
-          });
-        })}
-
-        {/* live sung-pitch marker per player. On a hit it goes green + pops
-            bigger + glows brighter — the "you nailed it" feedback. */}
-        {rendered.map((r) => {
-          if (r.markerPitch == null) return null;
-          const color = r.markerHit ? COLORS.nowLine : r.input.color;
-          const size = Math.round(noteH * MARKER_SCALE);
-          return (
-            <div
-              key={r.id}
-              style={{
-                position: "absolute",
-                left: nowX - size / 2,
-                top: yForMarker(r.markerPitch) - size / 2,
-                width: size,
-                height: size,
-                borderRadius: "50%",
-                background: color,
-                boxShadow: r.markerHit
-                  ? `0 0 ${size * 1.2}px ${color}, 0 0 ${size / 2}px ${color}`
-                  : `0 0 ${size * 0.7}px ${color}`,
-                transform: r.markerHit ? "scale(1.3)" : "scale(1)",
-                transition:
-                  "top 60ms linear, transform 110ms ease, box-shadow 110ms ease, background 90ms ease",
-                pointerEvents: "none",
-                zIndex: 3,
-              }}
-            />
-          );
-        })}
-
-        {/* running score HUD per player — spread evenly across the BOTTOM of the
-            lane (space-between), P1 at the left past the pitch-label gutter through
-            PN at the right, matching the mic banner's left→right order. Sits above
-            the lyric band, which is its own row below the lane. Each tinted its
-            colour; name only in multiplayer. */}
-        <div
-          style={{
-            position: "absolute",
-            left: GUTTER + 16,
-            right: 16,
-            bottom: 12,
+            height: "75%",
+            minHeight: 160,
             display: "flex",
-            justifyContent: "space-between",
-            alignItems: "flex-end",
-            gap: 24,
-            pointerEvents: "none",
+            flexDirection: "column",
+            gap: laneEntries.length > 1 ? 10 : 0,
           }}
         >
-          {rendered.map((r) =>
-            r.score ? (
-              <div
-                key={r.id}
-                style={{ textAlign: "center", fontVariantNumeric: "tabular-nums", minWidth: 0 }}
-              >
-                {rendered.length > 1 && (
-                  <div
-                    style={{ fontSize: 54, fontWeight: 800, color: r.input.color, lineHeight: 1 }}
-                  >
-                    {r.input.name}
-                  </div>
-                )}
-                <div
-                  style={{
-                    fontSize: 90,
-                    fontWeight: 800,
-                    lineHeight: 1,
-                    color: rendered.length > 1 ? r.input.color : COLORS.nowLine,
-                    textShadow: "0 1px 6px rgba(0,0,0,0.5)",
-                  }}
-                >
-                  {r.score.total.toLocaleString()}
-                </div>
-                <div
-                  style={{
-                    marginTop: 10,
-                    fontSize: 48,
-                    fontWeight: 600,
-                    color: "rgba(255,255,255,0.55)",
-                  }}
-                >
-                  {r.score.notesSung}/{r.score.notesTotal} notes
-                </div>
-              </div>
-            ) : null
-          )}
+          {laneEntries.map((e, i) => (
+            <Lane
+              key={e?.id ?? `lane${i}`}
+              song={song}
+              positionMs={positionMs}
+              nowFraction={nowFraction}
+              player={e ? { id: e.id, name: e.input.name, color: e.input.color } : null}
+              markerPitch={e?.markerPitch ?? null}
+              markerHit={e?.markerHit ?? false}
+              score={e?.score ?? null}
+              trail={e ? enginesRef.current.get(e.id)?.trail ?? [] : []}
+              multiplayer={laneEntries.length > 1}
+            />
+          ))}
         </div>
       </div>
-      </div>
-
       {/* ── Lyric band (anchored at the bottom, like SingStar/UltraStar) ── */}
       <div
         style={{
