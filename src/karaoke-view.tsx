@@ -232,6 +232,13 @@ interface Engine {
   trail: { ms: number; pitch: number; hit: boolean }[];
 }
 
+/** Scale a #rrggbb colour's brightness (f<1 darkens, f>1 lightens), clamped. */
+function shade(hex: string, f: number): string {
+  const n = parseInt(hex.slice(1), 16);
+  const c = (v: number) => Math.max(0, Math.min(255, Math.round(v * f)));
+  return `rgb(${c((n >> 16) & 255)}, ${c((n >> 8) & 255)}, ${c(n & 255)})`;
+}
+
 /**
  * One player's note highway — a self-measuring row. Versus stacks several (one
  * per singer); solo / play-along renders exactly one. Each Lane owns its OWN
@@ -284,6 +291,11 @@ function Lane(props: {
     return rows;
   }, [minPitch, maxPitch, bandH]);
 
+  // SingStar model: the target notes take a MUTED shade of the player's colour
+  // (so each lane reads as that singer's), and the live marker below is the
+  // BRIGHT, white-ringed indicator that reads on top of any of them. Golden
+  // notes stay gold — a universal "worth double" signal, not per-player.
+  const noteTint = player ? shade(player.color, 0.66) : COLORS.noteNormal;
   const noteEls = useMemo(() => {
     const els: JSX.Element[] = [];
     let key = 0;
@@ -300,7 +312,7 @@ function Lane(props: {
               top: yForPitch(sy.pitch),
               height: noteH,
               borderRadius: noteH / 2,
-              background: sy.type === "golden" ? COLORS.noteGolden : COLORS.noteNormal,
+              background: sy.type === "golden" ? COLORS.noteGolden : noteTint,
               boxShadow: sy.type === "golden" ? "0 0 8px rgba(230,180,34,0.6)" : "none",
             }}
           />
@@ -309,7 +321,7 @@ function Lane(props: {
     }
     return els;
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [song, lane.h, lane.w, minPitch, maxPitch]);
+  }, [song, lane.h, lane.w, minPitch, maxPitch, noteTint]);
 
   const nowX = lane.w * NOW_FRACTION;
   const trackTranslate = nowX - positionMs * pxPerMs;
@@ -391,11 +403,15 @@ function Lane(props: {
             width: markerSize,
             height: markerSize,
             borderRadius: "50%",
+            boxSizing: "border-box",
             background: markerColor,
+            // White ring + dark rim so the indicator reads on ANY note colour —
+            // its own tinted lane included. On a hit it also pops + glows green.
+            border: `${Math.max(2, Math.round(markerSize * 0.14))}px solid #fff`,
             boxShadow: markerHit
-              ? `0 0 ${markerSize * 1.2}px ${markerColor}, 0 0 ${markerSize / 2}px ${markerColor}`
-              : `0 0 ${markerSize * 0.7}px ${markerColor}`,
-            transform: markerHit ? "scale(1.3)" : "scale(1)",
+              ? `0 0 ${markerSize * 1.3}px ${markerColor}, 0 0 ${markerSize / 2}px ${markerColor}, 0 0 0 2px rgba(0,0,0,0.55)`
+              : `0 0 ${markerSize * 0.8}px ${markerColor}, 0 0 0 2px rgba(0,0,0,0.55)`,
+            transform: markerHit ? "scale(1.32)" : "scale(1)",
             transition: "top 60ms linear, transform 110ms ease, box-shadow 110ms ease, background 90ms ease",
             pointerEvents: "none",
             zIndex: 3,
@@ -622,23 +638,40 @@ export function KaraokeView(props: KaraokeViewProps) {
             minHeight: 160,
             display: "flex",
             flexDirection: "column",
-            gap: laneEntries.length > 1 ? 10 : 0,
           }}
         >
-          {laneEntries.map((e, i) => (
-            <Lane
-              key={e?.id ?? `lane${i}`}
-              song={song}
-              positionMs={positionMs}
-              nowLineNudge={nowLineNudge}
-              player={e ? { id: e.id, name: e.input.name, color: e.input.color } : null}
-              markerPitch={e?.markerPitch ?? null}
-              markerHit={e?.markerHit ?? false}
-              score={e?.score ?? null}
-              trail={e ? enginesRef.current.get(e.id)?.trail ?? [] : []}
-              multiplayer={laneEntries.length > 1}
-            />
-          ))}
+          {laneEntries.flatMap((e, i) => {
+            const lane = (
+              <Lane
+                key={e?.id ?? `lane${i}`}
+                song={song}
+                positionMs={positionMs}
+                nowLineNudge={nowLineNudge}
+                player={e ? { id: e.id, name: e.input.name, color: e.input.color } : null}
+                markerPitch={e?.markerPitch ?? null}
+                markerHit={e?.markerHit ?? false}
+                score={e?.score ?? null}
+                trail={e ? enginesRef.current.get(e.id)?.trail ?? [] : []}
+                multiplayer={laneEntries.length > 1}
+              />
+            );
+            if (i === 0) return [lane];
+            // A slim, edge-fading divider between adjacent singers' lanes.
+            const divider = (
+              <div
+                key={`div${i}`}
+                style={{
+                  flex: "0 0 auto",
+                  height: 3,
+                  margin: "7px 0",
+                  borderRadius: 2,
+                  background:
+                    "linear-gradient(90deg, transparent, rgba(255,255,255,0.32), transparent)",
+                }}
+              />
+            );
+            return [divider, lane];
+          })}
         </div>
       </div>
       {/* ── Lyric band (anchored at the bottom, like SingStar/UltraStar) ── */}
