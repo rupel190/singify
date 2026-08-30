@@ -163,7 +163,9 @@ const COLORS = {
  * Per-player marker/trail/HUD colours, assigned by index. Player 0 is the same
  * pink the solo marker always used, so a one-player session looks identical.
  */
-export const PLAYER_COLORS = [COLORS.livePitch, "#3a86ff", "#e6b422", "#43d17a"];
+// Slot 2 is violet, NOT gold — gold is reserved for golden notes (in every
+// lane), so a gold player colour would blend its own golden notes.
+export const PLAYER_COLORS = [COLORS.livePitch, "#3a86ff", "#a05cff", "#43d17a"];
 
 // MIDI note number → name (60 = C4). Drives the left pitch axis.
 const NOTE_NAMES = ["C", "C♯", "D", "D♯", "E", "F", "F♯", "G", "G♯", "A", "A♯", "B"];
@@ -230,6 +232,20 @@ interface Engine {
   keeper: ReturnType<typeof createScoreKeeper>;
   smoother: ReturnType<typeof createPitchSmoother>;
   trail: { ms: number; pitch: number; hit: boolean }[];
+}
+
+/**
+ * Inject the gold-shimmer keyframes once. A metallic highlight sweeps across
+ * golden notes via an animated background-position — pure CSS, no canvas/WebGL
+ * (kind to the GPU). Idempotent; safe to call every render.
+ */
+function ensureGoldShimmer(): void {
+  if (typeof document === "undefined" || document.getElementById("singify-gold-shimmer")) return;
+  const st = document.createElement("style");
+  st.id = "singify-gold-shimmer";
+  st.textContent =
+    "@keyframes singify-gold-shimmer{from{background-position:220% 0}to{background-position:-20% 0}}";
+  document.head.appendChild(st);
 }
 
 /** Scale a #rrggbb colour's brightness (f<1 darkens, f>1 lightens), clamped. */
@@ -312,8 +328,15 @@ function Lane(props: {
               top: yForPitch(sy.pitch),
               height: noteH,
               borderRadius: noteH / 2,
-              background: sy.type === "golden" ? COLORS.noteGolden : noteTint,
-              boxShadow: sy.type === "golden" ? "0 0 8px rgba(230,180,34,0.6)" : "none",
+              ...(sy.type === "golden"
+                ? {
+                    background:
+                      "linear-gradient(100deg, #9a6f14 0%, #e6b422 26%, #fff4bf 50%, #e6b422 74%, #9a6f14 100%)",
+                    backgroundSize: "220% 100%",
+                    animation: "singify-gold-shimmer 2.4s linear infinite",
+                    boxShadow: "0 0 12px rgba(230,180,34,0.7)",
+                  }
+                : { background: noteTint }),
             }}
           />
         );
@@ -503,6 +526,8 @@ export function KaraokeView(props: KaraokeViewProps) {
 
   // Fresh attempt whenever the song OR the roster changes: drop every engine so
   // scores/markers/trails start clean (turning a mic on = a fresh scored run).
+  useEffect(() => ensureGoldShimmer(), []);
+
   useEffect(() => {
     enginesRef.current.clear();
     lastMsRef.current = 0;
