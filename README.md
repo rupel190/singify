@@ -89,7 +89,7 @@ to test against real charts — no USDB account needed. Free CC-licensed charts:
 | --- | --- | --- | --- |
 | `K` | Open the menu | `M` | Toggle mic(s) |
 | `Q` | Quick Sing on the current track | `L` | Load a local `.txt` chart |
-| `[` / `]` | Nudge lyrics later / earlier (±10 ms) | `P` | Punch-sync (tap on the first word) |
+| `[` / `]` | Nudge lyrics later / earlier — ±10 ms (Shift ±100, Ctrl ±1) | `P` | Punch-sync (tap on the first word) |
 | `\` | Reset sync | `R` | Re-search USDB (reopen the picker) |
 | `-` / `=` | Mic sensitivity − / + | `,` / `.` | Hit-line nudge (visual only) |
 

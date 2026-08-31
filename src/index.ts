@@ -1622,10 +1622,13 @@ async function main(): Promise<void> {
       openSing(); // straight to Quick Sing on the current track
     } else if (e.key === "Escape") {
       if (visible) setVisible(false); // close the overlay
-    } else if (e.key === "[") {
-      setOffset(offsetMs - OFFSET_STEP); // lyrics 10 ms later
-    } else if (e.key === "]") {
-      setOffset(offsetMs + OFFSET_STEP); // lyrics 10 ms earlier
+    } else if (e.code === "BracketLeft" || e.code === "BracketRight") {
+      // Offset nudge, step scaled by modifier: Ctrl = fine 1 ms, Shift = coarse
+      // 100 ms, plain = 10 ms. `[` = lyrics later, `]` = earlier. Uses e.code so
+      // Shift+[ (which TYPES "{") still registers as the bracket key.
+      const step = e.ctrlKey ? 1 : e.shiftKey ? 100 : OFFSET_STEP;
+      setOffset(offsetMs + (e.code === "BracketLeft" ? -step : step));
+      e.preventDefault();
     } else if (e.key === "\\") {
       setOffset(0); // reset sync
     } else if (e.key === "m" || e.key === "M") {
