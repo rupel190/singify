@@ -1734,8 +1734,6 @@ async function main(): Promise<void> {
       punchSync(); // tap on the first sung word to snap the offset
     } else if (e.key === "r" || e.key === "R") {
       void reSearch(); // force a fresh USDB search + picker for this track
-    } else if (e.key === "f" || e.key === "F") {
-      toggleFps(); // debug fps · ms overlay
     } else if (e.key === "-") {
       setSensitivity(sensitivity - 5); // less sensitive (noisy room)
     } else if (e.key === "=") {
