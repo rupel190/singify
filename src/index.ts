@@ -1540,14 +1540,14 @@ function toggleFps(): void {
     fpsEl.id = "singify-fps";
     Object.assign(fpsEl.style, {
       position: "fixed",
-      left: "10px",
-      bottom: "10px",
-      zIndex: "1001",
-      padding: "4px 9px",
+      right: "14px",
+      bottom: "14px",
+      zIndex: "2147483647", // above everything (the overlay's own score sits bottom-left)
+      padding: "5px 10px",
       borderRadius: "6px",
-      background: "rgba(0, 0, 0, 0.72)",
+      background: "rgba(0, 0, 0, 0.82)",
       color: "#7cfc00",
-      font: "700 13px ui-monospace, SFMono-Regular, monospace",
+      font: "700 15px ui-monospace, SFMono-Regular, monospace",
       pointerEvents: "none",
     } as CSSStyleDeclaration);
     document.body.appendChild(fpsEl);
@@ -1561,7 +1561,7 @@ function toggleFps(): void {
     fpsRaf = requestAnimationFrame(tick);
   };
   fpsRaf = requestAnimationFrame(tick);
-  Spicetify.showNotification?.("FPS meter on (F)");
+  Spicetify.showNotification?.("FPS meter on (Ctrl+F / F)");
 }
 
 // ── Bootstrap ────────────────────────────────────────────────────────────────
@@ -1701,6 +1701,21 @@ async function main(): Promise<void> {
       setNowLineNudge(nowLineNudge + NOWLINE_STEP); // green line a touch right
     }
   });
+
+  // Ctrl+F toggles the FPS meter via a CAPTURE-phase listener, so it fires before
+  // other extensions that bind plain "f" (and preventDefault stops any browser
+  // "find"). Plain F still works too via the bubble handler above when it's free.
+  document.addEventListener(
+    "keydown",
+    (e) => {
+      if (e.ctrlKey && (e.key === "f" || e.key === "F")) {
+        e.preventDefault();
+        e.stopImmediatePropagation();
+        toggleFps();
+      }
+    },
+    true
+  );
 
   // Prime with whatever is already playing.
   void onSongChange();
