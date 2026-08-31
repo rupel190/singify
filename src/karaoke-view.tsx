@@ -147,8 +147,7 @@ const SPARK_MAX_PER_BURST = 4; // particles per burst once the streak is long
 // fixed px, so they stay in proportion when the lane geometry changes — the
 // live marker reads a little fatter than the note it is chasing.
 const MARKER_SCALE = 1.6;
-const TRAIL_DOT_MIN = 0.35; // oldest sample in the trail
-const TRAIL_DOT_MAX = 0.7; // newest
+const TRAIL_DOT_MAX = 0.7; // newest dot size (× noteH); it shrinks to ×0.5 as it ages (keyframe)
 
 const COLORS = {
   laneBg: "rgba(0, 0, 0, 0.28)",
@@ -284,6 +283,32 @@ function spawnSpark(layer: HTMLElement, x: number, y: number, noteH: number): vo
   layer.appendChild(el);
 }
 
+// Sung-pitch trail, imperative. Instead of re-mapping ~70 reconciled dots every
+// frame, each new sample spawns ONE dot into the translated note layer at
+// left = ms·pxPerMs — so it scrolls with the track for free — and a CSS keyframe
+// fades + shrinks it over TRAIL_MS before it self-removes. Same trick as sparks;
+// zero per-frame React work for the trail.
+function ensureTrailStyles(): void {
+  if (typeof document === "undefined" || document.getElementById("singify-trail")) return;
+  const st = document.createElement("style");
+  st.id = "singify-trail";
+  // 0.5 = TRAIL_DOT_MIN / TRAIL_DOT_MAX (the old age-based shrink, baked in).
+  st.textContent =
+    "@keyframes singify-trail{from{opacity:0.72;transform:scale(1)}to{opacity:0;transform:scale(0.5)}}";
+  document.head.appendChild(st);
+}
+
+/** Emit one trail dot into `layer` (which is inside the translated note track). */
+function spawnTrailDot(layer: HTMLElement, x: number, y: number, size: number, color: string): void {
+  const el = document.createElement("div");
+  el.style.cssText =
+    `position:absolute;left:${(x - size / 2).toFixed(1)}px;top:${(y - size / 2).toFixed(1)}px;` +
+    `width:${size.toFixed(1)}px;height:${size.toFixed(1)}px;border-radius:50%;pointer-events:none;` +
+    `background:${color};animation:singify-trail ${TRAIL_MS}ms linear forwards;`;
+  el.addEventListener("animationend", () => el.remove(), { once: true });
+  layer.appendChild(el);
+}
+
 /** Scale a #rrggbb colour's brightness (f<1 darkens, f>1 lightens), clamped. */
 function shade(hex: string, f: number): string {
   const n = parseInt(hex.slice(1), 16);
@@ -321,6 +346,10 @@ function Lane(props: {
   const sparkLayerRef = useRef<HTMLDivElement | null>(null);
   const streakRef = useRef(0);
   const sparkTickRef = useRef(0);
+  // Imperative trail: a layer inside the translated track, plus the last sample
+  // already spawned (so we only emit the new ones each frame).
+  const trailLayerRef = useRef<HTMLDivElement | null>(null);
+  const lastTrailMsRef = useRef(-1);
 
   const [minPitch, maxPitch] = useMemo(() => getPitchRange(song), [song]);
   const pitchSpan = Math.max(1, maxPitch - minPitch);
@@ -422,6 +451,28 @@ function Lane(props: {
     for (let k = 0; k < count; k++) spawnSpark(layer, nowX, y, noteH);
   });
 
+  // Imperative trail: emit a dot for each NEW sample into the translated layer.
+  // Runs each frame (no deps) but does zero React reconciliation — the dots are
+  // plain DOM that scroll with the track and self-remove on their fade.
+  useEffect(() => {
+    const layer = trailLayerRef.current;
+    if (!layer || !lane.w) return;
+    // A seek/restart moves the clock back and clears the engine's trail — drop the
+    // lingering dots and re-arm so the new run's trail spawns cleanly.
+    if (positionMs < lastTrailMsRef.current - 500) {
+      layer.replaceChildren();
+      lastTrailMsRef.current = -1;
+    }
+    ensureTrailStyles();
+    const size = noteH * TRAIL_DOT_MAX;
+    const col = player?.color ?? COLORS.livePitch;
+    for (const pt of trail) {
+      if (pt.ms <= lastTrailMsRef.current) continue;
+      lastTrailMsRef.current = pt.ms;
+      spawnTrailDot(layer, pt.ms * pxPerMs, yForMarker(pt.pitch), size, pt.hit ? COLORS.nowLine : col);
+    }
+  });
+
   return (
     <div
       ref={laneRef}
@@ -463,31 +514,10 @@ function Lane(props: {
       />
       <div style={{ position: "absolute", inset: 0, transform: `translateX(${trackTranslate}px)`, willChange: "transform" }}>
         {noteEls}
+        {/* Trail dots live in track space, so this one transform scrolls them all. */}
+        <div ref={trailLayerRef} style={{ position: "absolute", inset: 0, pointerEvents: "none" }} />
       </div>
       <div style={{ position: "absolute", top: 0, bottom: 0, left: nowX + nowLineNudge, width: 3, background: COLORS.nowLine, boxShadow: `0 0 10px ${COLORS.nowLine}` }} />
-      {trail.map((pt, i) => {
-        const x = nowX + (pt.ms - positionMs) * pxPerMs;
-        if (x < gutter + 4) return null;
-        const o = Math.max(0, 1 - (positionMs - pt.ms) / TRAIL_MS);
-        const size = noteH * (TRAIL_DOT_MIN + o * (TRAIL_DOT_MAX - TRAIL_DOT_MIN));
-        const ty = yForMarker(pt.pitch);
-        return (
-          <div
-            key={i}
-            style={{
-              position: "absolute",
-              left: x - size / 2,
-              top: ty - size / 2,
-              width: size,
-              height: size,
-              borderRadius: "50%",
-              background: pt.hit ? COLORS.nowLine : player?.color ?? COLORS.livePitch,
-              opacity: o * 0.75,
-              pointerEvents: "none",
-            }}
-          />
-        );
-      })}
       <div
         ref={sparkLayerRef}
         style={{ position: "absolute", inset: 0, pointerEvents: "none", zIndex: 2 }}
