@@ -214,6 +214,15 @@ export interface DetectOptions {
   clarityThreshold?: number;
 }
 
+// Reused autocorrelation scratch — detectPitch fully consumes it before it
+// returns, so one buffer is safe across frames and across both players' calls.
+// Avoids a per-frame Float32Array(2048) allocation (GC churn on the hot path).
+let _acf: Float32Array | null = null;
+function acfScratch(n: number): Float32Array {
+  if (!_acf || _acf.length < n) _acf = new Float32Array(n);
+  return _acf;
+}
+
 /**
  * Detect the fundamental frequency of a window of samples, or null if there
  * isn't a confident one.
@@ -236,9 +245,17 @@ export function detectPitch(
   // 1. Energy gate — skip silence before doing any work.
   if (rms(samples) < rmsThreshold) return null;
 
+  // Only lags inside the pitch band are ever read downstream, so compute the
+  // autocorrelation up to maxLag+1 (for the parabolic peak) and skip the rest —
+  // those discarded high lags are the bulk of the O(n²) work (~44% at n=2048,
+  // 70 Hz floor). Verified: nothing reads c above bestLag+1 ≤ maxLag+1.
+  const minLag = Math.max(1, Math.floor(sampleRate / maxHz));
+  const maxLag = Math.min(n - 1, Math.floor(sampleRate / minHz));
+  const acfMax = Math.min(n - 1, maxLag + 1);
+
   // 2. Autocorrelation c[lag] = Σ samples[i]·samples[i+lag].
-  const c = new Float32Array(n);
-  for (let lag = 0; lag < n; lag++) {
+  const c = acfScratch(n);
+  for (let lag = 0; lag <= acfMax; lag++) {
     let sum = 0;
     for (let i = 0; i < n - lag; i++) sum += samples[i] * samples[i + lag];
     c[lag] = sum;
@@ -247,11 +264,9 @@ export function detectPitch(
   // 3. Walk past the initial descent (the main lobe around lag 0) so we don't
   //    mistake the zero-lag energy peak for the pitch period.
   let d = 0;
-  while (d < n - 1 && c[d] > c[d + 1]) d++;
+  while (d < acfMax && c[d] > c[d + 1]) d++;
 
   // 4. Peak-pick within the frequency band of interest.
-  const minLag = Math.max(1, Math.floor(sampleRate / maxHz));
-  const maxLag = Math.min(n - 1, Math.floor(sampleRate / minHz));
   let bestLag = -1;
   let bestVal = -Infinity;
   for (let lag = Math.max(d, minLag); lag <= maxLag; lag++) {

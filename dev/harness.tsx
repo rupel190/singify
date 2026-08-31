@@ -543,9 +543,17 @@ function App() {
   const patchHud = (i: number, patch: Partial<PlayerSlot>) =>
     setHudSlots((r) => r.map((q, j) => (j === i ? { ...q, ...patch } : q)));
 
+  // Dev frame-time meter: EMA of the inter-frame delta. Total frame time (rAF
+  // schedule + React render + paint), so it rises above ~16.7ms when the render
+  // can't keep up — the number to watch when A/B-ing the imperative hot-path work.
+  const fpsRef = React.useRef({ last: 0, emaMs: 16.7 });
   React.useEffect(() => {
     let raf = 0;
     const tick = () => {
+      const now = performance.now();
+      const s = fpsRef.current;
+      if (s.last) s.emaMs = s.emaMs * 0.9 + (now - s.last) * 0.1;
+      s.last = now;
       if (getBaseMs() > loopEnd) seek(0);
       force((x) => (x + 1) % 1_000_000); // repaint transport each frame
       raf = requestAnimationFrame(tick);
@@ -564,6 +572,22 @@ function App() {
 
   return (
     <>
+    <div
+      style={{
+        position: "fixed",
+        left: 8,
+        bottom: 8,
+        zIndex: 200,
+        padding: "4px 9px",
+        borderRadius: 6,
+        background: "rgba(0,0,0,0.72)",
+        color: "#7CFC00",
+        font: "700 12px ui-monospace, SFMono-Regular, monospace",
+        pointerEvents: "none",
+      }}
+    >
+      {(1000 / fpsRef.current.emaMs).toFixed(0)} fps · {fpsRef.current.emaMs.toFixed(1)} ms
+    </div>
     <div style={{ maxWidth: 960, margin: "24px auto", padding: "0 16px" }}>
       <div
         style={{
