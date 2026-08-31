@@ -21,6 +21,8 @@ import {
   getPosition,
   getPitchRange,
   targetPitchAt,
+  isGoldenNote,
+  isRapNote,
   type ParsedSong,
   type Syllable,
 } from "./ultrastar-parser";
@@ -330,7 +332,7 @@ function Lane(props: {
               top: yForPitch(sy.pitch),
               height: noteH,
               borderRadius: noteH / 2,
-              ...(sy.type === "golden"
+              ...(isGoldenNote(sy.type)
                 ? {
                     background:
                       "linear-gradient(100deg, #9a6f14 0%, #e6b422 26%, #fff4bf 50%, #e6b422 74%, #9a6f14 100%)",
@@ -338,7 +340,13 @@ function Lane(props: {
                     animation: "singify-gold-shimmer 2.4s linear infinite",
                     boxShadow: "0 0 12px rgba(230,180,34,0.7)",
                   }
-                : { background: noteTint }),
+                : isRapNote(sy.type)
+                  ? {
+                      // Rap = rhythm, not pitch: a hatched bar signals "just hit
+                      // the words on time", with no pitch to chase.
+                      background: `repeating-linear-gradient(115deg, ${noteTint} 0 6px, ${shade(noteTint, 0.6)} 6px 12px)`,
+                    }
+                  : { background: noteTint }),
             }}
           />
         );

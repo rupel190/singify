@@ -47,7 +47,7 @@ auto-resolve, sessions and the localhost helper all work end-to-end.
 
 | Module | State |
 | --- | --- |
-| `src/ultrastar-parser.ts` | ✅ headers, beats→ms, RELATIVE, `:`/`*`/`F` notes · tested (rap `R`/`G` not yet parsed — see below) |
+| `src/ultrastar-parser.ts` | ✅ headers, beats→ms, RELATIVE, all note types `:`/`*`/`F`/`R`/`G` · tested |
 | `src/usdb.ts` | ✅ USDB client (login, search-scrape, downloadTxt) · tested · runs in the helper |
 | `src/cache.ts` | ✅ query sanitisation, fuzzy matching, on-disk song cache · tested |
 | `src/resolver.ts` | ✅ cache + USDB flow, session-expiry re-login · tested |
@@ -56,12 +56,12 @@ auto-resolve, sessions and the localhost helper all work end-to-end.
 | `server/helper.ts` (localhost bridge) | ✅ Bun HTTP server wrapping resolver/usdb/cache · CORS · lazy login + retry · has a USDB account |
 | `src/resolver-client.ts` (thin client) | ✅ browser/Spotify side; same signatures as `resolver.ts`, fetches the helper |
 | `src/mic.ts` + live pitch marker | ✅ getUserMedia → detectPitch → smoothed marker · per-player device, gain, gate, monitor-out |
-| `src/scoring.ts` + result screen | ✅ beat-weighted 9000 + 1000 line bonus, golden 2×, octave-agnostic · **difficulty ±2/±1/±0** · grade tiers |
+| `src/scoring.ts` + result screen | ✅ beat-weighted 9000 + 1000 line bonus, golden 2×, octave-agnostic · **difficulty ±2/±1/±0** · rap (`R`/`G`) presence-scored · grade tiers |
 | Sessions (`src/session.ts`, `session-view.tsx`) | ✅ multi-round, playlist-sourced, per-player scores, aggregate end-screen |
 | Config + credentials | ✅ `~/.config/singify/config.json`, loaded by the helper |
 | Stats + persistence (`stats.ts`, `persist.ts`, `server/store.ts`) | ✅ per-mic / per-singer aggregates · XDG-backed settings/offsets/stats mirrored via the helper |
 
-**Tests:** `bun test` → **182 pass** (parser + cache/resolver + pitch + scoring +
+**Tests:** `bun test` → **188 pass** (parser + cache/resolver + pitch + scoring +
 session + stats + store + helper). No live USDB calls; everything is
 fixture/mock/synthetic-tone.
 
@@ -70,7 +70,7 @@ fixture/mock/synthetic-tone.
 ```bash
 nix develop            # or `direnv allow` once, then it auto-loads (flake.nix)
 bun install            # first time only
-bun test               # 182 tests
+bun test               # 188 tests
 bun run dev            # browser harness → http://localhost:3000 (or next free port)
 bun run helper         # localhost bridge → http://127.0.0.1:4455 (USDB + cache)
 bun run build          # bundle → dist/karaoke.js
@@ -185,9 +185,7 @@ unpushed build with `nh os switch -- --override-input singify git+file:///path/t
 
 ## Remaining work
 
-- **Rap notes (`R` / `G` tokens).** UltraStar marks rap/golden-rap syllables with
-  `R`/`G`; the parser currently matches only `:`/`*`/`F`, so those lines are
-  silently dropped (whole rap sections vanish from Deutschrap etc. charts). Parse
-  them as pitch-agnostic notes so the lyrics still scroll.
 - **Optional "live resolve" in the harness** — point the browser harness at the
   running helper so real charts render in-browser (today it uses mock candidates).
+- **Solo Quick-Sing stats** — today only session rounds are recorded; wire
+  `onComplete` for solo so practice runs count too.

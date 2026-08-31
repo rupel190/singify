@@ -21,6 +21,8 @@
  *   :  → normal note
  *   *  → golden note (bonus points in scoring)
  *   F  → freestyle (no pitch check, no scoring)
+ *   R  → rap (no pitch check; scored on presence, not pitch)
+ *   G  → golden rap (rap + bonus points)
  *   -  → line break (beat of next line start, optional second value = end beat)
  *   E  → end of song
  *   #  → header tag
@@ -28,7 +30,16 @@
 
 // ── Types ──────────────────────────────────────────────────────────────────
 
-export type NoteType = "normal" | "golden" | "freestyle";
+export type NoteType = "normal" | "golden" | "freestyle" | "rap" | "golden-rap";
+
+/** Rap notes (R / G) are pitch-agnostic — scored on presence, not pitch. */
+export function isRapNote(t: NoteType): boolean {
+  return t === "rap" || t === "golden-rap";
+}
+/** Golden notes (* / G) are worth double and get the shimmer. */
+export function isGoldenNote(t: NoteType): boolean {
+  return t === "golden" || t === "golden-rap";
+}
 
 export interface Syllable {
   text: string;
@@ -130,7 +141,7 @@ export function parse(raw: string): ParsedSong {
     if (!noteType) continue;
 
     // Split on first whitespace groups, text may have spaces
-    const match = line.match(/^[:*F]\s+(-?\d+)\s+(\d+)\s+(-?\d+)\s?(.*)/);
+    const match = line.match(/^[:*FRG]\s+(-?\d+)\s+(\d+)\s+(-?\d+)\s?(.*)/);
     if (!match) continue;
 
     const localBeat = parseInt(match[1], 10);
@@ -211,6 +222,8 @@ function noteTypeFromToken(token: string): NoteType | null {
     case ":": return "normal";
     case "*": return "golden";
     case "F": return "freestyle";
+    case "R": return "rap";
+    case "G": return "golden-rap";
     default:  return null;
   }
 }

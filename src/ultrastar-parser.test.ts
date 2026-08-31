@@ -1,5 +1,12 @@
 import { describe, test, expect } from "bun:test";
-import { parse, getPosition, getPitchRange, targetPitchAt } from "./ultrastar-parser";
+import {
+  parse,
+  getPosition,
+  getPitchRange,
+  targetPitchAt,
+  isRapNote,
+  isGoldenNote,
+} from "./ultrastar-parser";
 
 // ── Fixtures ───────────────────────────────────────────────────────────────
 
@@ -14,6 +21,34 @@ const MINIMAL_SONG = `
 : 16 4 60 World
 E
 `.trim();
+
+describe("parse() rap notes (R / G)", () => {
+  const RAP = [
+    "#TITLE:x",
+    "#ARTIST:y",
+    "#BPM:120",
+    "#GAP:0",
+    ": 0 4 60 sing",
+    "R 4 4 60 yo",
+    "G 8 4 60 bling",
+    "E",
+  ].join("\n");
+
+  test("R and G lines are parsed, not dropped", () => {
+    const syl = parse(RAP).lines.flatMap((l) => l.syllables);
+    expect(syl.map((s) => s.text)).toEqual(["sing", "yo", "bling"]);
+    expect(syl.map((s) => s.type)).toEqual(["normal", "rap", "golden-rap"]);
+  });
+
+  test("type helpers classify rap and golden", () => {
+    expect(isRapNote("rap")).toBe(true);
+    expect(isRapNote("golden-rap")).toBe(true);
+    expect(isRapNote("normal")).toBe(false);
+    expect(isGoldenNote("golden-rap")).toBe(true);
+    expect(isGoldenNote("golden")).toBe(true);
+    expect(isGoldenNote("rap")).toBe(false);
+  });
+});
 
 describe("targetPitchAt", () => {
   const song = parse(MINIMAL_SONG); // notes: 1000–1500ms @55, 1500–2000 @55, 3000–3500 @60

@@ -1,6 +1,6 @@
 import { describe, test, expect } from "bun:test";
 import { parse } from "./ultrastar-parser";
-import { createScoreKeeper, toleranceSemitones, gradeForScore } from "./scoring";
+import { createScoreKeeper, toleranceSemitones, gradeForScore, SCORE_FACTOR } from "./scoring";
 
 // BPM=60 → msPerBeat = 60000 / (60*4) = 250ms.
 // note a: 0–1000ms  pitch 0  normal  weight 4×1=4  → max 2250
@@ -30,6 +30,35 @@ function singNote(
   const step = (endMs - startMs) / frames;
   for (let i = 0; i < frames; i++) keeper.sample(startMs + i * step, midi);
 }
+
+describe("rap notes (R / G) score on presence, not pitch", () => {
+  const rapSong = parse("#TITLE:R\n#ARTIST:A\n#BPM:60\n#GAP:0\nR 0 4 0 yo\nE");
+
+  test("a rap note credits even when the pitch is wrong", () => {
+    const k = createScoreKeeper(rapSong, "hard"); // strictest pitch tolerance
+    singNote(k, 0, 1000, 7); // wildly off-pitch
+    expect(k.read().notesSung).toBe(1);
+    expect(k.read().notePoints).toBeGreaterThan(0);
+  });
+
+  test("a normal note off-pitch gets nothing (contrast)", () => {
+    const normSong = parse("#TITLE:N\n#ARTIST:A\n#BPM:60\n#GAP:0\n: 0 4 0 la\nE");
+    const k = createScoreKeeper(normSong, "hard");
+    singNote(k, 0, 1000, 7);
+    expect(k.read().notePoints).toBe(0);
+  });
+
+  test("silence never credits a rap note", () => {
+    const k = createScoreKeeper(rapSong, "hard");
+    singNote(k, 0, 1000, null);
+    expect(k.read().notePoints).toBe(0);
+  });
+
+  test("golden-rap is worth double a plain rap", () => {
+    expect(SCORE_FACTOR.rap).toBe(1);
+    expect(SCORE_FACTOR["golden-rap"]).toBe(2);
+  });
+});
 
 describe("gradeForScore", () => {
   test("maps score bands to named tiers", () => {

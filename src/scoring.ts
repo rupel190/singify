@@ -24,21 +24,28 @@
  * `Range := 2 - Level`). Folding modulo-12 also makes the comparison immune to
  * the constant (×12) offset between the chart's raw pitch numbers and MIDI.
  *
+ * Rap notes (R / G) skip the pitch test entirely — any voiced input during the
+ * note counts, since rapping is judged on rhythm, not pitch. Golden-rap (G) is
+ * still worth double, like any golden note.
+ *
  * createScoreKeeper() is the only stateful part; it takes per-frame samples and
  * exposes the running score. It's still fully unit-testable by feeding a
  * scripted sequence of (ms, midi) readings — no microphone required.
  */
 
 import { foldToOctaveOf } from "./pitch";
-import type { ParsedSong, NoteType } from "./ultrastar-parser";
+import { isRapNote, type ParsedSong, type NoteType } from "./ultrastar-parser";
 
 export type Difficulty = "easy" | "medium" | "hard";
 
-/** Points multiplier per note type (freestyle is never scored). */
+/** Points multiplier per note type (freestyle is never scored). Rap notes score
+ *  like normal/golden ones by WEIGHT, but their hit test is pitch-agnostic. */
 export const SCORE_FACTOR: Record<NoteType, number> = {
   normal: 1,
   golden: 2,
   freestyle: 0,
+  rap: 1,
+  "golden-rap": 2,
 };
 
 export const MAX_SCORE = 10000;
@@ -93,6 +100,7 @@ interface NoteAcc {
   endMs: number;
   hitFrames: number;
   totalFrames: number;
+  rap: boolean; // pitch-agnostic — any voiced input counts as a hit
 }
 
 export interface ScoreKeeper {
@@ -135,6 +143,7 @@ export function createScoreKeeper(
         endMs: s.startMs + s.durationMs,
         hitFrames: 0,
         totalFrames: 0,
+        rap: isRapNote(s.type),
       });
     }
   });
@@ -164,10 +173,13 @@ export function createScoreKeeper(
     const n = activeNote(positionMs);
     if (!n) return; // outside every note — nothing to credit
     n.totalFrames++;
-    if (sungMidi != null) {
-      const folded = foldToOctaveOf(sungMidi, n.pitch, n.pitch);
-      if (Math.abs(folded - n.pitch) <= tol) n.hitFrames++;
+    if (sungMidi == null) return; // silence never credits
+    if (n.rap) {
+      n.hitFrames++; // rap: any voiced input counts — rhythm, not pitch
+      return;
     }
+    const folded = foldToOctaveOf(sungMidi, n.pitch, n.pitch);
+    if (Math.abs(folded - n.pitch) <= tol) n.hitFrames++;
   }
 
   function read(): ScoreState {
