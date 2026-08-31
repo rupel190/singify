@@ -742,8 +742,13 @@ function ensureOverlay(): HTMLDivElement {
     position: "fixed",
     inset: "0",
     zIndex: "999",
-    background: "rgba(10, 10, 14, 0.94)",
-    backdropFilter: liteFx ? "none" : "blur(6px)", // fullscreen blur — heavy on RDNA4; off in GPU-lite
+    // Bumped 0.94 → 0.97 so dropping the blur below doesn't let the background
+    // read through more sharply — it stays a clean dark scrim, minus the cost.
+    background: "rgba(10, 10, 14, 0.97)",
+    // No backdrop-filter: a fullscreen per-frame blur is the single heaviest GPU
+    // op here (measured ~14 ms/frame on RDNA4 at 4 lanes) and near-invisible under
+    // a 97%-opaque scrim. Removing it took 26 → ~40 fps.
+    backdropFilter: "none",
     display: "none",
   } as CSSStyleDeclaration);
   document.body.appendChild(overlay);
@@ -1620,8 +1625,10 @@ let liteFx = localStorage.getItem(LITE_KEY) === "1";
 (globalThis as { __SINGIFY_LITE?: boolean }).__SINGIFY_LITE = liteFx;
 
 function applyLite(): void {
+  // The overlay backdrop blur is gone for everyone now; GPU-lite toggles the
+  // remaining karaoke-view effects (gold shimmer, marker/now-line glows) so their
+  // residual cost can still be isolated against the frame-time meter.
   (globalThis as { __SINGIFY_LITE?: boolean }).__SINGIFY_LITE = liteFx;
-  if (overlay) overlay.style.backdropFilter = liteFx ? "none" : "blur(6px)";
   if (visible) renderOverlay();
 }
 
