@@ -681,6 +681,8 @@ let manualChart = false;
 
 // Round history for the 📊 Stats screen — loaded from the helper when it opens.
 let statRounds: StatRound[] = [];
+// True when that load couldn't reach the helper (history may exist on disk).
+let statsHelperDown = false;
 
 // Picker state — set when resolveForTrack returns candidates to choose from.
 let currentTrackId: string | null = null;
@@ -782,6 +784,7 @@ function renderOverlay(): void {
     renderScaled(
       React.createElement(StatsScreen, {
         rounds: statRounds,
+        helperDown: statsHelperDown,
         onBack: () => {
           activeScreen = "home";
           renderOverlay();
@@ -1072,8 +1075,9 @@ function openHome(): void {
 function openStats(): void {
   activeScreen = "stats";
   setVisible(true);
-  void loadStatRounds().then((rounds) => {
+  void loadStatRounds().then(({ rounds, reachable }) => {
     statRounds = rounds;
+    statsHelperDown = !reachable;
     if (activeScreen === "stats") renderOverlay();
   });
 }

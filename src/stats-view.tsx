@@ -23,9 +23,13 @@ function fmt(n: number): string {
   return Math.round(n).toLocaleString();
 }
 
-export function StatsScreen(props: { rounds: StatRound[]; onBack: () => void }) {
+export function StatsScreen(props: {
+  rounds: StatRound[];
+  helperDown?: boolean;
+  onBack: () => void;
+}) {
   const React = Spicetify.React;
-  const { rounds, onBack } = props;
+  const { rounds, helperDown, onBack } = props;
   const mics = aggregateByMic(rounds);
   const players = aggregateByPlayer(rounds);
   const recent = [...rounds].sort((a, b) => b.t - a.t).slice(0, 8);
@@ -73,24 +77,54 @@ export function StatsScreen(props: { rounds: StatRound[]; onBack: () => void }) 
         </button>
       </div>
 
-      {rounds.length === 0 ? (
+      {helperDown && (
         <div
           style={{
             maxWidth: 820,
-            margin: "0 auto",
-            padding: "40px 24px",
-            textAlign: "center",
-            color: C.sub,
-            fontSize: 16,
-            background: C.card,
-            border: `1px solid ${C.border}`,
-            borderRadius: 14,
+            margin: "0 auto 16px",
+            padding: "14px 18px",
+            display: "flex",
+            gap: 10,
+            alignItems: "baseline",
+            fontSize: 15,
             lineHeight: 1.5,
+            background: "rgba(230,180,34,0.10)",
+            border: "1px solid rgba(230,180,34,0.35)",
+            borderRadius: 12,
           }}
         >
-          No rounds yet. Play a session — each scored song is saved here with the
-          mic and settings it was sung on, so you can see which setup wins.
+          <span style={{ fontSize: 18 }}>⚠️</span>
+          <span style={{ color: C.text }}>
+            Karaoke helper isn't running — any saved history is on disk but can't be
+            read right now. Start it with{" "}
+            <code style={{ color: C.gold, fontFamily: "ui-monospace, monospace" }}>
+              bun run helper
+            </code>
+            , then reopen.
+          </span>
         </div>
+      )}
+
+      {rounds.length === 0 ? (
+        helperDown ? null : (
+          <div
+            style={{
+              maxWidth: 820,
+              margin: "0 auto",
+              padding: "40px 24px",
+              textAlign: "center",
+              color: C.sub,
+              fontSize: 16,
+              background: C.card,
+              border: `1px solid ${C.border}`,
+              borderRadius: 14,
+              lineHeight: 1.5,
+            }}
+          >
+            No rounds yet. Play a session — each scored song is saved here with the
+            mic and settings it was sung on, so you can see which setup wins.
+          </div>
+        )
       ) : (
         <div style={{ maxWidth: 820, margin: "0 auto", display: "flex", flexDirection: "column", gap: 22 }}>
           <Section title="By microphone" hint="best average first">

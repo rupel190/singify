@@ -154,10 +154,18 @@ async function ensureLoaded(): Promise<StatRound[] | null> {
   }
 }
 
-/** Round history for the stats screen; buffered-but-unsaved rounds included. */
-export async function loadStatRounds(): Promise<StatRound[]> {
+export interface StatsLoad {
+  rounds: StatRound[];
+  /** false = the helper was unreachable, so on-disk history couldn't be read. */
+  reachable: boolean;
+}
+
+/** Round history for the stats screen. `reachable:false` means the helper is
+ *  down — the screen should say so rather than imply there's no history. */
+export async function loadStatRounds(): Promise<StatsLoad> {
   const rounds = await ensureLoaded();
-  return rounds ?? [...pending];
+  if (rounds) return { rounds, reachable: true };
+  return { rounds: [...pending], reachable: false };
 }
 
 /** Append one finished round; flush to disk (debounced) once history is loaded. */
