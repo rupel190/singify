@@ -136,8 +136,13 @@ const LANE_VPAD = 24; // px of vertical padding inside the lane
 // lanes are shorter, so each Lane scales its own label size down from this (and
 // derives its gutter from that), so the names don't dwarf the tiny note bars.
 const AXIS_LABEL_MAX = 40;
-const TRAIL_MS = 850; // how far back (ms) the sung-pitch trail reaches
-const TRAIL_MAX = 96; // ring-buffer cap (frames) — a safety bound on dot count
+const TRAIL_MS = 1190; // how far back (ms) the sung-pitch trail reaches (~1.4× the original 850)
+const TRAIL_MAX = 160; // ring-buffer cap (frames) — headroom for the longer trail on high-refresh panels
+
+// Streak sparks: while a singer holds pitch, particles shower off the marker.
+const SPARK_STREAK_MIN = 20; // frames on-pitch before sparks kick in (~0.33s @60fps)
+const SPARK_EVERY = 4; // emit a burst every N frames while the streak holds
+const SPARK_MAX_PER_BURST = 4; // particles per burst once the streak is long
 // Marker and trail are sized as MULTIPLES of the note height rather than in
 // fixed px, so they stay in proportion when the lane geometry changes — the
 // live marker reads a little fatter than the note it is chasing.
@@ -248,6 +253,37 @@ function ensureGoldShimmer(): void {
   document.head.appendChild(st);
 }
 
+// Streak sparks — a shower of little particles off the marker while a singer
+// holds pitch. Pure CSS transforms (per-particle --dx/--dy), so it stays on the
+// GPU compositor path this project prefers over canvas/WebGL.
+function ensureSparkStyles(): void {
+  if (typeof document === "undefined" || document.getElementById("singify-spark")) return;
+  const st = document.createElement("style");
+  st.id = "singify-spark";
+  st.textContent =
+    "@keyframes singify-spark{from{opacity:1;transform:translate(0,0) scale(1)}to{opacity:0;transform:translate(var(--dx),var(--dy)) scale(0.25)}}";
+  document.head.appendChild(st);
+}
+
+/** Emit one spark from (x,y) into `layer`; it flies out, fades, and self-removes. */
+function spawnSpark(layer: HTMLElement, x: number, y: number, noteH: number): void {
+  const s = Math.max(3, noteH * 0.22);
+  const ang = -Math.PI / 2 + (Math.random() - 0.5) * 1.9; // mostly upward, fanned out
+  const dist = noteH * (0.9 + Math.random() * 1.5);
+  const dx = Math.cos(ang) * dist;
+  const dy = Math.sin(ang) * dist; // negative = upward
+  const color = Math.random() < 0.4 ? "#ffffff" : COLORS.nowLine; // white glints among green
+  const el = document.createElement("div");
+  el.style.cssText =
+    `position:absolute;left:${(x - s / 2).toFixed(1)}px;top:${(y - s / 2).toFixed(1)}px;` +
+    `width:${s.toFixed(1)}px;height:${s.toFixed(1)}px;border-radius:50%;pointer-events:none;` +
+    `background:${color};box-shadow:0 0 ${(s * 1.5).toFixed(1)}px ${color};` +
+    `--dx:${dx.toFixed(1)}px;--dy:${dy.toFixed(1)}px;` +
+    `animation:singify-spark ${520 + Math.floor(Math.random() * 240)}ms ease-out forwards;`;
+  el.addEventListener("animationend", () => el.remove(), { once: true });
+  layer.appendChild(el);
+}
+
 /** Scale a #rrggbb colour's brightness (f<1 darkens, f>1 lightens), clamped. */
 function shade(hex: string, f: number): string {
   const n = parseInt(hex.slice(1), 16);
@@ -274,12 +310,17 @@ function Lane(props: {
   multiplayer: boolean;
 }) {
   const React = Spicetify.React;
-  const { useRef, useMemo } = React;
+  const { useRef, useMemo, useEffect } = React;
   const { song, positionMs, nowLineNudge, player, markerPitch, markerHit, score, trail, multiplayer } =
     props;
 
   const laneRef = useRef<HTMLDivElement | null>(null);
   const lane = useSize(laneRef);
+  // Streak sparks: a layer the particles live in, plus the running on-pitch
+  // streak and a throttle tick (both survive re-renders via refs).
+  const sparkLayerRef = useRef<HTMLDivElement | null>(null);
+  const streakRef = useRef(0);
+  const sparkTickRef = useRef(0);
 
   const [minPitch, maxPitch] = useMemo(() => getPitchRange(song), [song]);
   const pitchSpan = Math.max(1, maxPitch - minPitch);
@@ -361,6 +402,26 @@ function Lane(props: {
   const markerColor = markerHit ? COLORS.nowLine : player?.color ?? COLORS.livePitch;
   const markerSize = Math.round(noteH * MARKER_SCALE);
 
+  // Spark shower while the singer holds pitch. Runs each frame (no deps): grow
+  // the streak on a hit, reset it on a miss, and once it's held long enough,
+  // throttle-emit a burst that scales with how long they've kept it up. Imperative
+  // (createElement + self-removing CSS animation) so it never churns React state.
+  useEffect(() => {
+    const layer = sparkLayerRef.current;
+    const onPitch = markerHit && markerPitch != null;
+    streakRef.current = onPitch ? streakRef.current + 1 : 0;
+    if (!layer || !lane.w || streakRef.current < SPARK_STREAK_MIN) return;
+    sparkTickRef.current += 1;
+    if (sparkTickRef.current % SPARK_EVERY !== 0) return;
+    ensureSparkStyles();
+    const count = Math.min(
+      SPARK_MAX_PER_BURST,
+      1 + Math.floor((streakRef.current - SPARK_STREAK_MIN) / 22)
+    );
+    const y = yForMarker(markerPitch as number);
+    for (let k = 0; k < count; k++) spawnSpark(layer, nowX, y, noteH);
+  });
+
   return (
     <div
       ref={laneRef}
@@ -427,6 +488,10 @@ function Lane(props: {
           />
         );
       })}
+      <div
+        ref={sparkLayerRef}
+        style={{ position: "absolute", inset: 0, pointerEvents: "none", zIndex: 2 }}
+      />
       {markerPitch != null && (
         <div
           style={{
