@@ -1514,6 +1514,56 @@ async function reSearch(): Promise<void> {
   if (visible) renderOverlay();
 }
 
+// ── FPS overlay (debug) ──────────────────────────────────────────────────────
+//
+// A tiny `fps · ms` readout for A/B-ing the hot-path work in the REAL client (the
+// browser harness has its own badge). Off by default; `F` toggles it. Its own rAF
+// measures the frame cadence — every rAF shares one frame budget, so when the
+// overlay's render can't keep up the number drops. Lives on <body>, outside the
+// zoomed overlay, so it stays readable at native size.
+let fpsEl: HTMLDivElement | null = null;
+let fpsRaf = 0;
+let fpsLast = 0;
+let fpsEma = 16.7;
+
+function toggleFps(): void {
+  if (fpsRaf) {
+    cancelAnimationFrame(fpsRaf);
+    fpsRaf = 0;
+    fpsLast = 0;
+    if (fpsEl) fpsEl.style.display = "none";
+    Spicetify.showNotification?.("FPS meter off");
+    return;
+  }
+  if (!fpsEl) {
+    fpsEl = document.createElement("div");
+    fpsEl.id = "singify-fps";
+    Object.assign(fpsEl.style, {
+      position: "fixed",
+      left: "10px",
+      bottom: "10px",
+      zIndex: "1001",
+      padding: "4px 9px",
+      borderRadius: "6px",
+      background: "rgba(0, 0, 0, 0.72)",
+      color: "#7cfc00",
+      font: "700 13px ui-monospace, SFMono-Regular, monospace",
+      pointerEvents: "none",
+    } as CSSStyleDeclaration);
+    document.body.appendChild(fpsEl);
+  }
+  fpsEl.style.display = "block";
+  const tick = (): void => {
+    const now = performance.now();
+    if (fpsLast) fpsEma = fpsEma * 0.9 + (now - fpsLast) * 0.1;
+    fpsLast = now;
+    if (fpsEl) fpsEl.textContent = `${(1000 / fpsEma).toFixed(0)} fps · ${fpsEma.toFixed(1)} ms`;
+    fpsRaf = requestAnimationFrame(tick);
+  };
+  fpsRaf = requestAnimationFrame(tick);
+  Spicetify.showNotification?.("FPS meter on (F)");
+}
+
 // ── Bootstrap ────────────────────────────────────────────────────────────────
 
 async function main(): Promise<void> {
@@ -1639,6 +1689,8 @@ async function main(): Promise<void> {
       punchSync(); // tap on the first sung word to snap the offset
     } else if (e.key === "r" || e.key === "R") {
       void reSearch(); // force a fresh USDB search + picker for this track
+    } else if (e.key === "f" || e.key === "F") {
+      toggleFps(); // debug fps · ms overlay
     } else if (e.key === "-") {
       setSensitivity(sensitivity - 5); // less sensitive (noisy room)
     } else if (e.key === "=") {
