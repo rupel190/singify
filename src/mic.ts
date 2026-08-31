@@ -42,8 +42,8 @@ export interface MicPitch {
   /**
    * Route the monitor to a specific OUTPUT device (a deviceId from
    * enumerateOutputs()); undefined = the system default. Resolves once the sink
-   * has switched. A no-op beyond the default when the engine lacks setSinkId
-   * (see outputRoutingSupported()).
+   * has switched (via AudioContext.setSinkId). A no-op beyond the default when the
+   * engine lacks it (see outputRoutingSupported()).
    */
   setOutputDevice(deviceId: string | undefined): Promise<void>;
   /**
@@ -91,11 +91,12 @@ export interface MicPitchOptions extends Omit<DetectOptions, "sampleRate"> {
   gain?: number;
   /**
    * Start with monitoring on (default FALSE). Monitoring plays this mic back out
-   * an output device so the singer hears themselves. Off by default for two
-   * reasons: software monitoring adds a full capture→playback round trip
-   * (30–100 ms) that reads as slapback and can hurt pitch, and mic + speakers in
-   * one room is a feedback path. Best paired with headphones, or a hardware
-   * direct-monitor knob instead.
+   * an output device so the singer hears themselves. It routes straight through
+   * the AudioContext output (no media-element buffer), so the delay is just the
+   * context's output buffer — roughly 10–30 ms — rather than the ~30–100 ms of a
+   * media-element path. Still off by default: even that can read as slapback, and
+   * mic + speakers in one room is a feedback path. Best with headphones, or a
+   * hardware direct-monitor knob (the true zero-latency option).
    */
   monitor?: boolean;
   /** Initial monitor loudness, 0..1 (default 0.05 — quiet; feedback-safe). Independent of `gain`. */
@@ -143,7 +144,7 @@ export async function startMicPitch(opts: MicPitchOptions = {}): Promise<MicPitc
     echoCancellation: s.echoCancellation,
   };
 
-  const ctx = new AudioContext();
+  const ctx = new AudioContext({ latencyHint: "interactive" }); // lowest output buffer
   const source = ctx.createMediaStreamSource(stream);
   const gainNode = ctx.createGain();
   gainNode.gain.value = Math.max(0, gain);
@@ -159,13 +160,14 @@ export async function startMicPitch(opts: MicPitchOptions = {}): Promise<MicPitc
 
   // ── Monitor tap (opt-in) ───────────────────────────────────────────────────
   // A second branch off `source` — BEFORE the scoring gain — so monitor loudness
-  // and scoring level are independent knobs. It feeds a MediaStreamDestination
-  // wired to a hidden <audio> element, because HTMLMediaElement.setSinkId is the
-  // broadly-supported way to send audio to a CHOSEN output device (per player).
+  // and scoring level are independent knobs. It goes STRAIGHT to the context
+  // output (ctx.destination); a chosen output device is selected with
+  // AudioContext.setSinkId. This deliberately avoids the older
+  // MediaStreamDestination → hidden <audio> path, whose media-element jitter
+  // buffer was the bulk of the monitor latency. The scoring path never reaches
+  // ctx.destination, so the monitor is still the only thing that makes sound.
   // Built lazily the first time monitoring is switched on, then reused.
   let monitorNode: GainNode | null = null;
-  let sinkStream: MediaStreamAudioDestinationNode | null = null;
-  let sinkEl: HTMLAudioElement | null = null;
   let monOn = monitor;
   let monLevel = clamp01(monitorGain);
   let outId = outputDeviceId;
@@ -179,20 +181,16 @@ export async function startMicPitch(opts: MicPitchOptions = {}): Promise<MicPitc
     monitorNode = ctx.createGain();
     applyMonitorGain();
     source.connect(monitorNode); // tap pre-scoring-gain
-    sinkStream = ctx.createMediaStreamDestination();
-    monitorNode.connect(sinkStream);
-    sinkEl = new Audio();
-    sinkEl.autoplay = true;
-    sinkEl.srcObject = sinkStream.stream;
+    monitorNode.connect(ctx.destination); // straight to output — no media-element re-buffer
     void routeSink();
-    void sinkEl.play().catch((err) => console.error("[singify] monitor play failed:", err));
   };
 
+  // Route the whole context (its only output IS the monitor) to a chosen device.
   const routeSink = async (): Promise<void> => {
-    const el = sinkEl as (HTMLAudioElement & { setSinkId?: (id: string) => Promise<void> }) | null;
-    if (!el?.setSinkId) return; // engine can't route — stays on the default output
+    const c = ctx as unknown as { setSinkId?: (id: string) => Promise<void> };
+    if (typeof c.setSinkId !== "function") return; // can't pick a device — stays on default
     try {
-      await el.setSinkId(outId ?? "");
+      await c.setSinkId(outId ?? "");
     } catch (err) {
       console.error("[singify] monitor setSinkId failed:", err);
     }
@@ -243,11 +241,6 @@ export async function startMicPitch(opts: MicPitchOptions = {}): Promise<MicPitc
       source.disconnect();
       gainNode.disconnect();
       if (monitorNode) monitorNode.disconnect();
-      if (sinkStream) sinkStream.disconnect();
-      if (sinkEl) {
-        sinkEl.pause();
-        sinkEl.srcObject = null;
-      }
       for (const t of stream.getTracks()) t.stop();
       void ctx.close();
     },
@@ -265,8 +258,8 @@ function clamp01(n: number): number {
  */
 export function outputRoutingSupported(): boolean {
   return (
-    typeof HTMLMediaElement !== "undefined" &&
-    typeof (HTMLMediaElement.prototype as { setSinkId?: unknown }).setSinkId === "function"
+    typeof AudioContext !== "undefined" &&
+    typeof (AudioContext.prototype as unknown as { setSinkId?: unknown }).setSinkId === "function"
   );
 }
 
