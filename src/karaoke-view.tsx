@@ -338,6 +338,10 @@ function Lane(props: {
   const { useRef, useMemo, useEffect } = React;
   const { song, positionMs, nowLineNudge, player, markerPitch, markerHit, score, trail, multiplayer } =
     props;
+  // GPU-lite (Ctrl+G in the adapter): drop the steady-repaint effects — gold
+  // shimmer, marker/now-line glows — to see how much of the frame budget is
+  // compositing vs the React render. Read per render; the adapter re-renders on toggle.
+  const lite = (globalThis as { __SINGIFY_LITE?: boolean }).__SINGIFY_LITE === true;
 
   const laneRef = useRef<HTMLDivElement | null>(null);
   const lane = useSize(laneRef);
@@ -403,13 +407,15 @@ function Lane(props: {
               height: noteH,
               borderRadius: noteH / 2,
               ...(isGoldenNote(sy.type)
-                ? {
-                    background:
-                      "linear-gradient(100deg, #9a6f14 0%, #e6b422 26%, #fff4bf 50%, #e6b422 74%, #9a6f14 100%)",
-                    backgroundSize: "220% 100%",
-                    animation: "singify-gold-shimmer 2.4s linear infinite",
-                    boxShadow: "0 0 12px rgba(230,180,34,0.7)",
-                  }
+                ? lite
+                  ? { background: "linear-gradient(100deg, #9a6f14 0%, #e6b422 50%, #9a6f14 100%)" }
+                  : {
+                      background:
+                        "linear-gradient(100deg, #9a6f14 0%, #e6b422 26%, #fff4bf 50%, #e6b422 74%, #9a6f14 100%)",
+                      backgroundSize: "220% 100%",
+                      animation: "singify-gold-shimmer 2.4s linear infinite",
+                      boxShadow: "0 0 12px rgba(230,180,34,0.7)",
+                    }
                 : isRapNote(sy.type)
                   ? {
                       // Rap = rhythm, not pitch: a hatched bar signals "just hit
@@ -424,7 +430,7 @@ function Lane(props: {
     }
     return els;
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [song, lane.h, lane.w, minPitch, maxPitch, noteTint]);
+  }, [song, lane.h, lane.w, minPitch, maxPitch, noteTint, lite]);
 
   const nowX = lane.w * NOW_FRACTION;
   const trackTranslate = nowX - positionMs * pxPerMs;
@@ -517,7 +523,7 @@ function Lane(props: {
         {/* Trail dots live in track space, so this one transform scrolls them all. */}
         <div ref={trailLayerRef} style={{ position: "absolute", inset: 0, pointerEvents: "none" }} />
       </div>
-      <div style={{ position: "absolute", top: 0, bottom: 0, left: nowX + nowLineNudge, width: 3, background: COLORS.nowLine, boxShadow: `0 0 10px ${COLORS.nowLine}` }} />
+      <div style={{ position: "absolute", top: 0, bottom: 0, left: nowX + nowLineNudge, width: 3, background: COLORS.nowLine, boxShadow: lite ? "none" : `0 0 10px ${COLORS.nowLine}` }} />
       <div
         ref={sparkLayerRef}
         style={{ position: "absolute", inset: 0, pointerEvents: "none", zIndex: 2 }}
@@ -536,9 +542,11 @@ function Lane(props: {
             // White ring + dark rim so the indicator reads on ANY note colour —
             // its own tinted lane included. On a hit it also pops + glows green.
             border: `${Math.max(2, Math.round(markerSize * 0.14))}px solid #fff`,
-            boxShadow: markerHit
-              ? `0 0 ${markerSize * 1.3}px ${markerColor}, 0 0 ${markerSize / 2}px ${markerColor}, 0 0 0 2px rgba(0,0,0,0.55)`
-              : `0 0 ${markerSize * 0.8}px ${markerColor}, 0 0 0 2px rgba(0,0,0,0.55)`,
+            boxShadow: lite
+              ? "0 0 0 2px rgba(0,0,0,0.55)" // rim only — no glow blur in GPU-lite
+              : markerHit
+                ? `0 0 ${markerSize * 1.3}px ${markerColor}, 0 0 ${markerSize / 2}px ${markerColor}, 0 0 0 2px rgba(0,0,0,0.55)`
+                : `0 0 ${markerSize * 0.8}px ${markerColor}, 0 0 0 2px rgba(0,0,0,0.55)`,
             transform: markerHit ? "scale(1.32)" : "scale(1)",
             transition: "top 60ms linear, transform 110ms ease, box-shadow 110ms ease, background 90ms ease",
             pointerEvents: "none",

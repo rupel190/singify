@@ -743,7 +743,7 @@ function ensureOverlay(): HTMLDivElement {
     inset: "0",
     zIndex: "999",
     background: "rgba(10, 10, 14, 0.94)",
-    backdropFilter: "blur(6px)",
+    backdropFilter: liteFx ? "none" : "blur(6px)", // fullscreen blur — heavy on RDNA4; off in GPU-lite
     display: "none",
   } as CSSStyleDeclaration);
   document.body.appendChild(overlay);
@@ -1609,6 +1609,33 @@ function toggleFps(): void {
   Spicetify.showNotification?.(`FPS meter ${fpsWanted ? "on" : "off"}`);
 }
 
+// ── GPU-lite mode (debug) ────────────────────────────────────────────────────
+// Ctrl+G strips the STEADY per-frame GPU cost — the overlay's backdrop blur, the
+// gold-note shimmer, and the marker/now-line glows — to isolate whether the frame
+// budget is going to compositing (GPU) or to the JS/React render. fps jumps in
+// lite mode → GPU-bound (framework-independent); no change → it's the render, and
+// Stage B / a rewrite is the lever. karaoke-view reads the global flag each render.
+const LITE_KEY = "singify:liteFx";
+let liteFx = localStorage.getItem(LITE_KEY) === "1";
+(globalThis as { __SINGIFY_LITE?: boolean }).__SINGIFY_LITE = liteFx;
+
+function applyLite(): void {
+  (globalThis as { __SINGIFY_LITE?: boolean }).__SINGIFY_LITE = liteFx;
+  if (overlay) overlay.style.backdropFilter = liteFx ? "none" : "blur(6px)";
+  if (visible) renderOverlay();
+}
+
+function toggleLite(): void {
+  liteFx = !liteFx;
+  try {
+    localStorage.setItem(LITE_KEY, liteFx ? "1" : "0");
+  } catch {
+    /* storage blocked — keep the in-memory value */
+  }
+  applyLite();
+  Spicetify.showNotification?.(`GPU-lite ${liteFx ? "ON — heavy fx off" : "off"}`);
+}
+
 // ── Bootstrap ────────────────────────────────────────────────────────────────
 
 async function main(): Promise<void> {
@@ -1745,16 +1772,21 @@ async function main(): Promise<void> {
     }
   });
 
-  // Ctrl+F toggles the FPS meter via a CAPTURE-phase listener, so it fires before
-  // other extensions that bind plain "f" (and preventDefault stops any browser
-  // "find"). Plain F still works too via the bubble handler above when it's free.
+  // Debug toggles on a CAPTURE-phase listener, so they fire before other
+  // extensions that bind plain letters (and preventDefault stops any browser
+  // default). Ctrl+F = FPS meter; Ctrl+G = GPU-lite (strip heavy compositing).
   document.addEventListener(
     "keydown",
     (e) => {
-      if (e.ctrlKey && (e.key === "f" || e.key === "F")) {
+      if (!e.ctrlKey) return;
+      if (e.key === "f" || e.key === "F") {
         e.preventDefault();
         e.stopImmediatePropagation();
         toggleFps();
+      } else if (e.key === "g" || e.key === "G") {
+        e.preventDefault();
+        e.stopImmediatePropagation();
+        toggleLite();
       }
     },
     true
