@@ -655,6 +655,29 @@ function newSlot(i: number, name: string): PlayerSlot {
   };
 }
 
+// One-time cleanup: an early build defaulted player 0's name to "You"; the roster
+// is P1–P4 now. Rewrite a persisted "You" so it doesn't linger in saved slots
+// (and re-mirror so settings.json is cleaned too). Runs before the rosters below
+// read the slots, so they pick up the corrected name.
+function migratePlayerNames(): void {
+  const slots = loadMicSlots();
+  let changed = false;
+  slots.forEach((s, i) => {
+    if (s && s.name === "You") {
+      s.name = `P${i + 1}`;
+      changed = true;
+    }
+  });
+  if (!changed) return;
+  try {
+    localStorage.setItem(MIC_SLOTS_KEY, JSON.stringify(slots));
+  } catch {
+    /* storage blocked — the roster defaults to P1–P4 anyway */
+  }
+  mirrorSettings();
+}
+migratePlayerNames();
+
 // Versus roster chosen on the setup screen: each player + their mic device + gain.
 let setupRoster: PlayerSlot[] = [newSlot(0, "P1")];
 // Snapshot of the roster taken when a session starts (the setup screen can keep
@@ -1046,8 +1069,13 @@ function setVisible(next: boolean): void {
   visible = next;
   const el = ensureOverlay();
   el.style.display = visible ? "block" : "none";
-  if (visible) renderOverlay();
-  else stopPreviews(); // closing the overlay releases any setup preview mics
+  if (visible) {
+    renderOverlay();
+    if (fpsWanted) startFps(); // debug frame-time readout, auto-shown while playing
+  } else {
+    stopFps();
+    stopPreviews(); // closing the overlay releases any setup preview mics
+  }
 }
 
 // Q → the karaoke surface (Quick Sing); toggles closed if already there.
@@ -1517,24 +1545,20 @@ async function reSearch(): Promise<void> {
 // ── FPS overlay (debug) ──────────────────────────────────────────────────────
 //
 // A tiny `fps · ms` readout for A/B-ing the hot-path work in the REAL client (the
-// browser harness has its own badge). Off by default; `F` toggles it. Its own rAF
-// measures the frame cadence — every rAF shares one frame budget, so when the
-// overlay's render can't keep up the number drops. Lives on <body>, outside the
-// zoomed overlay, so it stays readable at native size.
+// harness has its own badge). It SHOWS AUTOMATICALLY while the overlay is open —
+// a hotkey alone proved unreliable (other extensions grab plain "f") — and Ctrl+F
+// hides/shows it, remembered across launches. Its own rAF measures the frame
+// cadence: every rAF shares one frame budget, so when the overlay's render can't
+// keep up the number drops. Lives on <body>, outside the zoomed overlay.
+const FPS_KEY = "singify:fps";
+let fpsWanted = localStorage.getItem(FPS_KEY) !== "0"; // default ON (perf-testing)
 let fpsEl: HTMLDivElement | null = null;
 let fpsRaf = 0;
 let fpsLast = 0;
 let fpsEma = 16.7;
 
-function toggleFps(): void {
-  if (fpsRaf) {
-    cancelAnimationFrame(fpsRaf);
-    fpsRaf = 0;
-    fpsLast = 0;
-    if (fpsEl) fpsEl.style.display = "none";
-    Spicetify.showNotification?.("FPS meter off");
-    return;
-  }
+function startFps(): void {
+  if (fpsRaf) return;
   if (!fpsEl) {
     fpsEl = document.createElement("div");
     fpsEl.id = "singify-fps";
@@ -1553,6 +1577,7 @@ function toggleFps(): void {
     document.body.appendChild(fpsEl);
   }
   fpsEl.style.display = "block";
+  fpsLast = 0;
   const tick = (): void => {
     const now = performance.now();
     if (fpsLast) fpsEma = fpsEma * 0.9 + (now - fpsLast) * 0.1;
@@ -1561,7 +1586,27 @@ function toggleFps(): void {
     fpsRaf = requestAnimationFrame(tick);
   };
   fpsRaf = requestAnimationFrame(tick);
-  Spicetify.showNotification?.("FPS meter on (Ctrl+F / F)");
+}
+
+function stopFps(): void {
+  if (fpsRaf) {
+    cancelAnimationFrame(fpsRaf);
+    fpsRaf = 0;
+  }
+  if (fpsEl) fpsEl.style.display = "none";
+}
+
+/** Ctrl+F (or F): remember the choice and apply it now if the overlay is open. */
+function toggleFps(): void {
+  fpsWanted = !fpsWanted;
+  try {
+    localStorage.setItem(FPS_KEY, fpsWanted ? "1" : "0");
+  } catch {
+    /* storage blocked — keep the in-memory value */
+  }
+  if (fpsWanted && visible) startFps();
+  else stopFps();
+  Spicetify.showNotification?.(`FPS meter ${fpsWanted ? "on" : "off"}`);
 }
 
 // ── Bootstrap ────────────────────────────────────────────────────────────────
