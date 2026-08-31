@@ -86,6 +86,10 @@ export interface ParsedSong {
 // ── Parser ─────────────────────────────────────────────────────────────────
 
 export function parse(raw: string): ParsedSong {
+  // Strip a leading UTF-8 BOM — common in Windows-exported .txt. Without this the
+  // first line reads "<BOM>#TITLE…", fails startsWith("#"), aborts header parsing,
+  // and the whole file throws "missing #BPM" (silently killing local + manual charts).
+  raw = raw.replace(/^﻿/, "");
   // Normalise line endings
   const lines = raw.replace(/\r\n/g, "\n").replace(/\r/g, "\n").split("\n");
 

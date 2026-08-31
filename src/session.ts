@@ -178,7 +178,9 @@ export interface PlayerSummary {
 export interface SessionSummary {
   players: PlayerSummary[]; // roster order
   rounds: RoundResult[];
-  bestRound: { title: string; player: string; total: number } | null;
+  // `index` is the position in `rounds` — the result table highlights by it, so a
+  // song sung twice only stars the actually-best row (title alone is ambiguous).
+  bestRound: { title: string; player: string; total: number; index: number } | null;
   winner: string | null; // highest total; null if no rounds yet
 }
 
@@ -200,13 +202,13 @@ export function summarize(s: Session): SessionSummary {
   });
 
   let bestRound: SessionSummary["bestRound"] = null;
-  for (const r of s.rounds) {
+  s.rounds.forEach((r, index) => {
     for (const sc of r.scores) {
       if (!bestRound || sc.total > bestRound.total) {
-        bestRound = { title: r.title, player: sc.player, total: sc.total };
+        bestRound = { title: r.title, player: sc.player, total: sc.total, index };
       }
     }
-  }
+  });
 
   const winner =
     s.rounds.length > 0 && players.length > 0

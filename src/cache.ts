@@ -21,7 +21,7 @@
 
 import { homedir } from "node:os";
 import { join } from "node:path";
-import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { mkdir, readFile, writeFile, rename } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { parse, type ParsedSong } from "./ultrastar-parser";
 
@@ -183,14 +183,23 @@ async function readCacheMap(): Promise<CacheMap> {
   if (!existsSync(cacheFile())) return {};
   try {
     return JSON.parse(await readFile(cacheFile(), "utf8")) as CacheMap;
-  } catch {
-    return {}; // corrupt cache → treat as empty rather than crashing
+  } catch (err) {
+    // Corrupt cache → treat as empty rather than crashing, but LOG it: silently
+    // returning {} would re-download every song and hammer USDB with no clue why.
+    console.error(`[singify] cache.json unreadable (${cacheFile()}) — treating as empty:`, err);
+    return {};
   }
 }
 
 async function writeCacheMap(map: CacheMap): Promise<void> {
   await mkdir(baseDir, { recursive: true });
-  await writeFile(cacheFile(), JSON.stringify(map, null, 2), "utf8");
+  // Atomic write: temp + rename, so a crash/kill mid-write can't truncate
+  // cache.json and silently wipe the whole track→chart map (which readCacheMap
+  // would then swallow as "empty"). Mirrors server/store.ts.
+  const file = cacheFile();
+  const tmp = `${file}.tmp`;
+  await writeFile(tmp, JSON.stringify(map, null, 2), "utf8");
+  await rename(tmp, file);
 }
 
 function sanitizeFilename(s: string): string {

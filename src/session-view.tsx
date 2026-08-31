@@ -1179,7 +1179,7 @@ export function SessionResultScreen(props: {
         </thead>
         <tbody>
           {summary.rounds.map((r, i) => {
-            const best = summary.bestRound?.title === r.title;
+            const best = i === summary.bestRound?.index;
             // Highlight the per-round winner (only meaningful when >1 sang it).
             const roundWinner = [...r.scores].sort((a, b) => b.total - a.total)[0]?.player;
             return (

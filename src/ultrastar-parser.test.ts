@@ -22,6 +22,15 @@ const MINIMAL_SONG = `
 E
 `.trim();
 
+describe("parse() robustness", () => {
+  test("a leading UTF-8 BOM is stripped, not fatal (Windows-exported .txt)", () => {
+    const song = parse("﻿" + MINIMAL_SONG);
+    expect(song.headers.title).toBe("Test Song");
+    expect(song.headers.bpm).toBe(120);
+    expect(song.lines.length).toBeGreaterThan(0);
+  });
+});
+
 describe("parse() rap notes (R / G)", () => {
   const RAP = [
     "#TITLE:x",

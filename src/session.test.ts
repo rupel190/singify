@@ -191,7 +191,16 @@ describe("summarize", () => {
     const sum = summarize(s);
     expect(sum.players[0].total).toBe(18000);
     expect(sum.players[0].avg).toBe(6000);
-    expect(sum.bestRound).toEqual({ title: "B", player: "P1", total: 9000 });
+    expect(sum.bestRound).toEqual({ title: "B", player: "P1", total: 9000, index: 1 });
+  });
+
+  test("same title twice → bestRound points at the higher round by index", () => {
+    let s = createSession(3);
+    s = recordRound(s, round("Dup", 4000));
+    s = recordRound(s, round("Dup", 8500));
+    const sum = summarize(s);
+    expect(sum.bestRound?.index).toBe(1);
+    expect(sum.bestRound?.total).toBe(8500);
   });
 
   test("is multiplayer-shaped: a column per player", () => {

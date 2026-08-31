@@ -126,32 +126,43 @@ export async function seedFromHelper(): Promise<string[]> {
 
 let statsCache: StatRound[] | null = null;
 let pending: StatRound[] = [];
+// The in-flight initial load, memoised so concurrent first callers (a round
+// finishing while the Stats screen opens) share ONE load instead of each building
+// a separate array where the slower silently overwrites the faster — which
+// dropped a just-recorded round. Cleared once the load settles.
+let loadingPromise: Promise<StatRound[] | null> | null = null;
 
 const pushStats = debounce(() => {
   if (statsCache) {
     const doc: StatsDoc = { rounds: statsCache };
-    void saveStore("stats", doc).catch(() => {});
+    void saveStore("stats", doc).catch((err) =>
+      console.error("[singify] stats save failed:", err)
+    );
   }
 }, 400);
 
 /** The authoritative round list once loaded, else null (helper unreachable). */
 async function ensureLoaded(): Promise<StatRound[] | null> {
   if (statsCache) return statsCache;
-  try {
-    const doc = await loadStore<Partial<StatsDoc>>("stats");
-    const rounds = Array.isArray(doc?.rounds) ? (doc!.rounds as StatRound[]) : [];
-    if (pending.length) {
-      rounds.push(...pending);
-      pending = [];
+  if (loadingPromise) return loadingPromise; // join the in-flight load — never race it
+  loadingPromise = (async () => {
+    try {
+      const doc = await loadStore<Partial<StatsDoc>>("stats");
+      const rounds = Array.isArray(doc?.rounds) ? (doc!.rounds as StatRound[]) : [];
+      if (pending.length) {
+        rounds.push(...pending);
+        pending = [];
+        pushStats(); // flush the merged-in buffered rounds
+      }
       statsCache = rounds;
-      pushStats(); // flush the merged-in buffered rounds
-    } else {
-      statsCache = rounds;
+      return statsCache;
+    } catch {
+      return null; // still unreachable — leave statsCache null so we retry later
+    } finally {
+      loadingPromise = null;
     }
-    return statsCache;
-  } catch {
-    return null; // still unreachable — don't fabricate an empty authoritative set
-  }
+  })();
+  return loadingPromise;
 }
 
 export interface StatsLoad {
@@ -179,4 +190,24 @@ export function recordStatRound(round: StatRound): void {
       pending.push(round); // helper down — hold; merges on next successful load
     }
   })();
+}
+
+/** Best-effort flush of the debounced stats write — for page exit. */
+function flushStats(): void {
+  if (statsCache) {
+    void saveStore("stats", { rounds: statsCache }).catch(() => {});
+  }
+}
+
+// Stats live only in memory behind a ~400ms debounce, so a round finished right
+// before Spotify closes would be lost. Flush on the way out: visibilitychange→
+// hidden fires while the page is still alive (best chance to complete the PUT);
+// pagehide is the last-ditch. Guarded so the DOM-less test env is untouched.
+if (typeof window !== "undefined") {
+  window.addEventListener("pagehide", flushStats);
+  if (typeof document !== "undefined") {
+    document.addEventListener("visibilitychange", () => {
+      if (document.visibilityState === "hidden") flushStats();
+    });
+  }
 }
