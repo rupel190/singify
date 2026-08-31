@@ -6,8 +6,9 @@
  * just accumulates and aggregates. Kept free of Spicetify/React so the harness
  * can drive a whole session with synthetic completions.
  *
- * MULTIPLAYER-SHAPED: a round already holds a LIST of per-player scores (length
- * 1 today). When hotseat / multi-mic land, more entries slot in with no rewrite.
+ * MULTIPLAYER: a round holds one score entry per player. Hotseat (one mic, the
+ * singer rotating by round) and multi-mic (a device per player) both land here
+ * in the same shape — the aggregates below don't care which one produced them.
  */
 
 import { gradeForScore, type Grade, type ScoreState } from "./scoring";
