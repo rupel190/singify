@@ -59,16 +59,18 @@ auto-resolve, sessions and the localhost helper all work end-to-end.
 | `src/scoring.ts` + result screen | ✅ beat-weighted 9000 + 1000 line bonus, golden 2×, octave-agnostic · **difficulty ±2/±1/±0** · grade tiers |
 | Sessions (`src/session.ts`, `session-view.tsx`) | ✅ multi-round, playlist-sourced, per-player scores, aggregate end-screen |
 | Config + credentials | ✅ `~/.config/singify/config.json`, loaded by the helper |
+| Stats + persistence (`stats.ts`, `persist.ts`, `server/store.ts`) | ✅ per-mic / per-singer aggregates · XDG-backed settings/offsets/stats mirrored via the helper |
 
-**Tests:** `bun test` → **169 pass** (parser + cache/resolver + pitch + scoring +
-session + helper). No live USDB calls; everything is fixture/mock/synthetic-tone.
+**Tests:** `bun test` → **182 pass** (parser + cache/resolver + pitch + scoring +
+session + stats + store + helper). No live USDB calls; everything is
+fixture/mock/synthetic-tone.
 
 ## Dev workflow
 
 ```bash
 nix develop            # or `direnv allow` once, then it auto-loads (flake.nix)
 bun install            # first time only
-bun test               # 169 tests
+bun test               # 182 tests
 bun run dev            # browser harness → http://localhost:3000 (or next free port)
 bun run helper         # localhost bridge → http://127.0.0.1:4455 (USDB + cache)
 bun run build          # bundle → dist/karaoke.js
@@ -108,13 +110,25 @@ the level and smears pitch. `getUserMedia` constraints are advisory, so `mic.ts`
 reads back `track.getSettings()` and exposes it as `MicPitch.applied` (shown in the
 harness Debug overlay).
 
-## Cache layout
+## Where things live
+
+Split by XDG class, so a `~/.cache` wipe only ever costs re-downloadable charts:
 
 ```
-~/.cache/singify/          ← XDG_CACHE_HOME; regenerable, safe to wipe
+~/.cache/singify/           ← regenerable: chart downloads
   songs/Artist - Title [USDB-12345].txt
-  cache.json    ← { [spotifyTrackId]: "./songs/Artist - Title [USDB-12345].txt" }
+  cache.json                ← { [spotifyTrackId]: "./songs/…txt" }
+~/.config/singify/          ← config: USDB creds + in-game settings
+  config.json               ← usdbUser / usdbPass / port / cacheDir / chartsDir
+  settings.json             ← mic gear, difficulty, gates, hit-line
+~/.local/share/singify/     ← durable data (survives a cache wipe)
+  offsets.json              ← per-track punch-ins
+  stats.json                ← round history (drives the 📊 Stats screen)
 ```
+
+localStorage stays the live store (it works with the helper off); the helper
+mirrors the durable parts to these files (`/store/:name`) and reseeds localStorage
+after a Spotify-profile wipe.
 
 ## The localhost helper (`server/helper.ts`)
 
@@ -130,6 +144,8 @@ thin `fetch` clients (`src/resolver-client.ts`) with the *same signatures* as
 GET  /health                        → { ok, hasCredentials }
 GET  /resolve?trackId&artist&title  → ResolveResult
 POST /pick { trackId, candidate }   → { song }
+GET  /store/:name                   → the settings / offsets / stats doc
+PUT  /store/:name                   → replace it (settings | offsets | stats)
 ```
 
 The helper owns the one thing the resolver won't: credentials. It logs in lazily
@@ -175,5 +191,3 @@ unpushed build with `nh os switch -- --override-input singify git+file:///path/t
   them as pitch-agnostic notes so the lyrics still scroll.
 - **Optional "live resolve" in the harness** — point the browser harness at the
   running helper so real charts render in-browser (today it uses mock candidates).
-- **Per-song / per-mic stats** — persist finished rounds (player, mic settings,
-  score) to reason about which setup performs best.

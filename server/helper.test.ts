@@ -208,3 +208,45 @@ describe("helper handler", () => {
     expect(res.status).toBe(404);
   });
 });
+
+describe("helper store routes", () => {
+  const mem = new Map<string, unknown>();
+  const known = (name: string) => name === "stats" || name === "settings";
+  const storeDeps: HandlerDeps = {
+    ...baseDeps,
+    readStore: async (name) => (known(name) ? (mem.get(name) ?? {}) : undefined),
+    writeStore: async (name, data) => {
+      if (!known(name)) return false;
+      mem.set(name, data);
+      return true;
+    },
+  };
+
+  test("GET /store/:name returns the stored doc", async () => {
+    mem.set("settings", { "singify:difficulty": "hard" });
+    const res = await createHandler(storeDeps)(req("GET", "/store/settings"));
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ "singify:difficulty": "hard" });
+  });
+
+  test("PUT /store/:name writes and echoes ok", async () => {
+    const res = await createHandler(storeDeps)(req("PUT", "/store/stats", { rounds: [1] }));
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ ok: true });
+    expect(mem.get("stats")).toEqual({ rounds: [1] });
+  });
+
+  test("unknown store name is rejected (never a filesystem path) → 404", async () => {
+    expect((await createHandler(storeDeps)(req("GET", "/store/evil"))).status).toBe(404);
+    expect((await createHandler(storeDeps)(req("PUT", "/store/evil", {}))).status).toBe(404);
+  });
+
+  test("PUT with an invalid JSON body → 400", async () => {
+    const bad = new Request("http://127.0.0.1:4455/store/stats", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: "{ not json",
+    });
+    expect((await createHandler(storeDeps)(bad)).status).toBe(400);
+  });
+});

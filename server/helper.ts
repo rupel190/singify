@@ -42,6 +42,10 @@ export interface HandlerDeps {
   /** Force a fresh USDB search (skips local + cache) for the re-choose flow. */
   searchForTrack: (artist: string, title: string) => Promise<ResolveResult>;
   confirmPick: (trackId: string, candidate: USDBSong) => Promise<ParsedSong>;
+  /** Read a whitelisted XDG-backed document store; undefined = unknown name. */
+  readStore?: (name: string) => Promise<unknown | undefined>;
+  /** Write a whitelisted XDG-backed document store; false = unknown name. */
+  writeStore?: (name: string, data: unknown) => Promise<boolean>;
 }
 
 const CORS: Record<string, string> = {
@@ -120,6 +124,23 @@ export function createHandler(
         return json(result);
       }
 
+      // XDG-backed key/value stores (settings / offsets / stats) for the
+      // renderer, which can't touch disk itself. The store module owns the
+      // name→file whitelist, so `name` here is never a filesystem path.
+      if (url.pathname.startsWith("/store/")) {
+        const name = decodeURIComponent(url.pathname.slice("/store/".length));
+        if (req.method === "GET" && deps.readStore) {
+          const data = await deps.readStore(name);
+          return data === undefined ? json({ error: "unknown store" }, 404) : json(data);
+        }
+        if (req.method === "PUT" && deps.writeStore) {
+          const body = (await req.json().catch(() => undefined)) as unknown;
+          if (body === undefined) return json({ error: "invalid JSON body" }, 400);
+          const ok = await deps.writeStore(name, body);
+          return ok ? json({ ok: true }) : json({ error: "unknown store" }, 404);
+        }
+      }
+
       if (url.pathname === "/pick" && req.method === "POST") {
         const body = (await req.json().catch(() => null)) as {
           trackId?: string;
@@ -169,6 +190,7 @@ async function startHelper(): Promise<void> {
   );
   const { setCacheDir, getCacheDir } = await import("../src/cache");
   const { createLocalCharts } = await import("./local-charts");
+  const { readStore, writeStore } = await import("./store");
 
   const cfg = loadConfig();
   if (cfg.cacheDir) setCacheDir(cfg.cacheDir);
@@ -195,6 +217,8 @@ async function startHelper(): Promise<void> {
     resolveForTrack,
     searchForTrack,
     confirmPick,
+    readStore,
+    writeStore,
   });
 
   const server = Bun.serve({ port: cfg.port, fetch: handler });

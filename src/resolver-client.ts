@@ -54,6 +54,29 @@ export async function confirmPick(
   return song;
 }
 
+// ── XDG-backed document stores (settings / offsets / stats) ──────────────────
+//
+// The renderer keeps its live state in localStorage (fast, always there) but
+// mirrors the durable parts up to disk through the helper — see src/persist.ts.
+// These are the raw transport; persist.ts owns what goes in each store.
+
+/** GET a helper store as a plain object; `{}` when empty. */
+export async function loadStore<T = Record<string, unknown>>(name: string): Promise<T> {
+  const res = await fetch(`${HELPER_BASE}/store/${encodeURIComponent(name)}`);
+  if (!res.ok) throw new Error(await errorMessage(res));
+  return (await res.json()) as T;
+}
+
+/** PUT a helper store. Rejects if the helper is unreachable (caller decides). */
+export async function saveStore(name: string, data: unknown): Promise<void> {
+  const res = await fetch(`${HELPER_BASE}/store/${encodeURIComponent(name)}`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(data),
+  });
+  if (!res.ok) throw new Error(await errorMessage(res));
+}
+
 export interface HelperHealth {
   ok: boolean;
   hasCredentials: boolean;

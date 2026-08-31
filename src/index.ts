@@ -60,6 +60,15 @@ import {
   type AudioOutput,
 } from "./mic";
 import { resolveForTrack, confirmPick } from "./resolver-client";
+import { StatsScreen } from "./stats-view";
+import type { StatRound } from "./stats";
+import {
+  mirrorSettings,
+  mirrorOffsets,
+  seedFromHelper,
+  recordStatRound,
+  loadStatRounds,
+} from "./persist";
 import { sensitivityToThreshold, thresholdToSensitivity } from "./pitch";
 import type { Difficulty } from "./scoring";
 import { UI_SCALE } from "./ui-scale";
@@ -150,6 +159,7 @@ function setOffset(next: number): void {
   } catch {
     /* storage blocked — keep the in-memory value */
   }
+  mirrorOffsets(); // durable copy → ~/.local/share/singify/offsets.json
   showOffset();
 }
 
@@ -488,6 +498,7 @@ function setNowLineNudge(next: number): void {
   } catch {
     /* storage blocked — keep the in-memory value */
   }
+  mirrorSettings();
   const sign = nowLineNudge > 0 ? "+" : "";
   showReadout(`Hit-line ${sign}${nowLineNudge}px`);
   if (visible) renderOverlay();
@@ -499,6 +510,7 @@ function setDifficulty(next: Difficulty): void {
   } catch {
     /* storage blocked — keep the in-memory value */
   }
+  mirrorSettings();
   showReadout(`Difficulty: ${next}`);
   if (visible) renderOverlay();
 }
@@ -536,6 +548,7 @@ function saveMicSlots(roster: PlayerSlot[]): void {
   } catch {
     /* storage blocked — the in-memory roster still holds the values */
   }
+  mirrorSettings(); // durable copy → ~/.config/singify/settings.json
 }
 
 /** Legacy per-slot gates (pre-micSlots) — still read as a fallback. */
@@ -615,7 +628,7 @@ let currentSong: ParsedSong | null = null;
 let visible = false;
 // Which screen the overlay shows. "sing" is the karaoke surface (Q / Quick Sing,
 // today's behaviour); the rest are the session flow.
-type Screen = "home" | "sing" | "session-setup" | "round-end" | "session-result";
+type Screen = "home" | "sing" | "session-setup" | "round-end" | "session-result" | "stats";
 // NB: named `activeScreen`, NOT `screen`. Spicetify loads this bundle as a classic
 // <script>, so a top-level `let screen` binds in the GLOBAL lexical scope and shadows
 // window.screen for the entire page. Spotify's own hooks then run
@@ -665,6 +678,9 @@ let playlistsLoading = false;
 // lets you sing along in Spotify without a USDB account. While set, songchange
 // won't overwrite the chart (reload the client to go back to auto-resolve).
 let manualChart = false;
+
+// Round history for the 📊 Stats screen — loaded from the helper when it opens.
+let statRounds: StatRound[] = [];
 
 // Picker state — set when resolveForTrack returns candidates to choose from.
 let currentTrackId: string | null = null;
@@ -756,6 +772,20 @@ function renderOverlay(): void {
           renderOverlay();
         },
         onStartSession: openSessionSetup,
+        onStats: openStats,
+      })
+    );
+    return;
+  }
+
+  if (activeScreen === "stats") {
+    renderScaled(
+      React.createElement(StatsScreen, {
+        rounds: statRounds,
+        onBack: () => {
+          activeScreen = "home";
+          renderOverlay();
+        },
       })
     );
     return;
@@ -1037,6 +1067,17 @@ function openHome(): void {
   setVisible(true);
 }
 
+// 📊 Stats — show the screen immediately (empty), then fill it once the round
+// history comes back from the helper (async; empty state if it's not running).
+function openStats(): void {
+  activeScreen = "stats";
+  setVisible(true);
+  void loadStatRounds().then((rounds) => {
+    statRounds = rounds;
+    if (activeScreen === "stats") renderOverlay();
+  });
+}
+
 // ── Sessions (multi-round) ───────────────────────────────────────────────────
 
 /** Per-player running totals across completed rounds, in roster order. */
@@ -1179,6 +1220,20 @@ async function startPlaylistSession(ref: PlaylistRef): Promise<void> {
   }
 }
 
+/** Which roster slot (hence which mic) produced a given round score. Scores from
+ *  KaraokeView carry id `mic<i>`, indexing straight back into the active roster. */
+function rosterSlotForScore(s: PlayerRoundScore): PlayerSlot | undefined {
+  const m = s.id.match(/^mic(\d+)$/);
+  if (m) return activeRoster()[Number(m[1])];
+  return activeRoster().find((p) => p.name === s.name);
+}
+
+/** Human-readable mic label for a slot (resolved device name, or the default). */
+function micLabelFor(slot: PlayerSlot | undefined): string {
+  if (!slot?.deviceId) return "Default mic";
+  return audioInputs.find((d) => d.deviceId === slot.deviceId)?.label ?? "Custom mic";
+}
+
 /** Fired by KaraokeView when a song finishes while scoring — records the round.
  *  scores has one entry (hotseat, this round's singer) or N (versus). */
 function onRoundComplete(scores: PlayerRoundScore[]): void {
@@ -1186,6 +1241,25 @@ function onRoundComplete(scores: PlayerRoundScore[]): void {
   if (scoredTrackIds.has(currentTrackId)) return; // one round per song
   if (scores.length === 0) return;
   scoredTrackIds.add(currentTrackId);
+
+  // Persist the round for cross-session stats — each singer tagged with the mic
+  // (device + gain + gate) they sang on, so gear can be compared over time.
+  recordStatRound({
+    t: Date.now(),
+    title: currentSong.headers.title,
+    artist: currentSong.headers.artist,
+    difficulty,
+    players: scores.map((s) => {
+      const slot = rosterSlotForScore(s);
+      return {
+        name: s.name,
+        score: s.score.total,
+        device: micLabelFor(slot),
+        gain: slot?.gain ?? 1,
+        sensitivity: slot?.sensitivity ?? sensitivity,
+      };
+    }),
+  });
   const r = roundFromScores(
     currentSong.headers.title,
     currentSong.headers.artist,
@@ -1228,6 +1302,7 @@ function setAutoSkip(on: boolean): void {
   } catch {
     /* storage blocked — keep the in-memory value */
   }
+  mirrorSettings();
   if (visible) renderOverlay();
 }
 
@@ -1457,6 +1532,27 @@ async function main(): Promise<void> {
     await new Promise((r) => setTimeout(r, 100));
   }
   await new Promise((r) => setTimeout(r, 500));
+
+  // Restore durable state (offsets, in-game settings) from disk when this
+  // profile's localStorage was wiped — non-blocking, and a no-op in the normal
+  // case (localStorage already has everything). Only when it actually restored
+  // something do we re-pull the live knobs read at module load and rebuild the
+  // rosters, so a wipe-recovery takes effect without a relaunch.
+  void seedFromHelper().then((restored) => {
+    if (restored.length === 0) return;
+    defaultOffset = readNum(DEFAULT_OFFSET_KEY) ?? 0;
+    offsetMs = loadOffsetForTrack(currentTrackId);
+    sensitivity = loadSensitivity();
+    difficulty = loadDifficulty();
+    nowLineNudge = loadNowLineNudge();
+    autoSkipNoChart = localStorage.getItem(AUTOSKIP_KEY) === "1";
+    if (!session && mics.length === 0) {
+      soloRoster = [newSlot(0, "P1")];
+      setupRoster = [newSlot(0, "P1")];
+      sessionRoster = [newSlot(0, "P1")];
+    }
+    if (visible) renderOverlay();
+  });
 
   Spicetify.Player.addEventListener("onprogress", onProgress);
   Spicetify.Player.addEventListener("onplaypause", onPlayPause);
