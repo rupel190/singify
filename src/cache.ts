@@ -4,7 +4,7 @@
  * Maps Spotify track IDs (or URIs) to local UltraStar .txt files so USDB is
  * only hit once per song. Layout:
  *
- *   ~/spicetify-karaoke/
+ *   ~/singify/
  *     songs/
  *       Artist - Title [USDB-12345].txt
  *     cache.json    ← { [spotifyTrackId]: "./songs/Artist - Title [USDB-12345].txt" }
@@ -28,10 +28,10 @@ import { parse, type ParsedSong } from "./ultrastar-parser";
 // ── Paths (overridable for tests) ────────────────────────────────────────────
 
 // The download cache is regenerable, so it belongs under XDG_CACHE_HOME
-// (~/.cache) rather than a bare ~/spicetify-karaoke dir.
+// (~/.cache) rather than a bare ~/singify dir.
 function defaultCacheDir(): string {
   const xdg = process.env.XDG_CACHE_HOME || join(homedir(), ".cache");
-  return join(xdg, "spicetify-karaoke");
+  return join(xdg, "singify");
 }
 
 let baseDir = defaultCacheDir();

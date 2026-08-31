@@ -139,7 +139,7 @@ export function createHandler(
           {
             error: "no-credentials",
             message:
-              'USDB credentials not configured. Create ~/.config/spicetify-karaoke/config.json with { "usdbUser": "…", "usdbPass": "…" }.',
+              'USDB credentials not configured. Create ~/.config/singify/config.json with { "usdbUser": "…", "usdbPass": "…" }.',
           },
           503
         );

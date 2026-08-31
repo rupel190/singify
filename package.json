@@ -1,5 +1,5 @@
 {
-  "name": "spicetify-karaoke",
+  "name": "singify",
   "version": "0.1.0",
   "description": "UltraStar karaoke inside Spotify via Spicetify",
   "type": "module",

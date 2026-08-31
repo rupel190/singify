@@ -1,7 +1,7 @@
 /**
  * config.ts — helper configuration.
  *
- * Reads ~/.config/spicetify-karaoke/config.json, with environment-variable
+ * Reads ~/.config/singify/config.json, with environment-variable
  * overrides (handy for dev without writing a file). All fields optional; the
  * server still starts without credentials (so /health works and the user gets
  * a clear message) — it just can't reach USDB until they're set.
@@ -14,7 +14,7 @@
  * non-existent ones are skipped — so you can point at a stable home dir AND a
  * dev repo dir and whichever exists contributes. Env override
  * SINGIFY_CHARTS_DIR is colon-separated (PATH-style). Defaults to
- * ~/.config/spicetify-karaoke/charts plus ./charts (relative to launch dir).
+ * ~/.config/singify/charts plus ./charts (relative to launch dir).
  */
 
 import { homedir } from "node:os";
@@ -40,7 +40,7 @@ export interface HelperConfig {
 export const DEFAULT_PORT = 4455;
 
 export function configPath(): string {
-  return join(homedir(), ".config", "spicetify-karaoke", "config.json");
+  return join(homedir(), ".config", "singify", "config.json");
 }
 
 /** Absolute default chart folders, in scan order: stable home first, repo dir second. */
@@ -48,7 +48,7 @@ function defaultChartsDirs(): string[] {
   // Curated charts are precious user data → XDG_DATA_HOME (~/.local/share).
   const dataHome = process.env.XDG_DATA_HOME || join(homedir(), ".local", "share");
   return [
-    join(dataHome, "spicetify-karaoke", "charts"),
+    join(dataHome, "singify", "charts"),
     join(process.cwd(), "charts"),
   ];
 }

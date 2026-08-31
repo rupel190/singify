@@ -3,7 +3,7 @@
   "configVersion": 1,
   "workspaces": {
     "": {
-      "name": "spicetify-karaoke",
+      "name": "singify",
       "devDependencies": {
         "@types/bun": "latest",
         "@types/react": "^19.2.17",
