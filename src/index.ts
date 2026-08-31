@@ -7,7 +7,7 @@
  * sings the current track.
  *
  * NOTE (real-runtime, stage 2): the cache layer (src/cache.ts) uses node:fs to
- * persist songs under ~/spicetify-karaoke/. That requires a Node-capable
+ * persist songs under ~/singify/. That requires a Node-capable
  * context; in a sandboxed renderer it must be reached via a preload bridge or
  * the Electron main process. For browser-harness development we exercise
  * <KaraokeView> directly with a fixture song and never touch the cache.
@@ -29,6 +29,7 @@ import {
   RoundEnd,
   SessionResultScreen,
   NoChartInSession,
+  HelperDownNotice,
   type PlayerSlot,
 } from "./session-view";
 import {
@@ -670,6 +671,11 @@ let currentTrackId: string | null = null;
 // True while a chart lookup for the current track is in flight — lets the
 // session no-chart card distinguish "still looking" from "searched, none found".
 let resolving = false;
+// Set when the last lookup failed because the helper was unreachable (fetch
+// refused). The overlay's no-chart surface reads this to explain the REAL reason
+// — "the helper isn't running" — instead of blaming the track. It's the actual
+// cause even for cached songs, since the cache lives behind the helper.
+let helperDown = false;
 let pickerQuery: { artist?: string; title?: string } | null = null;
 let pickerCandidates: USDBSong[] | null = null;
 let pickPending: number | null = null;
@@ -880,21 +886,28 @@ function renderOverlay(): void {
             onSkip: skipRound,
             onReChoose: () => void reSearch(),
             searched: !resolving,
+            helperDown,
           })
-        : React.createElement(
-            "div",
-            {
-              style: {
-                display: "flex",
-                height: "100%",
-                alignItems: "center",
-                justifyContent: "center",
-                color: "#c8c8c8",
-                fontSize: 20,
+        : helperDown
+          ? React.createElement(HelperDownNotice, {
+              title: currentTitle(),
+              artist: currentArtist(),
+              onReChoose: () => void reSearch(),
+            })
+          : React.createElement(
+              "div",
+              {
+                style: {
+                  display: "flex",
+                  height: "100%",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  color: "#c8c8c8",
+                  fontSize: 20,
+                },
               },
-            },
-            "No karaoke chart for this track."
-          );
+              "No karaoke chart for this track."
+            );
 
   // Live level meters ride over the karaoke surface in BOTH modes as one centred
   // banner, so a singer can watch their level against the gate mid-song. A
@@ -1313,6 +1326,7 @@ async function onSongChange(): Promise<void> {
 
   try {
     const res = await resolveForTrack(item.uri, artist, title);
+    helperDown = false; // the fetch returned at all — the helper is up
     if (
       res.status === "cached" ||
       res.status === "downloaded" ||
@@ -1337,13 +1351,17 @@ async function onSongChange(): Promise<void> {
   } catch (err) {
     console.error("[singify] resolve failed:", err);
     // A TypeError from fetch means the helper isn't reachable (connection
-    // refused) — the most likely first-run cause. Anything else is a real
-    // lookup error from the helper, so show its message.
-    const msg =
-      err instanceof TypeError
-        ? "Karaoke helper not running — start it with `bun run helper`"
-        : `Karaoke lookup failed: ${err instanceof Error ? err.message : String(err)}`;
-    Spicetify.showNotification?.(msg, true);
+    // refused) — the most likely first-run cause. That case gets NO background
+    // toast: it surfaces as a persistent caution INSIDE the overlay instead, so
+    // it only tells you when you're actually looking. Any other error is a real
+    // lookup failure from the helper, worth a toast.
+    helperDown = err instanceof TypeError;
+    if (!helperDown) {
+      Spicetify.showNotification?.(
+        `Karaoke lookup failed: ${err instanceof Error ? err.message : String(err)}`,
+        true
+      );
+    }
   } finally {
     resolving = false; // lookup settled (found, picker, or nothing)
   }
@@ -1393,6 +1411,7 @@ async function reSearch(): Promise<void> {
 
   try {
     const res = await resolveForTrack(item.uri, artist, title, true);
+    helperDown = false; // the fetch returned — the helper is up
     if (res.status === "needsPicker") {
       pickerQuery = { artist, title };
       pickerCandidates = res.candidates;
@@ -1400,11 +1419,15 @@ async function reSearch(): Promise<void> {
       Spicetify.showNotification?.(`No USDB matches for “${title}”`);
     }
   } catch (err) {
-    const msg =
-      err instanceof TypeError
-        ? "Karaoke helper not running — start it with `bun run helper`"
-        : `Search failed: ${err instanceof Error ? err.message : String(err)}`;
-    Spicetify.showNotification?.(msg, true);
+    // Helper unreachable → let the in-overlay caution box carry it (we're on the
+    // sing surface here anyway); any other failure is worth a toast.
+    helperDown = err instanceof TypeError;
+    if (!helperDown) {
+      Spicetify.showNotification?.(
+        `Search failed: ${err instanceof Error ? err.message : String(err)}`,
+        true
+      );
+    }
   } finally {
     resolving = false;
   }
@@ -1439,8 +1462,10 @@ async function main(): Promise<void> {
   Spicetify.Player.addEventListener("onplaypause", onPlayPause);
   Spicetify.Player.addEventListener("songchange", () => void onSongChange());
 
-  // Topbar entry point for the menu — the same door as the K hotkey. Typed
-  // loosely — Spicetify.Topbar isn't in our .d.ts and may be absent on old builds.
+  // Menu entry point — the same door as the K hotkey. Prefer the PLAYBAR (the
+  // bottom-right control cluster next to the lyrics / queue / device / mic icons)
+  // so it sits where the eye already goes for "extras"; fall back to the Topbar on
+  // older builds. Typed loosely — neither API is in our .d.ts.
   const S = Spicetify as unknown as {
     Topbar?: {
       Button: new (
@@ -1450,8 +1475,34 @@ async function main(): Promise<void> {
         disabled?: boolean
       ) => unknown;
     };
+    Playbar?: {
+      Button: new (
+        label: string,
+        icon: string,
+        onClick: (self?: unknown) => void,
+        disabled?: boolean,
+        active?: boolean
+      ) => { element?: HTMLElement };
+    };
   };
-  if (S.Topbar?.Button) {
+  // A mic glyph. Playbar.Button accepts a raw <svg> for the icon; we size it up
+  // and give it horizontal breathing room via a scoped stylesheet below, so it
+  // reads as its own control instead of crowding Spotify's icons.
+  const MIC_ICON =
+    '<svg role="img" height="16" width="16" viewBox="0 0 24 24" fill="currentColor">' +
+    '<path d="M12 15a3 3 0 0 0 3-3V6a3 3 0 0 0-6 0v6a3 3 0 0 0 3 3zm6-3a6 6 0 0 1-5 5.916V21h2a1 1 0 1 1 0 2H9a1 1 0 1 1 0-2h2v-3.084A6 6 0 0 1 6 12a1 1 0 1 1 2 0 4 4 0 0 0 8 0 1 1 0 1 1 2 0z"/></svg>';
+  if (S.Playbar?.Button) {
+    if (!document.getElementById("singify-btn-css")) {
+      const style = document.createElement("style");
+      style.id = "singify-btn-css";
+      // Bigger icon + more spacing — scoped to OUR button so Spotify's own stay put.
+      style.textContent =
+        ".singify-playbar-btn{margin-inline:8px}.singify-playbar-btn svg{width:22px;height:22px}";
+      document.head.appendChild(style);
+    }
+    const btn = new S.Playbar.Button("Singify — sessions (K)", MIC_ICON, () => openHome());
+    btn.element?.classList.add("singify-playbar-btn");
+  } else if (S.Topbar?.Button) {
     new S.Topbar.Button("Singify sessions", "gamepad", () => openHome());
   }
 

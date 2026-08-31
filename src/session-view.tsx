@@ -860,9 +860,15 @@ export function NoChartInSession(props: {
   onReChoose: () => void;
   /** True once we've searched and found nothing (vs still looking). */
   searched: boolean;
+  /** The helper is unreachable — the real reason there's "no chart". */
+  helperDown?: boolean;
 }) {
   const React = Spicetify.React;
-  const { title, artist, onSkip, onReChoose, searched } = props;
+  const { title, artist, onSkip, onReChoose, searched, helperDown } = props;
+  // A down helper is the actual cause — say so instead of blaming the track.
+  if (helperDown) {
+    return <HelperDownNotice title={title} artist={artist} onSkip={onSkip} onReChoose={onReChoose} />;
+  }
   return (
     <Center zoom={3}>
       <div style={{ fontSize: 40 }}>🎤</div>
@@ -880,6 +886,79 @@ export function NoChartInSession(props: {
           <button style={ghostBtn(React)} onClick={onReChoose}>
             🔎 Re-choose (R)
           </button>
+        </div>
+      )}
+    </Center>
+  );
+}
+
+// ── Helper-down caution ──────────────────────────────────────────────────────
+//
+// The overlay says "no karaoke chart" whenever a lookup comes back empty — but
+// the most common first-run cause is that the localhost helper simply isn't
+// running, and (surprising the first time) that also blanks *cached* songs,
+// because the cache lives on disk behind the helper and the renderer has no
+// filesystem of its own. So when a resolve fails because the helper is
+// unreachable, show THIS instead of the generic "no chart" — a persistent,
+// in-overlay caution that names the real reason, rather than a background toast
+// that fires whether or not you're looking.
+export function HelperDownNotice(props: {
+  title?: string;
+  artist?: string;
+  onSkip?: () => void;
+  onReChoose?: () => void;
+}) {
+  const React = Spicetify.React;
+  const { title, artist, onSkip, onReChoose } = props;
+  return (
+    <Center zoom={2.4}>
+      <div style={{ fontSize: 48 }}>⚠️</div>
+      <div style={{ fontSize: 26, fontWeight: 800, color: "#e6b422" }}>
+        Karaoke helper isn't running
+      </div>
+      <div
+        style={{
+          fontSize: 17,
+          color: "rgba(255,255,255,0.7)",
+          maxWidth: 560,
+          textAlign: "center",
+          lineHeight: 1.45,
+        }}
+      >
+        Charts load through the local helper — even songs you've already sung and
+        cached. Start it in a terminal, then it'll pick this track up:
+      </div>
+      <code
+        style={{
+          marginTop: 4,
+          padding: "8px 16px",
+          borderRadius: 10,
+          background: "rgba(255,255,255,0.06)",
+          border: "1px solid rgba(255,255,255,0.12)",
+          fontFamily: "ui-monospace, SFMono-Regular, monospace",
+          fontSize: 18,
+          color: "#fff",
+        }}
+      >
+        bun run helper
+      </code>
+      {(title || artist) && (
+        <div style={{ fontSize: 15, color: "rgba(255,255,255,0.5)", marginTop: 4 }}>
+          {[artist, title].filter(Boolean).join(" — ")}
+        </div>
+      )}
+      {(onSkip || onReChoose) && (
+        <div style={{ display: "flex", gap: 12, marginTop: 18 }}>
+          {onReChoose && (
+            <button style={primaryBtn(React)} onClick={onReChoose}>
+              ↻ Try again (R)
+            </button>
+          )}
+          {onSkip && (
+            <button style={ghostBtn(React)} onClick={onSkip}>
+              ⏭ Skip to next song
+            </button>
+          )}
         </div>
       )}
     </Center>

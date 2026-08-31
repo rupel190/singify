@@ -1,10 +1,18 @@
 # Spicetify Karaoke (singify)
 
-UltraStar karaoke inside Spotify via Spicetify. When a song plays, it fetches the
-matching UltraStar `.txt` from USDB, parses it, and renders a syllable-highlighted
-lyric scroll + pitch lane in a fullscreen overlay.
+UltraStar karaoke **inside Spotify**, via Spicetify. When a song plays, singify
+fetches the matching UltraStar `.txt` from USDB, parses it, and renders a
+syllable-highlighted lyric scroll + pitch highway in a fullscreen overlay — then
+scores your singing off the mic, solo or 1–4 players head-to-head.
 
 **Stack:** Bun · TypeScript · Spicetify (Electron/Chromium renderer) · Linux (NixOS)
+
+## Screenshots
+
+| | |
+| --- | --- |
+| ![Solo stage](docs/stage-solo.png)<br>**Solo stage** — pitch highway, live score, per-syllable lyric wipe, golden notes | ![Versus](docs/stage-versus.png)<br>**1–4 players** — one coloured lane each, per-player score + mic |
+| ![Session setup](docs/session-setup.png)<br>**Start a session** — roster, playlist, difficulty, round count | ![Results](docs/result.png)<br>**Session results** — winner, star tiers, per-song breakdown |
 
 ## Why not fork an existing engine?
 
@@ -29,87 +37,81 @@ ports-and-adapters split:
   - `src/index.ts` — Spotify: uses Spotify's injected React, interpolates the
     clock from `Player` events, resolves real charts.
 
-Add UI features once (in the core) and both hosts get them for free.
+Add a UI feature once (in the core) and both hosts get it for free. Every
+screenshot above was captured straight from the browser harness.
 
 ## Status
 
+singify **runs live in a real Spotify client**: mic scoring, lyric scroll, USDB
+auto-resolve, sessions and the localhost helper all work end-to-end.
+
 | Module | State |
 | --- | --- |
-| `src/ultrastar-parser.ts` | ✅ UltraStar `.txt` parser (headers, beats→ms, RELATIVE, note types) · tested |
-| `src/usdb.ts` | ✅ USDB client (login, search-scrape, downloadTxt) · tested · ⚠️ Node-only auth (see below) |
-| `src/cache.ts` | ✅ Query sanitisation, fuzzy matching, on-disk song cache · tested · ⚠️ uses `node:fs` |
-| `src/resolver.ts` | ✅ cache + USDB resolution flow, session-expiry handling · tested |
-| `src/karaoke-view.tsx` | ✅ Pitch lane + per-syllable lyric wipe · **browser-verified** in the harness |
-| `src/index.ts` (extension) | ✅ clock, overlay, `songchange` wiring, hotkeys · ⚠️ **not yet proven in a live Spotify client** |
-| `server/helper.ts` (localhost bridge) | ✅ Bun HTTP server wrapping resolver/usdb/cache · CORS · lazy login + retry · tested · needs a USDB account to resolve for real |
+| `src/ultrastar-parser.ts` | ✅ headers, beats→ms, RELATIVE, `:`/`*`/`F` notes · tested (rap `R`/`G` not yet parsed — see below) |
+| `src/usdb.ts` | ✅ USDB client (login, search-scrape, downloadTxt) · tested · runs in the helper |
+| `src/cache.ts` | ✅ query sanitisation, fuzzy matching, on-disk song cache · tested |
+| `src/resolver.ts` | ✅ cache + USDB flow, session-expiry re-login · tested |
+| `src/karaoke-view.tsx` | ✅ pitch highway + per-syllable wipe + coloured versus lanes · browser + **live in Spotify** |
+| `src/index.ts` (extension) | ✅ clock, overlay, `songchange`, hotkeys, sessions · **live in Spotify** |
+| `server/helper.ts` (localhost bridge) | ✅ Bun HTTP server wrapping resolver/usdb/cache · CORS · lazy login + retry · has a USDB account |
 | `src/resolver-client.ts` (thin client) | ✅ browser/Spotify side; same signatures as `resolver.ts`, fetches the helper |
-| Lyric offset (audio-sync knob) | ✅ `[` / `]` / `\` in Spotify, buttons in the harness |
-| `src/song-picker.tsx` (candidate chooser) | ✅ browser-verified in the harness · wired into both hosts |
-| `src/pitch.ts` (pitch detection) | ✅ autocorrelation f0 + Hz↔MIDI↔pitch-class + marker smoother (median → EMA) · tested |
-| `src/mic.ts` + live pitch marker | ✅ getUserMedia → detectPitch → smoothed marker on the lane · needs a mic to feel |
-| `src/scoring.ts` (running score, HUD) | ✅ beat-weighted note points + line bonus, golden 2×, octave-agnostic · tested · HUD shows while mic is live |
-| `src/result-screen.tsx` (end-of-song) | ✅ grade tier + stars + score breakdown + "Sing again" · shows when playback passes the song end |
-| Credentials prompt + config loader | ⬜ not started |
-| Localhost helper (USDB + cache bridge) | ⬜ needed for live Spotify — see *Known runtime gap* |
+| `src/mic.ts` + live pitch marker | ✅ getUserMedia → detectPitch → smoothed marker · per-player device, gain, gate, monitor-out |
+| `src/scoring.ts` + result screen | ✅ beat-weighted 9000 + 1000 line bonus, golden 2×, octave-agnostic · **difficulty ±2/±1/±0** · grade tiers |
+| Sessions (`src/session.ts`, `session-view.tsx`) | ✅ multi-round, playlist-sourced, per-player scores, aggregate end-screen |
+| Config + credentials | ✅ `~/.config/singify/config.json`, loaded by the helper |
 
-**Tests:** `bun test` → **97 pass** (parser + cache/resolver + pitch detection + scoring + helper).
-No live USDB calls; everything is fixture/mock/synthetic-tone based.
+**Tests:** `bun test` → **169 pass** (parser + cache/resolver + pitch + scoring +
+session + helper). No live USDB calls; everything is fixture/mock/synthetic-tone.
 
 ## Dev workflow
 
 ```bash
 nix develop            # or `direnv allow` once, then it auto-loads (flake.nix)
 bun install            # first time only
-bun test               # 50 core tests
+bun test               # 169 tests
 bun run dev            # browser harness → http://localhost:3000 (or next free port)
 bun run helper         # localhost bridge → http://127.0.0.1:4455 (USDB + cache)
 bun run build          # bundle → dist/karaoke.js
 ```
 
-The harness renders `<KaraokeView>` against a fixture chart with a play/pause/seek
-transport, so you can iterate on the UI without Spotify. **Drop a real UltraStar
-`.txt` onto the stage** (or use *Load .txt…*) to test against real charts — no
-USDB account needed. Free CC-licensed charts: [UltraStar-Deluxe/songs](https://github.com/UltraStar-Deluxe/songs).
+The harness renders the real components against a fixture chart with a
+play/pause/seek transport. Deep-link any surface for dev or screenshots:
+`?screen=ingame` (add `&players=4`), `?screen=session`, `?screen=result`,
+`?screen=picker`. **Drop a real UltraStar `.txt` onto the stage** (or *Load .txt…*)
+to test against real charts — no USDB account needed. Free CC-licensed charts:
+[UltraStar-Deluxe/songs](https://github.com/UltraStar-Deluxe/songs).
 
-### Hotkeys (in Spotify) / controls (in the harness)
+### Hotkeys (in Spotify)
 
-| Action | Spotify | Harness |
-| --- | --- | --- |
-| Open the menu | `K` | — |
-| Quick Sing (karaoke overlay) | `Q` | (always shown) |
-| Nudge lyrics later / earlier | `[` / `]` (±10 ms) | −10 / +10 buttons |
-| Reset sync | `\` | ⟲ reset |
-| Choose among matches | picker overlay (press `Q`) | "Picker demo →" toggle |
-| Toggle mic (live pitch) | `M` | 🎤 Mic button |
-| Mic sensitivity − / + | `-` / `=` (±5%) | sensitivity slider |
-| Hit-line nudge ◂ / ▸ | `,` / `.` (visual only) | — |
-| Pitch diagnostics overlay | — | 🔬 Debug toggle |
+| Key | Action | Key | Action |
+| --- | --- | --- | --- |
+| `K` | Open the menu | `M` | Toggle mic(s) |
+| `Q` | Quick Sing on the current track | `L` | Load a local `.txt` chart |
+| `[` / `]` | Nudge lyrics later / earlier (±10 ms) | `P` | Punch-sync (tap on the first word) |
+| `\` | Reset sync | `R` | Re-search USDB (reopen the picker) |
+| `-` / `=` | Mic sensitivity − / + | `,` / `.` | Hit-line nudge (visual only) |
 
 The **offset** shifts the whole karaoke timeline against the audio (positive =
-lyrics fire earlier), to compensate for output latency and slightly-off UltraStar
-`GAP` values. It's a property of the *clock*, so it lives entirely in the two
-adapters — `karaoke-view.tsx` never changed to add it. In Spotify the value is
-persisted (`localStorage`); in the harness it's ephemeral.
+lyrics fire earlier), compensating for output latency and slightly-off UltraStar
+`GAP` values. It's a property of the *clock*, saved **per track**, so it lives in
+the adapters — `karaoke-view.tsx` never changed to add it.
 
-**Mic sensitivity** (0–100%) is the mirror image: it's a property of the *mic*
-port (the detector's RMS gate), so the view is again untouched. Higher = quieter
-singing is detected (home alone, fewer dropouts); lower = rejects room/crowd
-noise (party). Persisted in both hosts. The harness's 🔬 Debug overlay shows a
-live input-level meter with the gate marked, so you can dial it in visually.
+**Mic sensitivity** (0–100%) is the mirror image — a property of the *mic* port
+(the detector's RMS gate), so the view is again untouched. Higher = quieter
+singing is detected (home alone); lower = rejects room/crowd noise (party). It's
+per-player, live-adjustable from the in-game banner.
 
 **Mic capture is raw by default** — `noiseSuppression`, `echoCancellation` and
 `autoGainControl` are all off. Browser noise-suppression treats a sustained sung
 note as stationary "noise" and ducks it (held notes fade after ~1–2 s); AGC pumps
 the level and smears pitch. `getUserMedia` constraints are advisory, so `mic.ts`
-reads back `track.getSettings()` and exposes it as `MicPitch.applied` (shown in
-the Debug overlay). The harness "Raw mic" toggle flips the DSP back on to A/B it.
-Open question for the Spotify phase: enabling echo-cancel to reduce backing-track
-bleed on speakers.
+reads back `track.getSettings()` and exposes it as `MicPitch.applied` (shown in the
+harness Debug overlay).
 
 ## Cache layout
 
 ```
-~/spicetify-karaoke/
+~/.cache/singify/          ← XDG_CACHE_HOME; regenerable, safe to wipe
   songs/Artist - Title [USDB-12345].txt
   cache.json    ← { [spotifyTrackId]: "./songs/Artist - Title [USDB-12345].txt" }
 ```
@@ -120,9 +122,9 @@ Two pieces can't run inside Spotify's **Chromium renderer**: USDB auth needs rea
 `Cookie` / `Set-Cookie` headers (browsers forbid both, and usdb.animux.de sends no
 CORS), and the cache needs `node:fs`. So the tested `resolver`/`usdb`/`cache`
 modules run in **Bun**, behind a small HTTP server; the extension and harness are
-thin `fetch` clients (`src/resolver-client.ts`), which have the *same signatures*
-as `resolver.ts`. Swapping the import moved all of USDB + cache out of the
-extension bundle (57 KB → 36 KB, zero `node:fs`).
+thin `fetch` clients (`src/resolver-client.ts`) with the *same signatures* as
+`resolver.ts`. That moved all of USDB + cache out of the extension bundle (zero
+`node:fs` ships to the renderer).
 
 ```
 GET  /health                        → { ok, hasCredentials }
@@ -133,61 +135,45 @@ POST /pick { trackId, candidate }   → { song }
 The helper owns the one thing the resolver won't: credentials. It logs in lazily
 and re-logs-in + retries once on session expiry.
 
-**Config:** `~/.config/spicetify-karaoke/config.json`
+**Config:** `~/.config/singify/config.json`
 `{ "usdbUser": "…", "usdbPass": "…", "port": 4455, "cacheDir": "…" }`
-(or `SINGIFY_USDB_USER` / `SINGIFY_USDB_PASS` / `SINGIFY_PORT` env vars). Without
+(or `SINGIFY_USDB_USER` / `SINGIFY_USDB_PASS` / `SINGIFY_PORT`). Without
 credentials the server still starts and `/health` works; `/resolve` returns 503.
-Needs a USDB account to resolve for real.
 
-**Live-Spotify caveat (stage 2):** Spotify's CSP may block `fetch` to
-`127.0.0.1` from the renderer. Untested — the browser harness reaches the helper
-fine; the Spotify path may need a CSP tweak or a Spicetify-side proxy.
+> **Note:** the cache lives on disk behind the helper, so **the helper must be
+> running even for already-cached songs** — the renderer has no filesystem of its
+> own. Confirmed: Spotify's CSP *does* allow the renderer to `fetch` `127.0.0.1`,
+> so no CSP patch is needed.
 
 ## Deploying into Spotify (NixOS / spicetify-nix)
 
-This repo's owner runs Spicetify declaratively via `spicetify-nix`. singify is a
-custom extension — same shape as any other entry in `enabledExtensions`:
-
-```nix
-singify = {
-  src  = pkgs.fetchFromGitHub { owner = "rupel190"; repo = "singify"; rev = "dist"; hash = "…"; };
-  name = "karaoke.js";
-};
-```
-
-i.e. `bun run build` → publish `dist/karaoke.js` to a `dist` branch → point Nix at
-it (mirroring the existing `spicetify-visualizer` setup). No reinstall.
+This repo's owner runs Spicetify declaratively via `spicetify-nix`, where singify
+is a custom extension entry (same shape as the `spicetify-visualizer` one). Loop:
+`bun run build` → push → relock the `singify` flake input → `nh os switch`. Test an
+unpushed build with `nh os switch -- --override-input singify git+file:///path/to/singify`.
 
 ## Notable design decisions
 
 - **`saveSong(spotifyTrackId, usdbId, artist, title, txt)`** takes the Spotify
-  track id first — `cache.json` is keyed by it, so the mapping can't be populated
-  otherwise.
-- **`loadSong` is async** (`Promise<ParsedSong | null>`) — it reads from disk.
+  track id first — `cache.json` is keyed by it.
 - **`fuzzyMatch`** returns `max(editSimilarity, tokenOverlap)` — edit-similarity
-  absorbs typos, token overlap absorbs word reorders. Auto-select threshold
-  `MATCH_THRESHOLD = 0.85`.
-- **Session expiry** surfaces as a typed `SessionExpiredError` from the resolver
-  so the extension layer (which owns credentials) re-logs-in and retries. The
-  resolver deliberately holds no credentials.
-- **Pitch lane is DOM + CSS transform**, not canvas — a single GPU-composited
-  `translateX` moves the note track. On this project's RDNA4 GPU (which has a
-  documented habit of crashing Spotify's GPU process on the wrong path) that's
-  the safer choice as well as the cheaper one.
-- **`setCacheDir(dir)`** overrides the cache root (used by tests).
+  absorbs typos, token overlap absorbs word reorders. Auto-select threshold `0.85`.
+- **Session expiry** surfaces as a typed `SessionExpiredError` from the resolver so
+  the helper (which owns credentials) can re-login and retry. The resolver holds
+  no credentials.
+- **The pitch highway is DOM + CSS transform**, not canvas — a single
+  GPU-composited `translateX` moves the note track. On this project's RDNA4 GPU
+  (documented habit of crashing Spotify's GPU process on the wrong path) that's the
+  safer *and* cheaper choice. Everything scales via CSS `zoom` off one root
+  `UI_SCALE`, so the same layout fills a laptop or a 4K TV.
 
-## Remaining work (priority order)
+## Remaining work
 
-1. **USDB account + config** — add credentials to
-   `~/.config/spicetify-karaoke/config.json`, then resolve a real chart end-to-end
-   via `bun run helper` (the helper itself is done).
-2. **Point the harness at the helper** — optional "live resolve" mode so real
-   charts render in the browser (today it uses mock candidates).
-3. **Live-Spotify bring-up** — first `spicetify apply`; confirm the
-   overlay/clock/picker against a real track, and whether CSP allows the
-   `127.0.0.1` helper fetch.
-4. **Scoring polish** — difficulty selector (tolerance ±2/±1/±0) and rap notes
-   (`R`/`G` tokens) once the parser emits them. Core scoring, end-of-song result
-   screen, and marker smoothing are done (`src/scoring.ts`,
-   `src/result-screen.tsx`, `pitch.ts`): beat-weighted 9000 + 1000 line bonus,
-   golden 2×, octave-agnostic, live HUD, grade tiers, median+EMA marker.
+- **Rap notes (`R` / `G` tokens).** UltraStar marks rap/golden-rap syllables with
+  `R`/`G`; the parser currently matches only `:`/`*`/`F`, so those lines are
+  silently dropped (whole rap sections vanish from Deutschrap etc. charts). Parse
+  them as pitch-agnostic notes so the lyrics still scroll.
+- **Optional "live resolve" in the harness** — point the browser harness at the
+  running helper so real charts render in-browser (today it uses mock candidates).
+- **Per-song / per-mic stats** — persist finished rounds (player, mic settings,
+  score) to reason about which setup performs best.

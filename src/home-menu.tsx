@@ -51,9 +51,10 @@ export function HomeMenu(props: HomeMenuProps) {
         alignItems: "center",
         justifyContent: "center",
         gap: 28,
-        // 2× this screen; it multiplies with the root's UI_SCALE. Percentages
-        // resolve in the zoomed space, so 100% still means "fill the parent".
-        zoom: 2,
+        // ~half its former size (was 2×) — the menu opened bigger than it needed
+        // to. Multiplies with the root's UI_SCALE; percentages resolve in the
+        // zoomed space, so 100% still means "fill the parent".
+        zoom: 1,
         height: "100%",
         overflowY: "auto",
         fontFamily: "var(--font-family, 'Spotify Circular', system-ui, sans-serif)",
