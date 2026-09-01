@@ -529,30 +529,43 @@ function Lane(props: {
         style={{ position: "absolute", inset: 0, pointerEvents: "none", zIndex: 2 }}
       />
       {markerPitch != null && (
+        // Outer moves the marker VERTICALLY via transform (composited — no layout
+        // and no shadow-repaint per frame, unlike animating `top`). Inner owns the
+        // hit pop/glow, so the two transforms keep independent transitions.
         <div
           style={{
             position: "absolute",
             left: nowX - markerSize / 2,
-            top: yForMarker(markerPitch) - markerSize / 2,
+            top: 0,
             width: markerSize,
             height: markerSize,
-            borderRadius: "50%",
-            boxSizing: "border-box",
-            background: markerColor,
-            // White ring + dark rim so the indicator reads on ANY note colour —
-            // its own tinted lane included. On a hit it also pops + glows green.
-            border: `${Math.max(2, Math.round(markerSize * 0.14))}px solid #fff`,
-            boxShadow: lite
-              ? "0 0 0 2px rgba(0,0,0,0.55)" // rim only — no glow blur in GPU-lite
-              : markerHit
-                ? `0 0 ${markerSize * 1.3}px ${markerColor}, 0 0 ${markerSize / 2}px ${markerColor}, 0 0 0 2px rgba(0,0,0,0.55)`
-                : `0 0 ${markerSize * 0.8}px ${markerColor}, 0 0 0 2px rgba(0,0,0,0.55)`,
-            transform: markerHit ? "scale(1.32)" : "scale(1)",
-            transition: "top 60ms linear, transform 110ms ease, box-shadow 110ms ease, background 90ms ease",
+            transform: `translateY(${yForMarker(markerPitch) - markerSize / 2}px)`,
+            transition: "transform 60ms linear",
+            willChange: "transform",
             pointerEvents: "none",
             zIndex: 3,
           }}
-        />
+        >
+          <div
+            style={{
+              width: "100%",
+              height: "100%",
+              borderRadius: "50%",
+              boxSizing: "border-box",
+              background: markerColor,
+              // White ring + dark rim so the indicator reads on ANY note colour —
+              // its own tinted lane included. On a hit it also pops + glows green.
+              border: `${Math.max(2, Math.round(markerSize * 0.14))}px solid #fff`,
+              boxShadow: lite
+                ? "0 0 0 2px rgba(0,0,0,0.55)" // rim only — no glow blur in GPU-lite
+                : markerHit
+                  ? `0 0 ${markerSize * 1.3}px ${markerColor}, 0 0 ${markerSize / 2}px ${markerColor}, 0 0 0 2px rgba(0,0,0,0.55)`
+                  : `0 0 ${markerSize * 0.8}px ${markerColor}, 0 0 0 2px rgba(0,0,0,0.55)`,
+              transform: markerHit ? "scale(1.32)" : "scale(1)",
+              transition: "transform 110ms ease, box-shadow 110ms ease, background 90ms ease",
+            }}
+          />
+        </div>
       )}
       {score && (
         <div
