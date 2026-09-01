@@ -742,13 +742,8 @@ function ensureOverlay(): HTMLDivElement {
     position: "fixed",
     inset: "0",
     zIndex: "999",
-    // Bumped 0.94 → 0.97 so dropping the blur below doesn't let the background
-    // read through more sharply — it stays a clean dark scrim, minus the cost.
-    background: "rgba(10, 10, 14, 0.97)",
-    // No backdrop-filter: a fullscreen per-frame blur is the single heaviest GPU
-    // op here (measured ~14 ms/frame on RDNA4 at 4 lanes) and near-invisible under
-    // a 97%-opaque scrim. Removing it took 26 → ~40 fps.
-    backdropFilter: "none",
+    background: "rgba(10, 10, 14, 0.94)",
+    backdropFilter: liteFx ? "none" : "blur(6px)", // off in GPU-lite (Ctrl+G) to A/B its cost
     display: "none",
   } as CSSStyleDeclaration);
   document.body.appendChild(overlay);
@@ -1560,7 +1555,9 @@ let fpsWanted = localStorage.getItem(FPS_KEY) !== "0"; // default ON (perf-testi
 let fpsEl: HTMLDivElement | null = null;
 let fpsRaf = 0;
 let fpsLast = 0;
-let fpsEma = 16.7;
+let fpsEma = 16.7; // fast — the current reading
+let fpsAvg = 16.7; // slow (~a few seconds) — the number to A/B on, immune to scene noise
+let fpsWorst = 16.7; // decaying max frame time — worst recent frame
 
 function startFps(): void {
   if (fpsRaf) return;
@@ -1585,9 +1582,17 @@ function startFps(): void {
   fpsLast = 0;
   const tick = (): void => {
     const now = performance.now();
-    if (fpsLast) fpsEma = fpsEma * 0.9 + (now - fpsLast) * 0.1;
+    if (fpsLast) {
+      const dt = now - fpsLast;
+      fpsEma = fpsEma * 0.8 + dt * 0.2; // fast
+      fpsAvg = fpsAvg * 0.98 + dt * 0.02; // slow — steady enough to compare
+      fpsWorst = Math.max(dt, fpsWorst * 0.99); // decaying worst frame
+    }
     fpsLast = now;
-    if (fpsEl) fpsEl.textContent = `${(1000 / fpsEma).toFixed(0)} fps · ${fpsEma.toFixed(1)} ms`;
+    if (fpsEl) {
+      const f = (ms: number): string => (1000 / ms).toFixed(0);
+      fpsEl.textContent = `${f(fpsEma)} · avg ${f(fpsAvg)} · low ${f(fpsWorst)} fps`;
+    }
     fpsRaf = requestAnimationFrame(tick);
   };
   fpsRaf = requestAnimationFrame(tick);
@@ -1625,10 +1630,8 @@ let liteFx = localStorage.getItem(LITE_KEY) === "1";
 (globalThis as { __SINGIFY_LITE?: boolean }).__SINGIFY_LITE = liteFx;
 
 function applyLite(): void {
-  // The overlay backdrop blur is gone for everyone now; GPU-lite toggles the
-  // remaining karaoke-view effects (gold shimmer, marker/now-line glows) so their
-  // residual cost can still be isolated against the frame-time meter.
   (globalThis as { __SINGIFY_LITE?: boolean }).__SINGIFY_LITE = liteFx;
+  if (overlay) overlay.style.backdropFilter = liteFx ? "none" : "blur(6px)";
   if (visible) renderOverlay();
 }
 
