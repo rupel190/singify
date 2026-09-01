@@ -23,6 +23,7 @@ import { SongPicker } from "./song-picker";
 import { HomeMenu } from "./home-menu";
 import {
   SessionSetup,
+  CompetitiveSetup,
   SessionHud,
   MicOverlay,
   NowPlaying,
@@ -384,6 +385,21 @@ function setPlayerOutput(i: number, deviceId: string | undefined): void {
  * marker/HUD colour is by slot index, matching the setup-screen dots.
  */
 function activePlayers(): PlayerInput[] {
+  // Competitive: one shared mic, labelled for whoever's turn it is (the round
+  // index = how many have already sung).
+  if (competitiveMode && session) {
+    const idx = Math.min(session.rounds.length, session.players.length - 1);
+    const m = mics[0];
+    if (!m) return [];
+    return [
+      {
+        id: "mic0",
+        name: session.players[idx] ?? `P${idx + 1}`,
+        color: PLAYER_COLORS[idx % PLAYER_COLORS.length],
+        getPitchMidi: () => m.read()?.midi ?? null,
+      },
+    ];
+  }
   const roster = activeRoster();
   const out: PlayerInput[] = [];
   mics.forEach((m, i) => {
@@ -628,7 +644,14 @@ let currentSong: ParsedSong | null = null;
 let visible = false;
 // Which screen the overlay shows. "sing" is the karaoke surface (Q / Quick Sing,
 // today's behaviour); the rest are the session flow.
-type Screen = "home" | "sing" | "session-setup" | "round-end" | "session-result" | "stats";
+type Screen =
+  | "home"
+  | "sing"
+  | "session-setup"
+  | "competitive-setup"
+  | "round-end"
+  | "session-result"
+  | "stats";
 // NB: named `activeScreen`, NOT `screen`. Spicetify loads this bundle as a classic
 // <script>, so a top-level `let screen` binds in the GLOBAL lexical scope and shadows
 // window.screen for the entire page. Spotify's own hooks then run
@@ -640,6 +663,13 @@ let activeScreen: Screen = "sing";
 // choice on the setup screen; lastRound + scoredTrackIds track round bookkeeping.
 let session: Session | null = null;
 let setupRounds = 5;
+// Competitive mode: one shared mic, the SAME song replayed once per singer, then
+// scores head-to-head. It rides the session engine (each singer = one round) with
+// two twists — rounds advance by REPLAY not next-track, and the lone mic is
+// relabelled to whoever's turn it is (see activePlayers/continueSession).
+let competitiveMode = false;
+let competitors: string[] = ["P1", "P2"];
+let competitiveDevice: string | undefined;
 /** A fresh roster slot, restored from whatever slot i last used. */
 function newSlot(i: number, name: string): PlayerSlot {
   const saved = loadMicSlots()[i];
@@ -798,6 +828,7 @@ function renderOverlay(): void {
           renderOverlay();
         },
         onStartSession: openSessionSetup,
+        onCompetitive: openCompetitive,
         onStats: openStats,
       })
     );
@@ -810,6 +841,51 @@ function renderOverlay(): void {
         rounds: statRounds,
         helperDown: statsHelperDown,
         onBack: () => {
+          activeScreen = "home";
+          renderOverlay();
+        },
+      })
+    );
+    return;
+  }
+
+  if (activeScreen === "competitive-setup") {
+    const song = currentSong
+      ? {
+          title: currentSong.headers.title || currentTitle(),
+          artist: currentSong.headers.artist || currentArtist(),
+        }
+      : null;
+    renderScaled(
+      React.createElement(CompetitiveSetup, {
+        players: competitors,
+        difficulty,
+        devices: audioInputs,
+        deviceId: competitiveDevice,
+        track: song,
+        onName: (i: number, name: string) => {
+          competitors = competitors.map((p, j) => (j === i ? name : p));
+          renderOverlay();
+        },
+        onAdd: () => {
+          if (competitors.length < 4) {
+            competitors = [...competitors, `P${competitors.length + 1}`];
+            renderOverlay();
+          }
+        },
+        onRemove: (i: number) => {
+          if (competitors.length > 2) {
+            competitors = competitors.filter((_, j) => j !== i);
+            renderOverlay();
+          }
+        },
+        onDifficulty: setDifficulty,
+        onDevice: (id: string | undefined) => {
+          competitiveDevice = id;
+          renderOverlay();
+        },
+        onStart: startCompetitive,
+        onCancel: () => {
           activeScreen = "home";
           renderOverlay();
         },
@@ -1135,6 +1211,45 @@ function openSessionSetup(): void {
   void loadDevices();
 }
 
+/** Open the competitive lobby (one mic, same song, take turns). */
+function openCompetitive(): void {
+  activeScreen = "competitive-setup";
+  renderOverlay();
+  void loadDevices();
+}
+
+/** Start a competitive duel over the CURRENT song. Needs a resolved chart. */
+function startCompetitive(): void {
+  if (!currentSong || !currentTrackId) {
+    Spicetify.showNotification?.("Play a song with a chart first, then start the duel", true);
+    return;
+  }
+  const names = competitors.map((n, i) => n.trim() || `P${i + 1}`);
+  session = createSession(names.length, names);
+  competitiveMode = true;
+  // One shared mic for everyone; activePlayers() relabels it each turn.
+  sessionRoster = [
+    {
+      name: names[0],
+      deviceId: competitiveDevice,
+      gain: 1,
+      sensitivity,
+      monitor: false,
+      monitorGain: 0.05,
+      outputDeviceId: undefined,
+    },
+  ];
+  scoredTrackIds = new Set();
+  lastRound = null;
+  stopPreviews();
+  if (micsActive()) stopMics(true);
+  void startMics();
+  onReplay(); // singer 1 starts from the top
+  scoreResetToken++;
+  activeScreen = "sing";
+  renderOverlay();
+}
+
 /**
  * Populate the input-device list for the setup mic picker. Browsers withhold
  * device labels until one mic grant, so prime a throwaway getUserMedia first —
@@ -1271,9 +1386,11 @@ function micLabelFor(slot: PlayerSlot | undefined): string {
  *  scores has one entry (hotseat, this round's singer) or N (versus). */
 function onRoundComplete(scores: PlayerRoundScore[]): void {
   if (!session || !currentSong || !currentTrackId) return;
-  if (scoredTrackIds.has(currentTrackId)) return; // one round per song
+  // Competitive replays the SAME track once per singer, so the one-round-per-track
+  // guard is skipped there; every other session counts a track at most once.
+  if (!competitiveMode && scoredTrackIds.has(currentTrackId)) return;
   if (scores.length === 0) return;
-  scoredTrackIds.add(currentTrackId);
+  if (!competitiveMode) scoredTrackIds.add(currentTrackId);
 
   // Persist the round for cross-session stats — each singer tagged with the mic
   // (device + gain + gate) they sang on, so gear can be compared over time.
@@ -1300,12 +1417,34 @@ function onRoundComplete(scores: PlayerRoundScore[]): void {
   );
   session = recordRound(session, r);
   lastRound = r;
+  if (competitiveMode) {
+    // Freeze at the song's end so Spotify can't auto-advance off the duel track
+    // while the score screen is up; continueSession seek(0)s + resumes next singer.
+    try {
+      (Spicetify.Player as { pause?: () => void }).pause?.();
+    } catch (err) {
+      console.error("[singify] competitive pause failed:", err);
+    }
+  }
   activeScreen = isComplete(session) ? "session-result" : "round-end";
   renderOverlay();
 }
 
-/** From RoundEnd — nudge Spotify to the next track; songchange returns to sing. */
+/** From RoundEnd — advance to the next singer. Competitive replays the SAME song
+ *  (seek 0 + resume); a normal session nudges Spotify to the next track. */
 function continueSession(): void {
+  if (competitiveMode) {
+    onReplay(); // seek(0) — the next singer takes the same track
+    try {
+      (Spicetify.Player as { play?: () => void }).play?.();
+    } catch (err) {
+      console.error("[singify] competitive resume failed:", err);
+    }
+    scoreResetToken++; // fresh scored attempt for the next singer
+    activeScreen = "sing";
+    renderOverlay();
+    return;
+  }
   try {
     (Spicetify.Player as { next?: () => void }).next?.();
   } catch (err) {
@@ -1339,8 +1478,15 @@ function setAutoSkip(on: boolean): void {
   if (visible) renderOverlay();
 }
 
-/** From the HUD "Skip" — don't count this song; play another. Slot stays open. */
+/** From the HUD "Skip" — don't count this song; play another. Slot stays open.
+ *  Competitive has only one song, so "skip" just restarts the current singer. */
 function skipRound(): void {
+  if (competitiveMode) {
+    onReplay();
+    scoreResetToken++;
+    if (visible) renderOverlay();
+    return;
+  }
   try {
     (Spicetify.Player as { next?: () => void }).next?.();
   } catch (err) {
@@ -1354,6 +1500,7 @@ function endSession(): void {
     activeScreen = "session-result";
   } else {
     session = null;
+    competitiveMode = false;
     activeScreen = "home";
   }
   renderOverlay();
@@ -1364,6 +1511,7 @@ function finishSession(): void {
   session = null;
   lastRound = null;
   scoredTrackIds = new Set();
+  competitiveMode = false;
   activeScreen = "home";
   renderOverlay();
 }

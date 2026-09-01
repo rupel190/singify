@@ -677,6 +677,119 @@ export function NowPlaying(props: { title: string; artist: string }) {
   );
 }
 
+// ── Competitive lobby ────────────────────────────────────────────────────────
+
+/**
+ * CompetitiveSetup — the ⚔ Competitive lobby. One mic, one song; each named
+ * singer takes the same track solo in turn, then scores go head-to-head. The
+ * adapter snapshots whatever's playing as the duel song.
+ */
+export function CompetitiveSetup(props: {
+  players: string[];
+  difficulty: Difficulty;
+  devices: AudioInput[];
+  deviceId?: string;
+  track: { title: string; artist: string } | null;
+  onName: (i: number, name: string) => void;
+  onAdd: () => void;
+  onRemove: (i: number) => void;
+  onDifficulty: (d: Difficulty) => void;
+  onDevice: (id: string | undefined) => void;
+  onStart: () => void;
+  onCancel: () => void;
+}) {
+  const React = Spicetify.React;
+  const {
+    players, difficulty, devices, deviceId, track,
+    onName, onAdd, onRemove, onDifficulty, onDevice, onStart, onCancel,
+  } = props;
+  const field: React.CSSProperties = {
+    background: "rgba(0,0,0,0.35)",
+    border: "1px solid rgba(255,255,255,0.14)",
+    borderRadius: 10,
+    color: "#fff",
+    fontSize: 20,
+    padding: "8px 12px",
+  };
+  const chip = (on: boolean): React.CSSProperties => ({
+    ...field,
+    cursor: "pointer",
+    textTransform: "capitalize",
+    fontWeight: 700,
+    color: on ? "#08210f" : "#fff",
+    background: on ? "#1ed760" : "rgba(0,0,0,0.35)",
+    borderColor: on ? "#1ed760" : "rgba(255,255,255,0.14)",
+  });
+  return (
+    <Center zoom={1.4} gap={18}>
+      <div style={{ fontSize: 40, fontWeight: 900 }}>⚔ Competitive</div>
+      <div style={{ fontSize: 17, color: "rgba(255,255,255,0.6)", textAlign: "center", maxWidth: 520 }}>
+        One mic, one song — each singer takes the same track solo, then scores go head-to-head. Pure skill.
+      </div>
+      <div style={{ ...field, width: 460, textAlign: "center", fontWeight: 600, color: track ? "#fff" : "#e6b422" }}>
+        {track ? `${track.title} — ${track.artist}` : "▶ Play a song first, then start the duel"}
+      </div>
+      <div style={{ display: "flex", flexDirection: "column", gap: 8, width: 460 }}>
+        {players.map((name, i) => (
+          <div key={i} style={{ display: "flex", gap: 8, alignItems: "center" }}>
+            <span style={{ color: PLAYER_COLORS[i % PLAYER_COLORS.length], fontWeight: 800, width: 22 }}>
+              {i + 1}
+            </span>
+            <input
+              value={name}
+              placeholder={`P${i + 1}`}
+              onChange={(e) => onName(i, (e.target as HTMLInputElement).value)}
+              style={{ ...field, flex: 1, minWidth: 0 }}
+            />
+            {players.length > 2 && (
+              <button onClick={() => onRemove(i)} title="Remove" style={{ ...ghostBtn(React), padding: "6px 12px" }}>
+                ✕
+              </button>
+            )}
+          </div>
+        ))}
+        {players.length < 4 && (
+          <button onClick={onAdd} style={{ ...ghostBtn(React), alignSelf: "flex-start" }}>
+            + Add singer
+          </button>
+        )}
+      </div>
+      <select
+        value={deviceId ?? ""}
+        onChange={(e) => onDevice((e.target as HTMLSelectElement).value || undefined)}
+        title="Shared mic — everyone sings on this one"
+        style={{ ...field, width: 460 }}
+      >
+        <option value="">Default mic</option>
+        {devices.map((d) => (
+          <option key={d.deviceId} value={d.deviceId}>
+            {d.label}
+          </option>
+        ))}
+      </select>
+      <div style={{ display: "flex", gap: 8 }}>
+        {(["easy", "medium", "hard"] as const).map((d) => (
+          <button key={d} onClick={() => onDifficulty(d)} style={chip(difficulty === d)}>
+            {d}
+          </button>
+        ))}
+      </div>
+      <div style={{ display: "flex", gap: 12, marginTop: 4 }}>
+        <button
+          onClick={onStart}
+          disabled={!track}
+          style={{ ...primaryBtn(React), opacity: track ? 1 : 0.45, cursor: track ? "pointer" : "default" }}
+        >
+          ⚔ Start duel
+        </button>
+        <button onClick={onCancel} style={ghostBtn(React)}>
+          Cancel
+        </button>
+      </div>
+    </Center>
+  );
+}
+
 // ── In-round HUD ─────────────────────────────────────────────────────────────
 
 export function SessionHud(props: {

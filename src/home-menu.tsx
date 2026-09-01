@@ -13,6 +13,7 @@ export interface HomeMenuProps {
   track: { artist: string; title: string } | null;
   onQuickSing: () => void;
   onStartSession: () => void;
+  onCompetitive: () => void;
   onStats: () => void;
 }
 
@@ -20,7 +21,7 @@ const ACCENT = "#1ed760";
 
 export function HomeMenu(props: HomeMenuProps) {
   const React = Spicetify.React;
-  const { track, onQuickSing, onStartSession, onStats } = props;
+  const { track, onQuickSing, onStartSession, onCompetitive, onStats } = props;
 
   const card: React.CSSProperties = {
     display: "flex",
@@ -78,6 +79,11 @@ export function HomeMenu(props: HomeMenuProps) {
       <button onClick={onStartSession} style={card}>
         <span style={title}>▶ Start a Session</span>
         <span style={sub}>multi-round · scores carry across songs · big finish</span>
+      </button>
+
+      <button onClick={onCompetitive} style={card}>
+        <span style={title}>⚔ Competitive</span>
+        <span style={sub}>one mic · same song · take turns · pure skill</span>
       </button>
 
       <button
