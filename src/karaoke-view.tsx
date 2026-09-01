@@ -143,6 +143,25 @@ const TRAIL_MAX = 160; // ring-buffer cap (frames) — headroom for the longer t
 const SPARK_STREAK_MIN = 20; // frames on-pitch before sparks kick in (~0.33s @60fps)
 const SPARK_EVERY = 4; // emit a burst every N frames while the streak holds
 const SPARK_MAX_PER_BURST = 4; // particles per burst once the streak is long
+
+// Note virtualization window around the playhead: render only notes whose start
+// falls within [now − PAST, now + lookahead + FUTURE], so the DOM/layer tree stays
+// ~30 notes per lane instead of ~600. PAST covers notes still on screen behind the
+// now-line plus any long note that began earlier; both are generous to avoid pops.
+const VIRT_PAST_MS = 2600;
+const VIRT_FUTURE_MS = 900;
+
+/** First index in a start-sorted note list whose startMs ≥ ms (binary search). */
+function lowerBoundStart(arr: readonly Syllable[], ms: number): number {
+  let lo = 0;
+  let hi = arr.length;
+  while (lo < hi) {
+    const mid = (lo + hi) >> 1;
+    if (arr[mid].startMs < ms) lo = mid + 1;
+    else hi = mid;
+  }
+  return lo;
+}
 // Marker and trail are sized as MULTIPLES of the note height rather than in
 // fixed px, so they stay in proportion when the lane geometry changes — the
 // live marker reads a little fatter than the note it is chasing.
@@ -390,47 +409,60 @@ function Lane(props: {
   // BRIGHT, white-ringed indicator that reads on top of any of them. Golden
   // notes stay gold — a universal "worth double" signal, not per-player.
   const noteTint = player ? shade(player.color, 0.66) : COLORS.noteNormal;
+  // Flat, start-sorted list of drawable notes (once per song). The virtualization
+  // window slices into this instead of walking every line on each recompute.
+  const allNotes = useMemo(
+    () =>
+      song.lines
+        .flatMap((l) => l.syllables)
+        .filter((s) => s.type !== "freestyle")
+        .sort((a, b) => a.startMs - b.startMs),
+    [song]
+  );
+  // Render only the notes inside the on-screen window (+margins), not all ~600.
+  // These indices change VALUE only when a note crosses an edge (a few times/sec),
+  // so the noteEls memo rebuilds THEN, not every frame — shrinking the paint
+  // artifact / compositor layer tree the profiler pinned as the bottleneck.
+  const firstIdx = lowerBoundStart(allNotes, positionMs - VIRT_PAST_MS);
+  const lastIdx = lowerBoundStart(allNotes, positionMs + LOOKAHEAD_MS + VIRT_FUTURE_MS);
   const noteEls = useMemo(() => {
     const els: JSX.Element[] = [];
-    let key = 0;
-    for (const line of song.lines) {
-      for (const sy of line.syllables) {
-        if (sy.type === "freestyle") continue;
-        els.push(
-          <div
-            key={key++}
-            style={{
-              position: "absolute",
-              left: sy.startMs * pxPerMs,
-              width: Math.max(3, sy.durationMs * pxPerMs - 2),
-              top: yForPitch(sy.pitch),
-              height: noteH,
-              borderRadius: noteH / 2,
-              ...(isGoldenNote(sy.type)
-                ? lite
-                  ? { background: "linear-gradient(100deg, #9a6f14 0%, #e6b422 50%, #9a6f14 100%)" }
-                  : {
-                      background:
-                        "linear-gradient(100deg, #9a6f14 0%, #e6b422 26%, #fff4bf 50%, #e6b422 74%, #9a6f14 100%)",
-                      backgroundSize: "220% 100%",
-                      animation: "singify-gold-shimmer 2.4s linear infinite",
-                      boxShadow: "0 0 12px rgba(230,180,34,0.7)",
-                    }
-                : isRapNote(sy.type)
-                  ? {
-                      // Rap = rhythm, not pitch: a hatched bar signals "just hit
-                      // the words on time", with no pitch to chase.
-                      background: `repeating-linear-gradient(115deg, ${noteTint} 0 6px, ${shade(noteTint, 0.6)} 6px 12px)`,
-                    }
-                  : { background: noteTint }),
-            }}
-          />
-        );
-      }
+    for (let i = firstIdx; i < lastIdx; i++) {
+      const sy = allNotes[i];
+      els.push(
+        <div
+          key={i}
+          style={{
+            position: "absolute",
+            left: sy.startMs * pxPerMs,
+            width: Math.max(3, sy.durationMs * pxPerMs - 2),
+            top: yForPitch(sy.pitch),
+            height: noteH,
+            borderRadius: noteH / 2,
+            ...(isGoldenNote(sy.type)
+              ? lite
+                ? { background: "linear-gradient(100deg, #9a6f14 0%, #e6b422 50%, #9a6f14 100%)" }
+                : {
+                    background:
+                      "linear-gradient(100deg, #9a6f14 0%, #e6b422 26%, #fff4bf 50%, #e6b422 74%, #9a6f14 100%)",
+                    backgroundSize: "220% 100%",
+                    animation: "singify-gold-shimmer 2.4s linear infinite",
+                    boxShadow: "0 0 12px rgba(230,180,34,0.7)",
+                  }
+              : isRapNote(sy.type)
+                ? {
+                    // Rap = rhythm, not pitch: a hatched bar signals "just hit
+                    // the words on time", with no pitch to chase.
+                    background: `repeating-linear-gradient(115deg, ${noteTint} 0 6px, ${shade(noteTint, 0.6)} 6px 12px)`,
+                  }
+                : { background: noteTint }),
+          }}
+        />
+      );
     }
     return els;
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [song, lane.h, lane.w, minPitch, maxPitch, noteTint, lite]);
+  }, [allNotes, firstIdx, lastIdx, lane.h, lane.w, minPitch, maxPitch, noteTint, lite]);
 
   const nowX = lane.w * NOW_FRACTION;
   const trackTranslate = nowX - positionMs * pxPerMs;
