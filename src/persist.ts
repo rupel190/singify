@@ -16,20 +16,30 @@
 
 import { loadStore, saveStore } from "./resolver-client";
 import type { StatRound, StatsDoc } from "./stats";
+import {
+  SENS_KEY,
+  SENS_SCALE_KEY,
+  DIFFICULTY_KEY,
+  NOWLINE_KEY,
+  MIC_SLOTS_KEY,
+  PLAYER_SENS_KEY,
+  AUTOSKIP_KEY,
+  DEFAULT_OFFSET_KEY,
+  OFFSET_PREFIX,
+} from "./storage-keys";
 
-// The localStorage keys that belong to the "settings" store. These MIRROR the
-// key strings the adapter (index.ts) reads/writes — keep in sync if you add a knob.
+// The knobs mirrored to the on-disk "settings" store. Built from the shared key
+// module, so this list can't drift from what the adapter actually reads/writes.
+// (FPS is ephemeral debug state and the offsets live in their own store.)
 const SETTINGS_KEYS = [
-  "singify:sensitivity",
-  "singify:sensitivityScale",
-  "singify:difficulty",
-  "singify:nowLinePx",
-  "singify:micSlots",
-  "singify:playerSens",
-  "singify:autoSkipNoChart",
+  SENS_KEY,
+  SENS_SCALE_KEY,
+  DIFFICULTY_KEY,
+  NOWLINE_KEY,
+  MIC_SLOTS_KEY,
+  PLAYER_SENS_KEY,
+  AUTOSKIP_KEY,
 ];
-const OFFSET_PREFIX = "singify:offset:"; // per-track punch-ins
-const OFFSET_GLOBAL = "singify:offsetMs"; // baseline for untuned tracks
 
 function ls(): Storage | null {
   try {
@@ -56,7 +66,7 @@ function gatherOffsets(): Record<string, string> {
   if (!store) return out;
   for (let i = 0; i < store.length; i++) {
     const k = store.key(i);
-    if (k && (k === OFFSET_GLOBAL || k.startsWith(OFFSET_PREFIX))) {
+    if (k && (k === DEFAULT_OFFSET_KEY || k.startsWith(OFFSET_PREFIX))) {
       const v = store.getItem(k);
       if (v != null) out[k] = v;
     }

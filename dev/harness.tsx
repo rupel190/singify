@@ -45,8 +45,8 @@ import type { ScoreState } from "../src/scoring";
 import { startMicPitch, type MicPitch, type AppliedProcessing } from "../src/mic";
 import { sensitivityToThreshold } from "../src/pitch";
 import type { Difficulty } from "../src/scoring";
+import { SENS_KEY } from "../src/storage-keys";
 
-const SENS_KEY = "singify:sensitivity";
 function loadSensitivity(): number {
   const v = Number(localStorage.getItem(SENS_KEY));
   return Number.isFinite(v) && v >= 0 && v <= 100 ? v : 60;

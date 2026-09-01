@@ -61,6 +61,18 @@ import {
   type AudioOutput,
 } from "./mic";
 import { resolveForTrack, confirmPick, helperHealth } from "./resolver-client";
+import {
+  SENS_KEY,
+  SENS_SCALE_KEY,
+  DIFFICULTY_KEY,
+  NOWLINE_KEY,
+  MIC_SLOTS_KEY,
+  PLAYER_SENS_KEY,
+  AUTOSKIP_KEY,
+  FPS_KEY,
+  DEFAULT_OFFSET_KEY,
+  OFFSET_PREFIX,
+} from "./storage-keys";
 import { StatsScreen } from "./stats-view";
 import type { StatRound } from "./stats";
 import {
@@ -123,8 +135,6 @@ function onPlayPause(): void {
 // latency baseline). This lives in the adapter, not <KaraokeView>: the offset is
 // a property of the clock port, so the shared view never has to know about it.
 
-const OFFSET_PREFIX = "singify:offset:"; // per track: singify:offset:<uri>
-const DEFAULT_OFFSET_KEY = "singify:offsetMs"; // baseline for untuned tracks (+ legacy global)
 const OFFSET_STEP = 10; // ms per nudge
 
 function readNum(key: string): number | null {
@@ -450,11 +460,9 @@ function onReplay(): void {
 // passes). Adjust live with - and = ; persisted like the lyric offset. Applies
 // immediately to a running mic. A property of the mic port — the view is untouched.
 
-const SENS_KEY = "singify:sensitivity";
 // Bumped whenever the sensitivity→RMS curve changes: the stored 0..100 number is
 // meaningless without the curve it was written against. v2 widened the gate's
 // quiet-end limit (0.05 → 0.12 RMS) so a genuinely loud room can be gated out.
-const SENS_SCALE_KEY = "singify:sensitivityScale";
 const SENS_SCALE = "v2";
 
 /** The v1 curve — kept ONLY to re-express an old stored value on the v2 one. */
@@ -488,7 +496,6 @@ let sensitivity = loadSensitivity();
 // (easy ±2, medium ±1, hard ±0 semitones). Global + persisted; applies to solo
 // and sessions alike. Rap/"freestyle" notes are pitch-agnostic, so they're
 // unaffected at any difficulty.
-const DIFFICULTY_KEY = "singify:difficulty";
 function loadDifficulty(): Difficulty {
   const v = localStorage.getItem(DIFFICULTY_KEY);
   return v === "medium" || v === "hard" ? v : "easy";
@@ -499,7 +506,6 @@ let difficulty: Difficulty = loadDifficulty();
 // (not the markers, notes, or timing) so it lines up with where a note visually
 // meets the marker. The lyric offset owns actual sync. Nudged with , and . ;
 // persisted globally.
-const NOWLINE_KEY = "singify:nowLinePx";
 const NOWLINE_STEP = 4; // px per press
 const NOWLINE_MAX = 200; // px either side
 function loadNowLineNudge(): number {
@@ -534,7 +540,6 @@ function setDifficulty(next: Difficulty): void {
 // Every slot's mic settings — name, device, gain, gate — saved by ROSTER INDEX,
 // so a new slot i restores whatever slot i last used. Indexed rather than kept
 // as one roster blob so editing solo (one slot) can't wipe player 2's setup.
-const MIC_SLOTS_KEY = "singify:micSlots";
 
 function loadMicSlots(): Partial<PlayerSlot>[] {
   try {
@@ -566,9 +571,6 @@ function saveMicSlots(roster: PlayerSlot[]): void {
   }
   mirrorSettings(); // durable copy → ~/.config/singify/settings.json
 }
-
-/** Legacy per-slot gates (pre-micSlots) — still read as a fallback. */
-const PLAYER_SENS_KEY = "singify:playerSens";
 
 function loadPlayerSensitivities(): number[] {
   try {
@@ -1492,7 +1494,6 @@ function continueSession(): void {
 // session hops straight past them instead of parking on the no-chart card. Only
 // a genuine "nothing found" triggers it — a picker means we DID find candidates,
 // which is a choice worth stopping for.
-const AUTOSKIP_KEY = "singify:autoSkipNoChart";
 let autoSkipNoChart = localStorage.getItem(AUTOSKIP_KEY) === "1";
 // Without a cap, a long chartless stretch would race through the whole playlist
 // in seconds. After this many misses in a row, switch the toggle back off so the
@@ -1730,7 +1731,6 @@ async function reSearch(): Promise<void> {
 // hides/shows it, remembered across launches. Its own rAF measures the frame
 // cadence: every rAF shares one frame budget, so when the overlay's render can't
 // keep up the number drops. Lives on <body>, outside the zoomed overlay.
-const FPS_KEY = "singify:fps";
 let fpsWanted = localStorage.getItem(FPS_KEY) !== "0"; // default ON (perf-testing)
 let fpsEl: HTMLDivElement | null = null;
 let fpsRaf = 0;
