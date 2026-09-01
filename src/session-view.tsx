@@ -495,28 +495,29 @@ export function MicOverlay(props: {
     minWidth: 0,
     background: "rgba(0,0,0,0.35)",
     border: "1px solid rgba(255,255,255,0.12)",
-    borderRadius: 10,
+    borderRadius: 8,
     color: "#fff",
-    fontSize: 26,
-    padding: "8px 10px",
+    fontSize: 18,
+    padding: "6px 9px",
   };
   // Width comes from the roster, never from the content: with equal flex
   // columns inside, a content-sized pill would collapse onto the labels.
   const n = Math.max(1, mics.length);
   const wanted = n * BAR_W + (n - 1) * BAR_LABEL + 56;
   const readout: React.CSSProperties = {
-    fontSize: 26,
+    fontSize: 18,
     fontWeight: 700,
     color: "rgba(255,255,255,0.45)",
     fontVariantNumeric: "tabular-nums",
+    whiteSpace: "nowrap", // gate/gain stay on one line, so columns don't misalign
   };
   return (
     <div
       style={{
         justifySelf: "end",
         width: `min(100%, ${wanted}px)`,
-        padding: "18px 28px",
-        borderRadius: 22,
+        padding: "12px 20px",
+        borderRadius: 16,
         background: "rgba(8,8,12,0.72)",
         border: "1px solid rgba(255,255,255,0.1)",
         color: "#fff",
@@ -531,7 +532,7 @@ export function MicOverlay(props: {
             // own contents, so a long device name can't shove the other singer.
             <div
               key={i}
-              style={{ flex: "1 1 0", minWidth: 0, display: "flex", flexDirection: "column", gap: 10 }}
+              style={{ flex: "1 1 0", minWidth: 0, display: "flex", flexDirection: "column", gap: 7 }}
             >
               <MicMeter
                 getLevel={m.getLevel}
@@ -540,8 +541,8 @@ export function MicOverlay(props: {
                 label={mics.length > 1 ? m.name : "🎤"}
                 labelColor={tint}
                 color={tint}
-                height={64}
-                labelSize={BAR_LABEL}
+                height={44}
+                labelSize={32}
               />
               <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
                 <span style={readout}>gate {Math.round(m.sensitivity)}%</span>
@@ -583,10 +584,10 @@ export function MicOverlay(props: {
                         onClick={() => onMonitor(i, !on)}
                         title="Play this mic back out an output device (use headphones to avoid feedback)"
                         style={{
-                          fontSize: 26,
+                          fontSize: 18,
                           fontWeight: 700,
-                          padding: "8px 14px",
-                          borderRadius: 10,
+                          padding: "6px 10px",
+                          borderRadius: 8,
                           cursor: "pointer",
                           border: `1px solid ${on ? tint : "rgba(255,255,255,0.14)"}`,
                           background: on ? `${tint}22` : "rgba(0,0,0,0.35)",
