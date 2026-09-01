@@ -140,10 +140,6 @@ export function recordRound(s: Session, r: RoundResult): Session {
   return { ...s, rounds: [...s.rounds, r] };
 }
 
-export function roundsDone(s: Session): number {
-  return s.rounds.length;
-}
-
 export function roundsLeft(s: Session): number {
   return Math.max(0, s.targetRounds - s.rounds.length);
 }

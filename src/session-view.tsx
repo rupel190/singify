@@ -16,9 +16,7 @@ import type { AudioInput, AudioOutput } from "./mic";
 import type { Difficulty } from "./scoring";
 import { PLAYER_COLORS } from "./karaoke-view";
 import { MicMeter } from "./mic-meter";
-
-const ACCENT = "#1ed760";
-const GOLD = "#e6b422";
+import { ACCENT, GOLD } from "./theme";
 
 /**
  * One live mic as the in-game banner sees it: the player's whole roster slot
@@ -425,13 +423,13 @@ export function SessionSetup(props: {
               {n}
             </button>
           ))}
-          <button style={{ ...primaryBtn(React), marginLeft: "auto" }} onClick={onStart}>
+          <button style={{ ...primaryBtn(), marginLeft: "auto" }} onClick={onStart}>
             ▶ {rounds} rounds
           </button>
         </div>
       </div>
 
-      <button style={{ ...ghostBtn(React), marginTop: 16 }} onClick={onCancel}>
+      <button style={{ ...ghostBtn(), marginTop: 16 }} onClick={onCancel}>
         Cancel
       </button>
     </Center>
@@ -717,8 +715,8 @@ export function CompetitiveSetup(props: {
     textTransform: "capitalize",
     fontWeight: 700,
     color: on ? "#08210f" : "#fff",
-    background: on ? "#1ed760" : "rgba(0,0,0,0.35)",
-    borderColor: on ? "#1ed760" : "rgba(255,255,255,0.14)",
+    background: on ? ACCENT : "rgba(0,0,0,0.35)",
+    borderColor: on ? ACCENT : "rgba(255,255,255,0.14)",
   });
   return (
     <Center zoom={1.4} gap={18}>
@@ -726,7 +724,7 @@ export function CompetitiveSetup(props: {
       <div style={{ fontSize: 17, color: "rgba(255,255,255,0.6)", textAlign: "center", maxWidth: 520 }}>
         One mic, one song — each singer takes the same track solo, then scores go head-to-head. Pure skill.
       </div>
-      <div style={{ ...field, width: 460, textAlign: "center", fontWeight: 600, color: track ? "#fff" : "#e6b422" }}>
+      <div style={{ ...field, width: 460, textAlign: "center", fontWeight: 600, color: track ? "#fff" : GOLD }}>
         {track ? `${track.title} — ${track.artist}` : "▶ Play a song first, then start the duel"}
       </div>
       <div style={{ display: "flex", flexDirection: "column", gap: 8, width: 460 }}>
@@ -742,14 +740,14 @@ export function CompetitiveSetup(props: {
               style={{ ...field, flex: 1, minWidth: 0 }}
             />
             {players.length > 2 && (
-              <button onClick={() => onRemove(i)} title="Remove" style={{ ...ghostBtn(React), padding: "6px 12px" }}>
+              <button onClick={() => onRemove(i)} title="Remove" style={{ ...ghostBtn(), padding: "6px 12px" }}>
                 ✕
               </button>
             )}
           </div>
         ))}
         {players.length < 4 && (
-          <button onClick={onAdd} style={{ ...ghostBtn(React), alignSelf: "flex-start" }}>
+          <button onClick={onAdd} style={{ ...ghostBtn(), alignSelf: "flex-start" }}>
             + Add singer
           </button>
         )}
@@ -778,11 +776,11 @@ export function CompetitiveSetup(props: {
         <button
           onClick={onStart}
           disabled={!track}
-          style={{ ...primaryBtn(React), opacity: track ? 1 : 0.45, cursor: track ? "pointer" : "default" }}
+          style={{ ...primaryBtn(), opacity: track ? 1 : 0.45, cursor: track ? "pointer" : "default" }}
         >
           ⚔ Start duel
         </button>
-        <button onClick={onCancel} style={ghostBtn(React)}>
+        <button onClick={onCancel} style={ghostBtn()}>
           Cancel
         </button>
       </div>
@@ -994,10 +992,10 @@ export function NoChartInSession(props: {
       </div>
       {searched && (
         <div style={{ display: "flex", gap: 12, marginTop: 18 }}>
-          <button style={primaryBtn(React)} onClick={onSkip}>
+          <button style={primaryBtn()} onClick={onSkip}>
             ⏭ Skip to next song
           </button>
-          <button style={ghostBtn(React)} onClick={onReChoose}>
+          <button style={ghostBtn()} onClick={onReChoose}>
             🔎 Re-choose (R)
           </button>
         </div>
@@ -1027,7 +1025,7 @@ export function HelperDownNotice(props: {
   return (
     <Center zoom={2.4}>
       <div style={{ fontSize: 48 }}>⚠️</div>
-      <div style={{ fontSize: 26, fontWeight: 800, color: "#e6b422" }}>
+      <div style={{ fontSize: 26, fontWeight: 800, color: GOLD }}>
         Karaoke helper isn't running
       </div>
       <div
@@ -1064,12 +1062,12 @@ export function HelperDownNotice(props: {
       {(onSkip || onReChoose) && (
         <div style={{ display: "flex", gap: 12, marginTop: 18 }}>
           {onReChoose && (
-            <button style={primaryBtn(React)} onClick={onReChoose}>
+            <button style={primaryBtn()} onClick={onReChoose}>
               ↻ Try again (R)
             </button>
           )}
           {onSkip && (
-            <button style={ghostBtn(React)} onClick={onSkip}>
+            <button style={ghostBtn()} onClick={onSkip}>
               ⏭ Skip to next song
             </button>
           )}
@@ -1170,7 +1168,7 @@ export function RoundEnd(props: {
           </span>
         </div>
       )}
-      <button style={{ ...primaryBtn(React), marginTop: 16 }} onClick={onContinue}>
+      <button style={{ ...primaryBtn(), marginTop: 16 }} onClick={onContinue}>
         {last ? "See the results ▶" : upNext ? "Next song ▶" : "Next — play another song ▶"}
       </button>
     </Center>
@@ -1337,11 +1335,11 @@ export function SessionResultScreen(props: {
 
       <div style={{ display: "flex", gap: 12, marginTop: 20 }}>
         {onSave && (
-          <button style={ghostBtn(React)} onClick={onSave}>
+          <button style={ghostBtn()} onClick={onSave}>
             💾 Save as playlist
           </button>
         )}
-        <button style={primaryBtn(React)} onClick={onDone}>
+        <button style={primaryBtn()} onClick={onDone}>
           Done
         </button>
       </div>
@@ -1379,7 +1377,7 @@ function Center(props: { children: unknown; gap?: number; zoom?: number }) {
   );
 }
 
-function primaryBtn(_react: unknown): Record<string, string | number> {
+function primaryBtn(): Record<string, string | number> {
   return {
     padding: "12px 22px",
     borderRadius: 12,
@@ -1391,7 +1389,7 @@ function primaryBtn(_react: unknown): Record<string, string | number> {
     color: "#04160b",
   };
 }
-function ghostBtn(_react: unknown): Record<string, string | number> {
+function ghostBtn(): Record<string, string | number> {
   return {
     padding: "12px 22px",
     borderRadius: 12,

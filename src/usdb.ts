@@ -84,12 +84,6 @@ export async function login(username: string, password: string): Promise<boolean
 /** The banner USDB serves in place of content once the session cookie lapses. */
 const LOGGED_OUT = /You are not logged in/i;
 
-export async function isLoggedIn(): Promise<boolean> {
-  if (!sessionCookie) return false;
-  const res = await fetch(`${BASE}/?link=browse`, { headers: cookieHeader() });
-  return !LOGGED_OUT.test(await res.text());
-}
-
 // ── Search ─────────────────────────────────────────────────────────────────
 
 export interface SearchOptions {

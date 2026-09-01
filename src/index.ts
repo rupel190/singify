@@ -60,7 +60,7 @@ import {
   type AudioInput,
   type AudioOutput,
 } from "./mic";
-import { resolveForTrack, confirmPick } from "./resolver-client";
+import { resolveForTrack, confirmPick, helperHealth } from "./resolver-client";
 import { StatsScreen } from "./stats-view";
 import type { StatRound } from "./stats";
 import {
@@ -748,6 +748,20 @@ let resolving = false;
 // — "the helper isn't running" — instead of blaming the track. It's the actual
 // cause even for cached songs, since the cache lives behind the helper.
 let helperDown = false;
+
+/**
+ * Did this resolve error mean the helper is genuinely unreachable? A fetch that
+ * can't reach the helper throws TypeError ("Failed to fetch") — the first-run
+ * "helper isn't running" case, which the in-overlay caution covers, so we stay
+ * quiet. But a real code bug in the resolve path throws TypeError too, and
+ * silently blaming the helper would bury it. So on a TypeError we probe /health:
+ * unreachable ⇒ truly down (stay quiet); reachable ⇒ it was our bug (surface it).
+ */
+async function helperIsUnreachable(err: unknown): Promise<boolean> {
+  if (!(err instanceof TypeError)) return false; // helper answered with an error
+  return (await helperHealth()) === null; // TypeError + no /health ⇒ truly down
+}
+
 let pickerQuery: { artist?: string; title?: string } | null = null;
 let pickerCandidates: USDBSong[] | null = null;
 let pickPending: number | null = null;
@@ -1432,24 +1446,44 @@ function onRoundComplete(scores: PlayerRoundScore[]): void {
 
 /** From RoundEnd — advance to the next singer. Competitive replays the SAME song
  *  (seek 0 + resume); a normal session nudges Spotify to the next track. */
+/**
+ * Advance Spotify's own queue — how non-competitive sessions move between rounds.
+ * Player.next can be missing or throw on some clients; a bare `next?.()` would
+ * then no-op silently and leave the Continue/Skip button dead. Say so with a
+ * toast instead, so the user knows to hit Spotify's own Next. `what` names the
+ * action for the message.
+ */
+function advanceQueue(what: string): void {
+  const next = (Spicetify.Player as { next?: () => void }).next;
+  if (!next) {
+    Spicetify.showNotification?.(`Couldn't ${what} — use Spotify's Next`, true);
+    return;
+  }
+  try {
+    next();
+  } catch (err) {
+    console.error(`[singify] ${what} failed:`, err);
+    Spicetify.showNotification?.(`Couldn't ${what} — use Spotify's Next`, true);
+  }
+}
+
 function continueSession(): void {
   if (competitiveMode) {
     onReplay(); // seek(0) — the next singer takes the same track
+    const play = (Spicetify.Player as { play?: () => void }).play;
     try {
-      (Spicetify.Player as { play?: () => void }).play?.();
+      if (!play) throw new Error("Player.play unavailable");
+      play();
     } catch (err) {
       console.error("[singify] competitive resume failed:", err);
+      Spicetify.showNotification?.("Couldn't restart the track — press play", true);
     }
     scoreResetToken++; // fresh scored attempt for the next singer
     activeScreen = "sing";
     renderOverlay();
     return;
   }
-  try {
-    (Spicetify.Player as { next?: () => void }).next?.();
-  } catch (err) {
-    console.error("[singify] session next failed:", err);
-  }
+  advanceQueue("continue the session");
 }
 
 // ── Auto-skip chartless tracks (sessions) ───────────────────────────────────
@@ -1487,11 +1521,7 @@ function skipRound(): void {
     if (visible) renderOverlay();
     return;
   }
-  try {
-    (Spicetify.Player as { next?: () => void }).next?.();
-  } catch (err) {
-    console.error("[singify] skip failed:", err);
-  }
+  advanceQueue("skip this song");
 }
 
 /** From the HUD "End" — finish early: show results if any rounds ran, else bail. */
@@ -1606,12 +1636,11 @@ async function onSongChange(): Promise<void> {
     }
   } catch (err) {
     console.error("[singify] resolve failed:", err);
-    // A TypeError from fetch means the helper isn't reachable (connection
-    // refused) — the most likely first-run cause. That case gets NO background
-    // toast: it surfaces as a persistent caution INSIDE the overlay instead, so
-    // it only tells you when you're actually looking. Any other error is a real
-    // lookup failure from the helper, worth a toast.
-    helperDown = err instanceof TypeError;
+    // Helper unreachable → NO background toast: it surfaces as a persistent
+    // caution INSIDE the overlay, so it only speaks up when you're looking. Any
+    // other error (including a code bug the /health probe rules out) is a real
+    // lookup failure worth a toast.
+    helperDown = await helperIsUnreachable(err);
     if (!helperDown) {
       Spicetify.showNotification?.(
         `Karaoke lookup failed: ${err instanceof Error ? err.message : String(err)}`,
@@ -1675,9 +1704,11 @@ async function reSearch(): Promise<void> {
       Spicetify.showNotification?.(`No USDB matches for “${title}”`);
     }
   } catch (err) {
+    console.error("[singify] search failed:", err);
     // Helper unreachable → let the in-overlay caution box carry it (we're on the
-    // sing surface here anyway); any other failure is worth a toast.
-    helperDown = err instanceof TypeError;
+    // sing surface here anyway); any other failure — including a code bug the
+    // /health probe rules out — is worth a toast.
+    helperDown = await helperIsUnreachable(err);
     if (!helperDown) {
       Spicetify.showNotification?.(
         `Search failed: ${err instanceof Error ? err.message : String(err)}`,

@@ -12,6 +12,7 @@
  */
 
 import type { USDBSong } from "./usdb";
+import { ACCENT, GOLD, SURFACE } from "./theme";
 
 export interface SongPickerProps {
   candidates: USDBSong[];
@@ -26,16 +27,13 @@ export interface SongPickerProps {
 }
 
 const C = {
+  ...SURFACE,
   scrim: "rgba(8, 8, 12, 0.6)",
-  card: "#16161c",
-  border: "#2a2a33",
   rowHover: "#1e1e26",
   chip: "#22222b",
-  text: "#f2f2f5",
-  sub: "#9a9aa6",
-  green: "#1ed760",
+  green: ACCENT,
   greenInk: "#08210f",
-  golden: "#e6b422",
+  golden: GOLD,
   danger: "#ff6b6b",
 };
 

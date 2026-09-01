@@ -8,6 +8,8 @@
  * milestone). A pure view — the adapter hands it the current track + callbacks.
  */
 
+import { ACCENT } from "./theme";
+
 export interface HomeMenuProps {
   /** The track Spotify is currently on, or null if nothing's playing. */
   track: { artist: string; title: string } | null;
@@ -16,8 +18,6 @@ export interface HomeMenuProps {
   onCompetitive: () => void;
   onStats: () => void;
 }
-
-const ACCENT = "#1ed760";
 
 export function HomeMenu(props: HomeMenuProps) {
   const React = Spicetify.React;

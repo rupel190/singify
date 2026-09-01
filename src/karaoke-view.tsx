@@ -35,6 +35,7 @@ import {
   type Difficulty,
 } from "./scoring";
 import { ResultScreen } from "./result-screen";
+import { ACCENT, GOLD } from "./theme";
 
 /**
  * One active singer — the generalised "mic port". Solo/hotseat pass a single
@@ -170,14 +171,14 @@ const TRAIL_DOT_MAX = 0.7; // newest dot size (× noteH); it shrinks to ×0.5 as
 
 const COLORS = {
   laneBg: "rgba(0, 0, 0, 0.28)",
-  nowLine: "#1ed760",
+  nowLine: ACCENT,
   noteNormal: "#4a78c2",
-  noteGolden: "#e6b422",
+  noteGolden: GOLD,
   gridLine: "rgba(255, 255, 255, 0.06)",
   lyricDone: "#6d6d6d",
   lyricUpcoming: "#c8c8c8",
   lyricActive: "#ffffff",
-  lyricWipe: "#1ed760",
+  lyricWipe: ACCENT,
   livePitch: "#ff5ea8",
   axisLabel: "rgba(255, 255, 255, 0.58)",
 };

@@ -8,15 +8,13 @@
 
 import type { StatRound } from "./stats";
 import { aggregateByMic, aggregateByPlayer } from "./stats";
+import { ACCENT, GOLD, SURFACE } from "./theme";
 
 const C = {
-  text: "#f2f2f5",
-  sub: "#9a9aa6",
-  card: "#16161c",
-  border: "#2a2a33",
+  ...SURFACE,
   row: "#1b1b22",
-  green: "#1ed760",
-  gold: "#e6b422",
+  green: ACCENT,
+  gold: GOLD,
 };
 
 function fmt(n: number): string {

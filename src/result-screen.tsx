@@ -9,6 +9,7 @@
  */
 
 import type { ScoreState, Grade } from "./scoring";
+import { ACCENT, GOLD } from "./theme";
 
 export interface ResultScreenProps {
   score: ScoreState;
@@ -17,8 +18,6 @@ export interface ResultScreenProps {
   onReplay?: () => void;
   fullscreen?: boolean;
 }
-
-const ACCENT = "#1ed760";
 
 export function ResultScreen(props: ResultScreenProps) {
   const React = Spicetify.React;
@@ -59,7 +58,7 @@ export function ResultScreen(props: ResultScreenProps) {
       {/* Star rating */}
       <div style={{ fontSize: fullscreen ? 34 : 26, letterSpacing: 4 }}>
         {Array.from({ length: 5 }).map((_, i) => (
-          <span key={i} style={{ color: i < grade.stars ? "#e6b422" : "#3a3a44" }}>
+          <span key={i} style={{ color: i < grade.stars ? GOLD : "#3a3a44" }}>
             ★
           </span>
         ))}

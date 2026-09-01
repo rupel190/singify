@@ -17,6 +17,7 @@ import {
   sensitivityToThreshold,
   thresholdToSensitivity,
 } from "./pitch";
+import { ACCENT } from "./theme";
 
 export interface MicMeterProps {
   /** Current input level (post-gain RMS, ~0..0.4). Polled every animation frame. */
@@ -51,7 +52,7 @@ export function MicMeter(props: MicMeterProps) {
     label,
     width = "100%",
     height = 16,
-    color = "#1ed760",
+    color = ACCENT,
     labelSize = 12,
     labelColor = "rgba(255,255,255,0.6)",
   } = props;

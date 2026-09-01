@@ -10,7 +10,7 @@
 
 import { join } from "node:path";
 
-const ROOT = join(import.meta.dir);
+const ROOT = import.meta.dir;
 const PORT = Number(process.env.PORT ?? 3000);
 
 async function handler(req: Request): Promise<Response> {

@@ -73,11 +73,18 @@ function debounce(fn: () => void, ms: number): () => void {
   };
 }
 
+// A failed mirror isn't fatal — localStorage is the live truth and the disk copy
+// is a convenience — but swallowing it silently hides a broken helper. Log so it
+// shows up when someone wonders why disk seeding didn't take.
 const pushSettings = debounce(() => {
-  void saveStore("settings", gather(SETTINGS_KEYS)).catch(() => {});
+  void saveStore("settings", gather(SETTINGS_KEYS)).catch((err) =>
+    console.error("[singify] settings mirror failed:", err)
+  );
 }, 600);
 const pushOffsets = debounce(() => {
-  void saveStore("offsets", gatherOffsets()).catch(() => {});
+  void saveStore("offsets", gatherOffsets()).catch((err) =>
+    console.error("[singify] offsets mirror failed:", err)
+  );
 }, 600);
 
 /** Call after any settings change (sensitivity, difficulty, mic slots, …). */
