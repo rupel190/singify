@@ -75,7 +75,7 @@ auto-resolve, sessions and the localhost helper all work end-to-end.
 | Config + credentials | ✅ `~/.config/singify/config.json`, loaded by the helper |
 | Stats + persistence (`stats.ts`, `persist.ts`, `server/store.ts`) | ✅ per-mic / per-singer aggregates · XDG-backed settings/offsets/stats mirrored via the helper |
 
-**Tests:** `bun test` → **188 pass** (parser + cache/resolver + pitch + scoring +
+**Tests:** `bun test` → **192 pass** (parser + cache/resolver + pitch + scoring +
 session + stats + store + helper). No live USDB calls; everything is
 fixture/mock/synthetic-tone.
 
@@ -84,7 +84,7 @@ fixture/mock/synthetic-tone.
 ```bash
 nix develop            # or `direnv allow` once, then it auto-loads (flake.nix)
 bun install            # first time only
-bun test               # 188 tests
+bun test               # 192 tests
 bun run dev            # browser harness → http://localhost:3000 (or next free port)
 bun run helper         # localhost bridge → http://127.0.0.1:4455 (USDB + cache)
 bun run build          # bundle → dist/karaoke.js
