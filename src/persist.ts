@@ -111,6 +111,14 @@ export function mirrorOffsets(): void {
  * Never overwrites a key already present — localStorage is the live truth while
  * running. Returns the keys it restored, so the adapter can re-apply the live
  * ones it had already read at module load. Silent no-op if the helper is down.
+ *
+ * Then pushes BACK, which is what makes the mirror self-healing. Writes only
+ * happen on change (mirrorSettings/mirrorOffsets), so anything tuned while the
+ * helper was down — or while a write was being rejected — never reached disk and
+ * never would: nothing retries it. Since a successful read proves the helper is
+ * reachable, this is the one moment we know a write can land, so we flush the
+ * live state. The push is a superset of what we just seeded, so it can't lose a
+ * key, and it's debounced like any other mirror.
  */
 export async function seedFromHelper(): Promise<string[]> {
   const store = ls();
@@ -129,6 +137,11 @@ export async function seedFromHelper(): Promise<string[]> {
         }
       }
     }
+    // Reached the helper → flush the live state so writes stranded while it was
+    // down (or blocked) land now. After seeding, localStorage is the union of
+    // both sides, so this can only ever add.
+    mirrorSettings();
+    mirrorOffsets();
   } catch {
     /* helper down → keep whatever localStorage already had */
   }

@@ -250,3 +250,18 @@ describe("helper store routes", () => {
     expect((await createHandler(storeDeps)(bad)).status).toBe(400);
   });
 });
+
+// The store writes are PUT, and a cross-origin PUT with a JSON body triggers a
+// CORS preflight. If the advertised methods omit PUT the browser blocks the
+// write BEFORE it reaches the handler — so every mirror silently failed while
+// reads (GET) kept working. Assert the advertised methods cover what we use.
+describe("CORS advertises every method the renderer actually uses", () => {
+  test("preflight allows PUT (the /store write verb)", async () => {
+    const res = await createHandler(baseDeps)(req("OPTIONS", "/store/offsets"));
+    const allowed = (res.headers.get("Access-Control-Allow-Methods") ?? "")
+      .split(",")
+      .map((m) => m.trim().toUpperCase());
+    expect(allowed).toContain("PUT");
+    expect(allowed).toContain("GET");
+  });
+});
