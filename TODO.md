@@ -1,32 +1,24 @@
 # TODO
 
-## Getting it in front of people
+Work items live in [HANDOFF.md](HANDOFF.md). This is the short list.
 
-Ordered by return, not by effort.
+## Before the Marketplace
 
-- [x] GitHub topics — `spicetify-extensions` is not decoration, it's how the Marketplace
-      *discovers* the repo. The other topics (`karaoke`, `ultrastar`, `singstar`, …) feed
-      GitHub's topic pages, which are crawled.
-- [x] `manifest.json` at repo root — required alongside the topic. `main` points at
-      `dist/karaoke.js`, so **the built bundle has to be committed** (`.gitignore` now lets
-      exactly that one file through).
-- [x] Repo homepage → <https://rupel.xyz/singify>
-- [x] Helper + platform caveats stated up front — README banner, `manifest.json`
-      description, and the landing page notice.
-- [ ] **Nothing above is pushed yet.** The topics and homepage are GitHub settings and are
-      live; `manifest.json`, the `.gitignore` change and the bundle are still local. The
-      Marketplace cannot see any of it until it's committed and pushed.
-- [ ] **Commit `dist/karaoke.js`** — until then the Marketplace listing installs nothing.
-- [ ] **Manual `.txt` fallback so the listing is honest** — see
-      [HANDOFF-marketplace.md](HANDOFF-marketplace.md). Right now a Marketplace install can
-      never load a chart. Worth doing *before* listing rather than after.
-- [ ] Announcement posts — r/spicetify, r/ultrastar, Spicetify Discord. Low appetite for
-      these; they can wait, and the Marketplace listing does most of the same job without
-      the self-promotion tax.
+- [x] Repo topics, `homepageUrl`, `manifest.json`
+- [x] Helper + platform caveats stated up front (README banner, manifest, landing page)
+- [x] `.gitignore` lets `dist/karaoke.js` through (`dist/*` + `!dist/karaoke.js`)
+- [ ] Manual `.txt` fallback so an install without the helper still works — **HANDOFF task A**
+- [ ] Commit `dist/karaoke.js`
+- [ ] Re-add the `spicetify-extensions` topic — it is the Marketplace's only discovery
+      mechanism, and it is deliberately off until the above lands
+
+## Offsets
+
+- [ ] Split per-track offset from the device baseline — **HANDOFF task B**. A real bug on its
+      own: change headphones today and every tuned track is wrong by the same constant.
+- [ ] Shared `offsets/community.json` — **HANDOFF task C**. Needs B first.
 
 ## Product
 
-- **Optional "live resolve" in the harness** — point the browser harness at the running
-  helper so real charts render in-browser (today it uses mock candidates).
-- **Solo Quick-Sing stats** — today only session rounds are recorded; wire `onComplete` for
-  solo so practice runs count too.
+- [ ] Live resolve in the browser harness (today: mock candidates)
+- [ ] Solo Quick-Sing stats — only session rounds are recorded
