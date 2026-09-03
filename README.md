@@ -7,6 +7,20 @@ scores your singing off the mic, solo or 1–4 players head-to-head.
 
 **Stack:** Bun · TypeScript · Spicetify (Electron/Chromium renderer) · Linux (NixOS)
 
+> [!IMPORTANT]
+> **The extension alone is not enough — it needs the helper.**
+> Chart download and the on-disk cache live in a small Bun server you run yourself
+> (`bun run helper`). The Spotify renderer has no filesystem, so **without the helper
+> running there is nothing to sing** — not even for songs you've already cached.
+> Installing from the Spicetify Marketplace gets you the overlay and none of that.
+
+> [!NOTE]
+> **Developed and tested on Linux only.** Nothing here is deliberately Linux-bound —
+> Bun and Spicetify both run on macOS and Windows — but it has never been run there.
+> Config and data follow XDG paths (`~/.config/singify`, `~/.local/share/singify`)
+> rather than the platform-native locations, and the documented deploy path is
+> `spicetify-nix` on NixOS. Reports from other platforms welcome.
+
 ## Screenshots
 
 | | |
@@ -186,7 +200,4 @@ unpushed build with `nh os switch -- --override-input singify git+file:///path/t
 
 ## Remaining work
 
-- **Optional "live resolve" in the harness** — point the browser harness at the
-  running helper so real charts render in-browser (today it uses mock candidates).
-- **Solo Quick-Sing stats** — today only session rounds are recorded; wire
-  `onComplete` for solo so practice runs count too.
+See [TODO.md](TODO.md).

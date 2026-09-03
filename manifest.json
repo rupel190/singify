@@ -1,0 +1,11 @@
+{
+  "name": "Singify — Karaoke",
+  "description": "SingStar-style karaoke inside Spotify: UltraStar charts, a scrolling lyric + pitch highway over the player, and mic scoring for 1-4 players. REQUIRES a local helper process (bun run helper) for chart download — this install gives you the overlay only. Built and tested on Linux.",
+  "preview": "docs/stage-versus.png",
+  "main": "dist/karaoke.js",
+  "readme": "README.md",
+  "authors": [
+    { "name": "Christoph Rippel", "url": "https://rupel.xyz" }
+  ],
+  "tags": ["karaoke", "lyrics", "ultrastar", "singstar", "microphone", "multiplayer"]
+}

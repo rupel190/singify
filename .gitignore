@@ -2,7 +2,12 @@
 node_modules/
 
 # build output
-dist/
+# NB: `dist/*`, not `dist/` — git never descends into an excluded *directory*, so a `!` negation
+# inside it can never re-include anything. Excluding the contents instead leaves the door open.
+dist/*
+# ...and the Marketplace bundle stays in: `manifest.json` points `main` here, and the Spicetify
+# Marketplace fetches it straight from the default branch, so it has to be committed.
+!dist/karaoke.js
 
 # bun
 .bun/
