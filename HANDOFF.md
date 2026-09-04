@@ -1,9 +1,8 @@
 # Handoff
 
-Three pieces of work, in dependency order. **A** must ship before singify goes on the
-Spicetify Marketplace. **B** is a correctness fix that happens to be the prerequisite for
-**C**; doing C without B produces a dataset that is wrong for everyone who isn't the person
-who made it.
+Three pieces of work. **A** must ship before singify goes on the Spicetify Marketplace.
+**B** is a pair of offset issues — one deferred by the owner, one live and worth fixing on
+its own. **C** is offset sharing, and it needs the live half of B.
 
 Already done, don't redo: repo topics, `homepageUrl`, `manifest.json`, the helper/platform
 notices (README banner, manifest description, and the `.notice` block on
@@ -61,9 +60,17 @@ topic.
 
 ---
 
-## B. Split the per-track offset from the device baseline
+## B. Offsets: what's deferred, and what isn't
 
-**This is a bug, independent of any sharing feature.**
+**Owner's call: the baseline split is deferred.** Everything here is HDMI and cabled, and a
+wired headset measured no worse than the speakers, so the device term is near-constant in
+practice. A single global latency setting is the intended fix and it can come later. Do not
+treat the split as a blocker for C.
+
+**What is not deferred:** `punchSync()` writes unvalidated. See "the punch problem" below.
+That one is worth doing on its own, and task C's export depends on it.
+
+### The deferred part, for whenever it comes up
 
 `src/index.ts:125-175`. The stored per-track offset is an **absolute** number, and it folds
 together two things that have nothing to do with each other:
@@ -79,8 +86,9 @@ untuned tracks. The moment you nudge a track, the value written to
 
 Two consequences:
 
-- Switch headphones and **every** tuned track is wrong by the same constant. With 339 tuned
-  songs the only remedy today is retuning all of them.
+- Switch headphones and **every** tuned track is wrong by the same constant. With 107 tuned
+  tracks the only remedy today is retuning all of them. (Deferred: the setup is cabled, so
+  this term barely moves in practice.)
 - A shared offsets file is meaningless. Every value carries its contributor's audio path.
 
 **Fix:** store the per-track value as a delta against the baseline.
@@ -102,38 +110,42 @@ offsets document (`{ "v": 2, "offsets": { … } }`), and on first load under v2 
 current `defaultOffset` from every stored per-track value. An unversioned document is v1.
 Get this wrong and you silently double-apply the baseline on every tuned song.
 
-### The existing data is half junk — measure before trusting it
+### The punch problem — this one is live
 
-`~/.local/share/singify/offsets.json` finally has content now that the CORS/persistence bug
-is fixed (`baf8c3e`). 107 tuned tracks, values stored as strings. The distribution:
+`~/.local/share/singify/offsets.json` has content now that the CORS/persistence bug is fixed
+(`baf8c3e`). 107 tuned tracks, values stored as strings. The distribution:
 
 ```
-within ±200 ms  (a plausible chart GAP error)     20 / 107
-within ±1 s                                       47 / 107
-within ±2 s                                       54 / 107
-beyond ±2 s                                       53 / 107   ← half
-largest magnitudes            92956, 48232, -46816, 44953 ms
+within ±200 ms      20 / 107
+within ±1 s         47 / 107
+within ±2 s         54 / 107
+beyond ±2 s         53 / 107
+largest magnitudes  92956, 48232, -46816, 44953 ms
 ```
 
-Half the dataset sits beyond ±2 seconds, and the extremes are a minute and a half. That is
-not output latency and it is not a GAP error.
+**A large value is not automatically wrong.** An UltraStar chart cut against a different
+release — album version vs single edit, or a version with a long intro — genuinely needs a
+multi-second offset, and the owner reports roughly 80% of these working in practice. Treat
+the file as a good default, not as junk.
 
-The cause is `punchSync()` (`src/index.ts:238`): it writes `firstNoteMs - getBaseMs()`, so
-the stored offset absorbs **the playback position at the instant you tapped**. The design
-comment assumes you press `P` on the first sung word; nothing enforces it. Punch at 0:45 and
-you have persisted a 45-second "offset" for that track.
+The actual problem is that **you cannot tell a legitimate large offset from a mis-punch.**
+`punchSync()` (`src/index.ts:238`) writes `firstMs - getBaseMs()`, so the stored value
+absorbs the playback position at the instant you tapped. The comment assumes you press `P` on
+the first sung word; nothing enforces it. Punch at 0:45 by accident and a 45-second "offset"
+is persisted, indistinguishable from a chart that really is 45 seconds out.
 
-Two implications:
+So:
 
-- **Validate at the source.** `punchSync()` should refuse, or at least warn, when
-  `|firstNoteMs − getBaseMs()|` exceeds a sane bound (a few seconds). A silent 90-second
-  write is a bug regardless of sharing.
-- **Never export raw.** Task C's export must gate on plausibility — a hard band, plus the
-  median-with-outlier-rejection rule below. Exporting this file as-is would publish 53 bad
-  values out of 107 and poison the dataset on day one.
+- **Give the write a sanity check.** Not a hard rejection — large values are sometimes right —
+  but `punchSync()` should confirm before persisting anything past a few seconds
+  ("that's a 45 s shift, sure?"), and the readout should make the magnitude obvious.
+- **Make them auditable.** A list of tuned tracks sorted by |offset| would let a human clear
+  the mistakes in one pass. There is no way to see or clear a bad punch today short of
+  editing the JSON.
+- **Never export raw.** Task C's export needs a confirmation step or a plausibility gate;
+  publishing the file as-is would ship whatever mis-punches are in it.
 
-Within the sane band the numbers look like what you'd expect: median −183 ms, stdev 565 ms.
-That subset is the real signal, and it is the part worth sharing.
+Within ±2 s the numbers look like what you'd expect: median −183 ms, stdev 565 ms.
 
 ---
 
@@ -144,8 +156,10 @@ is that these are two different objects:
 
 - `~/.local/share/singify/offsets.json` — **your live state.** Machine-local, written by the
   helper on every nudge, never in git. Leave it exactly where it is.
-- `offsets/community.json` **in the repo** — a curated dataset with a schema, generated by an
-  export step and updated by pull request.
+- `offsets/` **in the repo** — a folder of curated packs, not one blessed file. Owner's call,
+  and it's the better shape: `offsets/community.json` as the general pool, but nothing stops
+  `offsets/eurovision.json` or someone's personal pack living alongside it. The user picks
+  which to import, or imports several and merges.
 
 Committing the live XDG file would be wrong; having a shared dataset in the repo is not. The
 repo is in fact the right home: it is already how people get the extension, PRs give you
@@ -184,8 +198,9 @@ big outlier is almost always someone who hadn't calibrated their baseline.
 wins over the community value. Import fills gaps.
 
 **Commands to add.** `bun run offsets:export` (live store → a PR-ready fragment, only tracks
-you've actually tuned) and `bun run offsets:import` (community file → gaps in the live
-store). Keep them out of the extension bundle; they're helper-side.
+you've actually tuned) and `bun run offsets:import <pack>` (a pack → gaps in the live store).
+Import takes a path or a name so several packs can be layered. Keep both out of the extension
+bundle; they're helper-side.
 
 **Then the landing page gets its list.** `offsets/community.json` is a real, legally clean,
 per-track dataset — artist, title, USDB id — and it answers the question every visitor has

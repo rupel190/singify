@@ -28,12 +28,25 @@ scores your singing off the mic, solo or 1–4 players head-to-head.
 | ![Solo stage](docs/stage-solo.png)<br>**Solo stage** — pitch highway, live score, per-syllable lyric wipe, golden notes | ![Versus](docs/stage-versus.png)<br>**1–4 players** — one coloured lane each, per-player score + mic |
 | ![Session setup](docs/session-setup.png)<br>**Start a session** — roster, playlist, difficulty, round count | ![Results](docs/result.png)<br>**Session results** — winner, star tiers, per-song breakdown |
 
-## Why not fork an existing engine?
+## Why this exists
 
-Existing engines (USDX, Vocaluxe, Performous, UltraStar Play, allkaraoke) own the
-audio; Spotify never exposes decoded PCM (DRM), so that's impossible here. singify
-rides only what Spotify *does* expose — the playback clock + the mic — overlaying
-the chart on whatever's already playing.
+The existing engines are good — USDX, Vocaluxe, Performous, UltraStar Play,
+allkaraoke — and USDB is the reason any of this works at all. They solve singing.
+None of them solve **getting to the singing**: you need a chart *and* the matching
+audio file, at the matching length, for every song anyone might want. Party's on,
+somebody names a song, and you're in a file manager.
+
+singify skips that. The audio is whatever Spotify is already playing, so the
+library is Spotify's; the chart resolves itself in the background. You name a
+song, it's on.
+
+## Why not fork one of them?
+
+They own the audio — they decode the file, so they know the playhead exactly and
+can analyse the backing track. Spotify never exposes decoded PCM (DRM), so that
+route is closed. singify rides only what Spotify *does* expose — the playback
+clock + the mic — overlaying the chart on whatever's already playing. That
+constraint is also what makes the library problem go away.
 
 ## Approach: browser-first, Spotify later
 
