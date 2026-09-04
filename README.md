@@ -126,6 +126,22 @@ lyrics fire earlier), compensating for output latency and slightly-off UltraStar
 `GAP` values. It's a property of the *clock*, saved **per track**, so it lives in
 the adapters — `karaoke-view.tsx` never changed to add it.
 
+Punch-sync (`P`) sets it in one tap: `offset = firstNoteMs − currentPosition`.
+Tuning is self-validating — you punch, you hear it, you nudge. Nothing needs to
+check the number, and a large one is often correct: a chart cut against an album
+version rather than a single edit really can be seconds out. Of 107 tuned tracks
+here, half sit beyond ±2 s and roughly 80% play right.
+
+Two things follow from the value being *absolute*:
+
+- It folds **output latency** (yours) together with **chart `GAP` error** (the
+  file's). In a cabled setup the latency term barely moves, so this is fine
+  today; a single global latency knob is the eventual fix, not a per-track one.
+- It makes offsets the one part of a tuned library that's **worth sharing** —
+  they're small, additive, and yours. The charts themselves can never be
+  redistributed (they're USDB's, hence `charts/` in `.gitignore`). See
+  [TODO.md](TODO.md).
+
 **Mic sensitivity** (0–100%) is the mirror image — a property of the *mic* port
 (the detector's RMS gate), so the view is again untouched. Higher = quieter
 singing is detected (home alone); lower = rejects room/crowd noise (party). It's
