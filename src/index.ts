@@ -1967,13 +1967,13 @@ async function main(): Promise<void> {
       void toggleMics();
     } else if (e.key === "l" || e.key === "L") {
       loadLocalChart(); // pick an UltraStar .txt (no USDB needed)
-    } else if ((e.key === "p" || e.key === "P") && e.ctrlKey) {
-      e.preventDefault(); // no print dialog
+    } else if (e.code === "KeyP" && e.shiftKey && e.altKey) {
+      // e.code, since Alt can change what e.key reports on some layouts.
       togglePunched(); // mark/unmark this track as "punched in proper"
     } else if ((e.key === "p" || e.key === "P") && e.shiftKey) {
       // Shift, not plain P, so a stray press can't wreck the sync.
       if (currentTrackId && isPunched(currentTrackId)) {
-        showReadout("✓ Locked — Ctrl+P to unmark");
+        showReadout("✓ Locked — Shift+Alt+P to unmark");
         return;
       }
       punchSync();

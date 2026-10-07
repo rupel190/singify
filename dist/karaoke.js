@@ -4626,12 +4626,11 @@ async function main() {
       toggleMics();
     } else if (e.key === "l" || e.key === "L") {
       loadLocalChart();
-    } else if ((e.key === "p" || e.key === "P") && e.ctrlKey) {
-      e.preventDefault();
+    } else if (e.code === "KeyP" && e.shiftKey && e.altKey) {
       togglePunched();
     } else if ((e.key === "p" || e.key === "P") && e.shiftKey) {
       if (currentTrackId && isPunched(currentTrackId)) {
-        showReadout("✓ Locked — Ctrl+P to unmark");
+        showReadout("✓ Locked — Shift+Alt+P to unmark");
         return;
       }
       punchSync();
