@@ -2022,6 +2022,8 @@ function SessionHud(props) {
     onRestartSong,
     autoSkip,
     onAutoSkip,
+    punched,
+    onPunched,
     sourceName
   } = props;
   const k = totals.length > 2 ? 0.62 : 1;
@@ -2120,7 +2122,16 @@ function SessionHud(props) {
     },
     onClick: () => onAutoSkip(!autoSkip),
     title: "Skip tracks with no karaoke chart automatically, instead of stopping on them"
-  }, autoSkip ? "☑" : "☐", " Auto-skip")));
+  }, autoSkip ? "☑" : "☐", " Auto-skip"), /* @__PURE__ */ Spicetify.React.createElement("button", {
+    style: {
+      ...btn,
+      borderColor: punched ? ACCENT : "rgba(255,255,255,0.14)",
+      background: punched ? `${ACCENT}1f` : "rgba(0,0,0,0.4)",
+      color: punched ? ACCENT : "#fff"
+    },
+    onClick: onPunched,
+    title: "Mark this song's sync as done (✓ in Spotify's track lists, locks punch) — Shift+Alt+P"
+  }, punched ? "☑" : "☐", " Punched")));
 }
 function NoChartInSession(props) {
   const React = Spicetify.React;
@@ -3383,6 +3394,8 @@ function togglePunched() {
   } catch {}
   mirrorOffsets();
   refreshBadges();
+  if (visible)
+    renderOverlay();
   showReadout(next ? "✓ Punched in proper — punch locked" : "Mark removed — punch unlocked");
 }
 function punchSync() {
@@ -4032,6 +4045,8 @@ function renderOverlay() {
     onRestartSong: restartSong,
     autoSkip: autoSkipNoChart,
     onAutoSkip: setAutoSkip,
+    punched: currentTrackId != null && isPunched(currentTrackId),
+    onPunched: togglePunched,
     sourceName: session.playlistName
   }) : null;
   const topRow = hud || nowPlaying || micBanner ? React.createElement("div", {

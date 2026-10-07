@@ -806,6 +806,9 @@ export function SessionHud(props: {
   /** Hop past tracks with no chart instead of parking on the no-chart card. */
   autoSkip: boolean;
   onAutoSkip: (on: boolean) => void;
+  /** This track is marked "punched in proper" (sync verified; punch locked). */
+  punched: boolean;
+  onPunched: () => void;
   /** Source playlist name, shown when the session is playlist-sourced. */
   sourceName?: string | null;
 }) {
@@ -821,6 +824,8 @@ export function SessionHud(props: {
     onRestartSong,
     autoSkip,
     onAutoSkip,
+    punched,
+    onPunched,
     sourceName,
   } = props;
   // 3+ players add a total line per singer AND wrap the button row, so the box
@@ -922,7 +927,7 @@ export function SessionHud(props: {
           </span>
         )}
       </div>
-      {/* Wraps, because five buttons at this type size outrun the HUD's column
+      {/* Wraps, because six buttons at this type size outrun the HUD's column
           on a narrower screen. */}
       <div style={{ display: "flex", gap: px(18), flexWrap: "wrap" }}>
         <button style={btn} onClick={onSkip}>
@@ -952,6 +957,18 @@ export function SessionHud(props: {
           title="Skip tracks with no karaoke chart automatically, instead of stopping on them"
         >
           {autoSkip ? "☑" : "☐"} Auto-skip
+        </button>
+        <button
+          style={{
+            ...btn,
+            borderColor: punched ? ACCENT : "rgba(255,255,255,0.14)",
+            background: punched ? `${ACCENT}1f` : "rgba(0,0,0,0.4)",
+            color: punched ? ACCENT : "#fff",
+          }}
+          onClick={onPunched}
+          title="Mark this song's sync as done (✓ in Spotify's track lists, locks punch) — Shift+Alt+P"
+        >
+          {punched ? "☑" : "☐"} Punched
         </button>
       </div>
     </div>

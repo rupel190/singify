@@ -264,6 +264,7 @@ function togglePunched(): void {
   }
   mirrorOffsets();
   refreshBadges();
+  if (visible) renderOverlay(); // the HUD's Punched toggle
   showReadout(next ? "✓ Punched in proper — punch locked" : "Mark removed — punch unlocked");
 }
 
@@ -1141,6 +1142,8 @@ function renderOverlay(): void {
         onRestartSong: restartSong,
         autoSkip: autoSkipNoChart,
         onAutoSkip: setAutoSkip,
+        punched: currentTrackId != null && isPunched(currentTrackId),
+        onPunched: togglePunched,
         sourceName: session.playlistName,
       })
     : null;
