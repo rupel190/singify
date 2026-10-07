@@ -3309,7 +3309,10 @@ function firstNoteMs(song) {
   }
   return null;
 }
-function punchSync() {
+var PUNCH_DOUBLE_MS = 400;
+var punchArmedAt = 0;
+var punchArmedBase = 0;
+function punchSync(baseMs = getBaseMs()) {
   if (!currentSong) {
     Spicetify.showNotification?.("Punch-sync: no chart loaded");
     return;
@@ -3319,7 +3322,7 @@ function punchSync() {
     Spicetify.showNotification?.("Punch-sync: chart has no notes");
     return;
   }
-  setOffset(firstMs - getBaseMs());
+  setOffset(firstMs - baseMs);
   const sign = offsetMs > 0 ? "+" : "";
   showReadout(`⏱ Punched — first line synced · offset ${sign}${offsetMs} ms`);
 }
@@ -4006,6 +4009,17 @@ function openHome() {
   activeScreen = "home";
   setVisible(true);
 }
+function openFromKey() {
+  if (!visible && currentSong) {
+    activeScreen = "sing";
+    setVisible(true);
+  } else if (visible && activeScreen === "sing") {
+    activeScreen = "home";
+    renderOverlay();
+  } else {
+    openHome();
+  }
+}
 function openStats() {
   activeScreen = "stats";
   setVisible(true);
@@ -4523,7 +4537,7 @@ async function main() {
     if (typing)
       return;
     if (e.key === "k" || e.key === "K") {
-      openHome();
+      openFromKey();
     } else if (e.key === "q" || e.key === "Q") {
       openSing();
     } else if (e.key === "Escape") {
@@ -4540,7 +4554,15 @@ async function main() {
     } else if (e.key === "l" || e.key === "L") {
       loadLocalChart();
     } else if (e.key === "p" || e.key === "P") {
-      punchSync();
+      const now = performance.now();
+      if (now - punchArmedAt < PUNCH_DOUBLE_MS) {
+        punchArmedAt = 0;
+        punchSync(punchArmedBase);
+      } else {
+        punchArmedAt = now;
+        punchArmedBase = getBaseMs();
+        showReadout("⏱ P again to punch-sync");
+      }
     } else if (e.key === "r" || e.key === "R") {
       reSearch();
     } else if (e.key === "-") {

@@ -235,7 +235,11 @@ function firstNoteMs(song: ParsedSong): number | null {
   return null;
 }
 
-function punchSync(): void {
+const PUNCH_DOUBLE_MS = 400; // max gap between the two P presses
+let punchArmedAt = 0;
+let punchArmedBase = 0;
+
+function punchSync(baseMs = getBaseMs()): void {
   if (!currentSong) {
     Spicetify.showNotification?.("Punch-sync: no chart loaded");
     return;
@@ -245,7 +249,7 @@ function punchSync(): void {
     Spicetify.showNotification?.("Punch-sync: chart has no notes");
     return;
   }
-  setOffset(firstMs - getBaseMs()); // snap the first line to this moment
+  setOffset(firstMs - baseMs); // snap the first line to this moment
   const sign = offsetMs > 0 ? "+" : "";
   showReadout(`⏱ Punched — first line synced · offset ${sign}${offsetMs} ms`);
 }
@@ -1191,6 +1195,20 @@ function openHome(): void {
   setVisible(true);
 }
 
+// K cycles closed → song → menu → closed: reopening lands on the chart you were
+// singing, and the menu is one more press away. No chart loaded → menu directly.
+function openFromKey(): void {
+  if (!visible && currentSong) {
+    activeScreen = "sing";
+    setVisible(true);
+  } else if (visible && activeScreen === "sing") {
+    activeScreen = "home";
+    renderOverlay();
+  } else {
+    openHome();
+  }
+}
+
 // 📊 Stats — show the screen immediately (empty), then fill it once the round
 // history comes back from the helper (async; empty state if it's not running).
 function openStats(): void {
@@ -1902,7 +1920,7 @@ async function main(): Promise<void> {
     if (typing) return;
 
     if (e.key === "k" || e.key === "K") {
-      openHome(); // the menu — same as the Topbar button
+      openFromKey(); // back to the song if one is loaded, else the menu
     } else if (e.key === "q" || e.key === "Q") {
       openSing(); // straight to Quick Sing on the current track
     } else if (e.key === "Escape") {
@@ -1921,7 +1939,17 @@ async function main(): Promise<void> {
     } else if (e.key === "l" || e.key === "L") {
       loadLocalChart(); // pick an UltraStar .txt (no USDB needed)
     } else if (e.key === "p" || e.key === "P") {
-      punchSync(); // tap on the first sung word to snap the offset
+      // Double-press to punch, so a stray P can't wreck the sync. The position is
+      // captured on the FIRST press — that's the tap that marks the word.
+      const now = performance.now();
+      if (now - punchArmedAt < PUNCH_DOUBLE_MS) {
+        punchArmedAt = 0;
+        punchSync(punchArmedBase);
+      } else {
+        punchArmedAt = now;
+        punchArmedBase = getBaseMs();
+        showReadout("⏱ P again to punch-sync");
+      }
     } else if (e.key === "r" || e.key === "R") {
       void reSearch(); // force a fresh USDB search + picker for this track
     } else if (e.key === "-") {

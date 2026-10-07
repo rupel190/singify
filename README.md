@@ -114,9 +114,9 @@ to test against real charts — no USDB account needed. Free CC-licensed charts:
 
 | Key | Action | Key | Action |
 | --- | --- | --- | --- |
-| `K` | Open the menu | `M` | Toggle mic(s) |
+| `K` | Back to the song (again → menu) | `M` | Toggle mic(s) |
 | `Q` | Quick Sing on the current track | `L` | Load a local `.txt` chart |
-| `[` / `]` | Nudge lyrics later / earlier — ±10 ms (Shift ±100, Ctrl ±1) | `P` | Punch-sync (tap on the first word) |
+| `[` / `]` | Nudge lyrics later / earlier — ±10 ms (Shift ±100, Ctrl ±1) | `P` `P` | Punch-sync (double-tap on the first word) |
 | `\` | Reset sync | `R` | Re-search USDB (reopen the picker) |
 | `-` / `=` | Mic sensitivity − / + | `,` / `.` | Hit-line nudge (visual only) |
 | `Ctrl+F` | FPS · ms overlay (debug; auto-shown while playing) | `Ctrl+G` | GPU-lite: strip heavy compositing (debug) |
@@ -126,7 +126,7 @@ lyrics fire earlier), compensating for output latency and slightly-off UltraStar
 `GAP` values. It's a property of the *clock*, saved **per track**, so it lives in
 the adapters — `karaoke-view.tsx` never changed to add it.
 
-Punch-sync (`P`) sets it in one tap: `offset = firstNoteMs − currentPosition`.
+Punch-sync (`P` `P`) sets it in one double-tap: `offset = firstNoteMs − currentPosition`.
 Tuning is self-validating — you punch, you hear it, you nudge. Nothing needs to
 check the number, and a large one is often correct: a chart cut against an album
 version rather than a single edit really can be seconds out. Of 107 tuned tracks
