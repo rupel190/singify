@@ -966,7 +966,7 @@ export function SessionHud(props: {
             color: punched ? ACCENT : "#fff",
           }}
           onClick={onPunched}
-          title="Mark this song's sync as done (✓ in Spotify's track lists, locks punch) — Shift+Alt+P"
+          title="Mark this song's sync as done (✓ in Spotify's track lists, locks P) — Shift+P"
         >
           {punched ? "☑" : "☐"} Punched
         </button>

@@ -54,6 +54,21 @@ export async function confirmPick(
   return song;
 }
 
+/** Write (offsetMs) or clear (null) the punched header in this track's chart file. */
+export async function savePunched(
+  trackId: string,
+  artist: string,
+  title: string,
+  offsetMs: number | null
+): Promise<boolean> {
+  const res = await fetch(`${HELPER_BASE}/punched`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ trackId, artist, title, offsetMs }),
+  });
+  return res.ok;
+}
+
 // ── XDG-backed document stores (settings / offsets / stats) ──────────────────
 //
 // The renderer keeps its live state in localStorage (fast, always there) but

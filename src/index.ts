@@ -60,7 +60,7 @@ import {
   type AudioInput,
   type AudioOutput,
 } from "./mic";
-import { resolveForTrack, confirmPick, helperHealth } from "./resolver-client";
+import { resolveForTrack, confirmPick, helperHealth, savePunched } from "./resolver-client";
 import {
   SENS_KEY,
   SENS_SCALE_KEY,
@@ -173,6 +173,7 @@ function setOffset(next: number): void {
     /* storage blocked — keep the in-memory value */
   }
   mirrorOffsets(); // durable copy → ~/.local/share/singify/offsets.json
+  if (currentTrackId && isPunched(currentTrackId)) syncPunchedChart(); // keep the file's offset current
   showOffset();
 }
 
@@ -250,6 +251,12 @@ function isPunched(uri: string): boolean {
 }
 
 let refreshBadges = (): void => {};
+let punchedWriteTimer = 0;
+
+function syncPunchedChart(): void {
+  clearTimeout(punchedWriteTimer); // coalesce a burst of [ / ] nudges into one write
+  punchedWriteTimer = window.setTimeout(writePunchedToChart, 600);
+}
 
 function togglePunched(): void {
   if (!currentTrackId) {
@@ -257,15 +264,39 @@ function togglePunched(): void {
     return;
   }
   const next = !isPunched(currentTrackId);
+  setPunchedLocal(currentTrackId, next);
+  writePunchedToChart();
+  if (visible) renderOverlay(); // the HUD's Punched toggle
+  showReadout(next ? "✓ Punched in proper — punch locked" : "Mark removed — punch unlocked");
+}
+
+function setPunchedLocal(uri: string, on: boolean): void {
   try {
-    localStorage.setItem(PUNCHED_PREFIX + currentTrackId, next ? "1" : "0");
+    localStorage.setItem(PUNCHED_PREFIX + uri, on ? "1" : "0");
   } catch {
     /* storage blocked */
   }
   mirrorOffsets();
   refreshBadges();
-  if (visible) renderOverlay(); // the HUD's Punched toggle
-  showReadout(next ? "✓ Punched in proper — punch locked" : "Mark removed — punch unlocked");
+}
+
+// The mark (with the offset it vouches for) also goes into the chart .txt, so the
+// file carries it to a fresh profile. Best-effort: no helper, or a chart loaded
+// by hand with L, just means the mark lives in localStorage alone.
+function writePunchedToChart(): void {
+  if (!currentTrackId || manualChart) return;
+  const on = isPunched(currentTrackId);
+  void savePunched(currentTrackId, currentArtist(), currentTitle(), on ? offsetMs : null).catch(
+    (err) => console.error("[singify] punched header write failed:", err)
+  );
+}
+
+/** A chart that arrives carrying the mark: adopt it, and its offset unless this profile has its own. */
+function adoptChartPunch(song: ParsedSong): void {
+  const fromFile = song.headers.punchedOffsetMs;
+  if (fromFile == null || !currentTrackId) return;
+  if (readNum(OFFSET_PREFIX + currentTrackId) == null) setOffset(fromFile);
+  if (!isPunched(currentTrackId)) setPunchedLocal(currentTrackId, true);
 }
 
 
@@ -1670,6 +1701,7 @@ async function onSongChange(): Promise<void> {
       res.status === "local"
     ) {
       currentSong = res.song;
+      adoptChartPunch(res.song);
       autoSkipStreak = 0; // a hit ends the chartless run
     } else if (res.status === "needsPicker") {
       pickerQuery = { artist, title };
@@ -1970,16 +2002,15 @@ async function main(): Promise<void> {
       void toggleMics();
     } else if (e.key === "l" || e.key === "L") {
       loadLocalChart(); // pick an UltraStar .txt (no USDB needed)
-    } else if (e.code === "KeyP" && e.shiftKey && e.altKey) {
-      // e.code, since Alt can change what e.key reports on some layouts.
-      togglePunched(); // mark/unmark this track as "punched in proper"
     } else if ((e.key === "p" || e.key === "P") && e.shiftKey) {
-      // Shift, not plain P, so a stray press can't wreck the sync.
+      togglePunched(); // mark/unmark this track as "punched in proper"
+    } else if (e.key === "p" || e.key === "P") {
+      // A punched track is locked, so a stray P can't wreck a finished sync.
       if (currentTrackId && isPunched(currentTrackId)) {
-        showReadout("✓ Locked — Shift+Alt+P to unmark");
+        showReadout("✓ Locked — Shift+P to unmark");
         return;
       }
-      punchSync();
+      punchSync(); // tap on the first sung word to snap the offset
     } else if (e.key === "r" || e.key === "R") {
       void reSearch(); // force a fresh USDB search + picker for this track
     } else if (e.key === "-") {

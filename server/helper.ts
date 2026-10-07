@@ -46,6 +46,17 @@ export interface HandlerDeps {
   readStore?: (name: string) => Promise<unknown | undefined>;
   /** Write a whitelisted XDG-backed document store; false = unknown name. */
   writeStore?: (name: string, data: unknown) => Promise<boolean>;
+  /**
+   * Write (offsetMs) or clear (null) the punched header in the chart this track
+   * resolves to. Returns the file written, or null if the track has no chart on
+   * disk (e.g. one loaded by hand with L).
+   */
+  markPunched?: (
+    trackId: string,
+    artist: string,
+    title: string,
+    offsetMs: number | null
+  ) => Promise<string | null>;
 }
 
 const CORS: Record<string, string> = {
@@ -141,6 +152,23 @@ export function createHandler(
         }
       }
 
+      if (url.pathname === "/punched" && req.method === "POST" && deps.markPunched) {
+        const body = (await req.json().catch(() => null)) as {
+          trackId?: string;
+          artist?: string;
+          title?: string;
+          offsetMs?: number | null;
+        } | null;
+        if (!body?.trackId) return json({ error: "missing trackId" }, 400);
+        const path = await deps.markPunched(
+          body.trackId,
+          body.artist ?? "",
+          body.title ?? "",
+          typeof body.offsetMs === "number" ? body.offsetMs : null
+        );
+        return path ? json({ ok: true, path }) : json({ error: "no chart file" }, 404);
+      }
+
       if (url.pathname === "/pick" && req.method === "POST") {
         const body = (await req.json().catch(() => null)) as {
           trackId?: string;
@@ -188,7 +216,9 @@ async function startHelper(): Promise<void> {
   const { resolveForTrack, confirmPick, searchForTrack } = await import(
     "../src/resolver"
   );
-  const { setCacheDir, getCacheDir } = await import("../src/cache");
+  const { setCacheDir, getCacheDir, songPath } = await import("../src/cache");
+  const { setPunchedHeader } = await import("../src/punch-header");
+  const { readFile, writeFile } = await import("node:fs/promises");
   const { createLocalCharts } = await import("./local-charts");
   const { readStore, writeStore } = await import("./store");
 
@@ -219,6 +249,14 @@ async function startHelper(): Promise<void> {
     confirmPick,
     readStore,
     writeStore,
+    // Same precedence as /resolve — local folder first, then the USDB cache — so
+    // the mark lands in the file that's actually playing.
+    async markPunched(trackId, artist, title, offsetMs) {
+      const path = localCharts.resolve(artist, title)?.path ?? (await songPath(trackId));
+      if (!path) return null;
+      await writeFile(path, setPunchedHeader(await readFile(path, "utf8"), offsetMs), "utf8");
+      return path;
+    },
   });
 
   const server = Bun.serve({ port: cfg.port, fetch: handler });

@@ -265,3 +265,31 @@ describe("CORS advertises every method the renderer actually uses", () => {
     expect(allowed).toContain("GET");
   });
 });
+
+describe("helper /punched route", () => {
+  const calls: unknown[][] = [];
+  const deps: HandlerDeps = {
+    ...baseDeps,
+    markPunched: async (...args) => {
+      calls.push(args);
+      return args[0] === "spotify:track:none" ? null : "/charts/x.txt";
+    },
+  };
+
+  test("forwards the mark and returns the file written", async () => {
+    const res = await createHandler(deps)(
+      req("POST", "/punched", { trackId: "spotify:track:a", artist: "B", title: "S", offsetMs: -40 })
+    );
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ ok: true, path: "/charts/x.txt" });
+    expect(calls.at(-1)).toEqual(["spotify:track:a", "B", "S", -40]);
+  });
+
+  test("null offset clears; a track with no chart file → 404", async () => {
+    await createHandler(deps)(req("POST", "/punched", { trackId: "spotify:track:a", offsetMs: null }));
+    expect(calls.at(-1)?.[3]).toBeNull();
+    const res = await createHandler(deps)(req("POST", "/punched", { trackId: "spotify:track:none" }));
+    expect(res.status).toBe(404);
+  });
+});
+

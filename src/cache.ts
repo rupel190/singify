@@ -258,6 +258,14 @@ export async function loadSong(
   }
 }
 
+/** Absolute path of a track's cached chart, or null if it has none on disk. */
+export async function songPath(spotifyTrackId: string): Promise<string | null> {
+  const rel = (await readCacheMap())[spotifyTrackId];
+  if (!rel) return null;
+  const abs = join(baseDir, rel.replace(/^\.\//, ""));
+  return existsSync(abs) ? abs : null;
+}
+
 /** Whether a Spotify track is already cached (and its file exists). */
 export async function isCached(spotifyTrackId: string): Promise<boolean> {
   const map = await readCacheMap();

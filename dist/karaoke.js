@@ -1,3 +1,6 @@
+// src/punch-header.ts
+var PUNCHED_TAG = "SINGIFYPUNCHED";
+
 // src/ultrastar-parser.ts
 function isRapNote(t) {
   return t === "rap" || t === "golden-rap";
@@ -104,7 +107,8 @@ function parseHeaders(lines) {
     start: raw.START ? parseFloat(raw.START.replace(",", ".")) : undefined,
     end: raw.END ? parseFloat(raw.END.replace(",", ".")) : undefined,
     relative: (raw.RELATIVE ?? "").toLowerCase() === "yes",
-    encoding: raw.ENCODING
+    encoding: raw.ENCODING,
+    punchedOffsetMs: Number.isFinite(parseFloat(raw[PUNCHED_TAG] ?? "")) ? parseFloat(raw[PUNCHED_TAG]) : undefined
   };
 }
 function noteTypeFromToken(token) {
@@ -2130,7 +2134,7 @@ function SessionHud(props) {
       color: punched ? ACCENT : "#fff"
     },
     onClick: onPunched,
-    title: "Mark this song's sync as done (✓ in Spotify's track lists, locks punch) — Shift+Alt+P"
+    title: "Mark this song's sync as done (✓ in Spotify's track lists, locks P) — Shift+P"
   }, punched ? "☑" : "☐", " Punched")));
 }
 function NoChartInSession(props) {
@@ -2789,6 +2793,14 @@ async function confirmPick(spotifyTrackId, candidate) {
   const { song } = await res.json();
   return song;
 }
+async function savePunched(trackId, artist, title, offsetMs) {
+  const res = await fetch(`${HELPER_BASE}/punched`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ trackId, artist, title, offsetMs })
+  });
+  return res.ok;
+}
 async function loadStore(name) {
   const res = await fetch(`${HELPER_BASE}/store/${encodeURIComponent(name)}`);
   if (!res.ok)
@@ -3329,6 +3341,8 @@ function setOffset(next) {
     }
   } catch {}
   mirrorOffsets();
+  if (currentTrackId && isPunched(currentTrackId))
+    syncPunchedChart();
   showOffset();
 }
 var readoutEl = null;
@@ -3383,20 +3397,44 @@ function isPunched(uri) {
   }
 }
 var refreshBadges = () => {};
+var punchedWriteTimer = 0;
+function syncPunchedChart() {
+  clearTimeout(punchedWriteTimer);
+  punchedWriteTimer = window.setTimeout(writePunchedToChart, 600);
+}
 function togglePunched() {
   if (!currentTrackId) {
     showReadout("Nothing playing to mark");
     return;
   }
   const next = !isPunched(currentTrackId);
-  try {
-    localStorage.setItem(PUNCHED_PREFIX + currentTrackId, next ? "1" : "0");
-  } catch {}
-  mirrorOffsets();
-  refreshBadges();
+  setPunchedLocal(currentTrackId, next);
+  writePunchedToChart();
   if (visible)
     renderOverlay();
   showReadout(next ? "✓ Punched in proper — punch locked" : "Mark removed — punch unlocked");
+}
+function setPunchedLocal(uri, on) {
+  try {
+    localStorage.setItem(PUNCHED_PREFIX + uri, on ? "1" : "0");
+  } catch {}
+  mirrorOffsets();
+  refreshBadges();
+}
+function writePunchedToChart() {
+  if (!currentTrackId || manualChart)
+    return;
+  const on = isPunched(currentTrackId);
+  savePunched(currentTrackId, currentArtist(), currentTitle(), on ? offsetMs : null).catch((err) => console.error("[singify] punched header write failed:", err));
+}
+function adoptChartPunch(song) {
+  const fromFile = song.headers.punchedOffsetMs;
+  if (fromFile == null || !currentTrackId)
+    return;
+  if (readNum(OFFSET_PREFIX + currentTrackId) == null)
+    setOffset(fromFile);
+  if (!isPunched(currentTrackId))
+    setPunchedLocal(currentTrackId, true);
 }
 function punchSync() {
   if (!currentSong) {
@@ -4438,6 +4476,7 @@ async function onSongChange() {
     helperDown = false;
     if (res.status === "cached" || res.status === "downloaded" || res.status === "local") {
       currentSong = res.song;
+      adoptChartPunch(res.song);
       autoSkipStreak = 0;
     } else if (res.status === "needsPicker") {
       pickerQuery = { artist, title };
@@ -4641,11 +4680,11 @@ async function main() {
       toggleMics();
     } else if (e.key === "l" || e.key === "L") {
       loadLocalChart();
-    } else if (e.code === "KeyP" && e.shiftKey && e.altKey) {
-      togglePunched();
     } else if ((e.key === "p" || e.key === "P") && e.shiftKey) {
+      togglePunched();
+    } else if (e.key === "p" || e.key === "P") {
       if (currentTrackId && isPunched(currentTrackId)) {
-        showReadout("✓ Locked — Shift+Alt+P to unmark");
+        showReadout("✓ Locked — Shift+P to unmark");
         return;
       }
       punchSync();
