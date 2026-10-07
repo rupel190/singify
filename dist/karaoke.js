@@ -3383,12 +3383,9 @@ function togglePunched() {
   } catch {}
   mirrorOffsets();
   refreshBadges();
-  showReadout(next ? "✓ Punched in proper — P locked" : "Mark removed — P unlocked");
+  showReadout(next ? "✓ Punched in proper — punch locked" : "Mark removed — punch unlocked");
 }
-var PUNCH_DOUBLE_MS = 400;
-var punchArmedAt = 0;
-var punchArmedBase = 0;
-function punchSync(baseMs = getBaseMs()) {
+function punchSync() {
   if (!currentSong) {
     Spicetify.showNotification?.("Punch-sync: no chart loaded");
     return;
@@ -3398,7 +3395,7 @@ function punchSync(baseMs = getBaseMs()) {
     Spicetify.showNotification?.("Punch-sync: chart has no notes");
     return;
   }
-  setOffset(firstMs - baseMs);
+  setOffset(firstMs - getBaseMs());
   const sign = offsetMs > 0 ? "+" : "";
   showReadout(`⏱ Punched — first line synced · offset ${sign}${offsetMs} ms`);
 }
@@ -4629,22 +4626,15 @@ async function main() {
       toggleMics();
     } else if (e.key === "l" || e.key === "L") {
       loadLocalChart();
-    } else if ((e.key === "p" || e.key === "P") && e.shiftKey) {
+    } else if ((e.key === "p" || e.key === "P") && e.ctrlKey) {
+      e.preventDefault();
       togglePunched();
-    } else if (e.key === "p" || e.key === "P") {
+    } else if ((e.key === "p" || e.key === "P") && e.shiftKey) {
       if (currentTrackId && isPunched(currentTrackId)) {
-        showReadout("✓ Locked — Shift+P to unmark");
+        showReadout("✓ Locked — Ctrl+P to unmark");
         return;
       }
-      const now = performance.now();
-      if (now - punchArmedAt < PUNCH_DOUBLE_MS) {
-        punchArmedAt = 0;
-        punchSync(punchArmedBase);
-      } else {
-        punchArmedAt = now;
-        punchArmedBase = getBaseMs();
-        showReadout("⏱ P again to punch-sync");
-      }
+      punchSync();
     } else if (e.key === "r" || e.key === "R") {
       reSearch();
     } else if (e.key === "-") {

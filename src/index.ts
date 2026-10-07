@@ -225,7 +225,7 @@ function showOffset(): void {
 // ── Punch-to-sync ────────────────────────────────────────────────────────────
 //
 // When a chart's #GAP is seconds off Spotify's master, nudging [ / ] 20 ms at a
-// time is hopeless. Instead: press P the instant you hear the first sung word.
+// time is hopeless. Instead: press Shift+P the instant you hear the first sung word.
 // We know the chart's first note time, so we snap it to "now" in one tap —
 // offset = firstNoteMs − current position — then you fine-tune from there. Saved
 // per track like any offset, so each song is punched once.
@@ -239,8 +239,8 @@ function firstNoteMs(song: ParsedSong): number | null {
 
 // "Punched in proper" — the user's verdict that this track's sync is done. Stored
 // "1"/"0" rather than removed, so an unmark can't be resurrected by the disk
-// seed (it only fills MISSING keys). A marked track ignores P, so a stray
-// double-tap can't undo a sync you were happy with.
+// seed (it only fills MISSING keys). A marked track ignores Shift+P, so a stray
+// punch can't undo a sync you were happy with.
 function isPunched(uri: string): boolean {
   try {
     return localStorage.getItem(PUNCHED_PREFIX + uri) === "1";
@@ -264,14 +264,11 @@ function togglePunched(): void {
   }
   mirrorOffsets();
   refreshBadges();
-  showReadout(next ? "✓ Punched in proper — P locked" : "Mark removed — P unlocked");
+  showReadout(next ? "✓ Punched in proper — punch locked" : "Mark removed — punch unlocked");
 }
 
-const PUNCH_DOUBLE_MS = 400; // max gap between the two P presses
-let punchArmedAt = 0;
-let punchArmedBase = 0;
 
-function punchSync(baseMs = getBaseMs()): void {
+function punchSync(): void {
   if (!currentSong) {
     Spicetify.showNotification?.("Punch-sync: no chart loaded");
     return;
@@ -281,7 +278,7 @@ function punchSync(baseMs = getBaseMs()): void {
     Spicetify.showNotification?.("Punch-sync: chart has no notes");
     return;
   }
-  setOffset(firstMs - baseMs); // snap the first line to this moment
+  setOffset(firstMs - getBaseMs()); // snap the first line to this moment
   const sign = offsetMs > 0 ? "+" : "";
   showReadout(`⏱ Punched — first line synced · offset ${sign}${offsetMs} ms`);
 }
@@ -1970,24 +1967,16 @@ async function main(): Promise<void> {
       void toggleMics();
     } else if (e.key === "l" || e.key === "L") {
       loadLocalChart(); // pick an UltraStar .txt (no USDB needed)
-    } else if ((e.key === "p" || e.key === "P") && e.shiftKey) {
+    } else if ((e.key === "p" || e.key === "P") && e.ctrlKey) {
+      e.preventDefault(); // no print dialog
       togglePunched(); // mark/unmark this track as "punched in proper"
-    } else if (e.key === "p" || e.key === "P") {
+    } else if ((e.key === "p" || e.key === "P") && e.shiftKey) {
+      // Shift, not plain P, so a stray press can't wreck the sync.
       if (currentTrackId && isPunched(currentTrackId)) {
-        showReadout("✓ Locked — Shift+P to unmark");
+        showReadout("✓ Locked — Ctrl+P to unmark");
         return;
       }
-      // Double-press to punch, so a stray P can't wreck the sync. The position is
-      // captured on the FIRST press — that's the tap that marks the word.
-      const now = performance.now();
-      if (now - punchArmedAt < PUNCH_DOUBLE_MS) {
-        punchArmedAt = 0;
-        punchSync(punchArmedBase);
-      } else {
-        punchArmedAt = now;
-        punchArmedBase = getBaseMs();
-        showReadout("⏱ P again to punch-sync");
-      }
+      punchSync();
     } else if (e.key === "r" || e.key === "R") {
       void reSearch(); // force a fresh USDB search + picker for this track
     } else if (e.key === "-") {
