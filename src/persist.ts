@@ -26,6 +26,7 @@ import {
   AUTOSKIP_KEY,
   DEFAULT_OFFSET_KEY,
   OFFSET_PREFIX,
+  PUNCHED_PREFIX,
 } from "./storage-keys";
 
 // The knobs mirrored to the on-disk "settings" store. Built from the shared key
@@ -66,7 +67,11 @@ function gatherOffsets(): Record<string, string> {
   if (!store) return out;
   for (let i = 0; i < store.length; i++) {
     const k = store.key(i);
-    if (k && (k === DEFAULT_OFFSET_KEY || k.startsWith(OFFSET_PREFIX))) {
+    // The punched mark rides along: it's a verdict on the offset, so it lives with it.
+    if (
+      k &&
+      (k === DEFAULT_OFFSET_KEY || k.startsWith(OFFSET_PREFIX) || k.startsWith(PUNCHED_PREFIX))
+    ) {
       const v = store.getItem(k);
       if (v != null) out[k] = v;
     }

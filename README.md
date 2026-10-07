@@ -119,6 +119,7 @@ to test against real charts — no USDB account needed. Free CC-licensed charts:
 | `[` / `]` | Nudge lyrics later / earlier — ±10 ms (Shift ±100, Ctrl ±1) | `P` `P` | Punch-sync (double-tap on the first word) |
 | `\` | Reset sync | `R` | Re-search USDB (reopen the picker) |
 | `-` / `=` | Mic sensitivity − / + | `,` / `.` | Hit-line nudge (visual only) |
+| `Shift+P` | Mark "punched in proper" (✓ in track lists, locks `P`) | | |
 | `Ctrl+F` | FPS · ms overlay (debug; auto-shown while playing) | `Ctrl+G` | GPU-lite: strip heavy compositing (debug) |
 
 The **offset** shifts the whole karaoke timeline against the audio (positive =

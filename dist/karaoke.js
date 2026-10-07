@@ -2815,6 +2815,61 @@ var AUTOSKIP_KEY = "singify:autoSkipNoChart";
 var FPS_KEY = "singify:fps";
 var DEFAULT_OFFSET_KEY = "singify:offsetMs";
 var OFFSET_PREFIX = "singify:offset:";
+var PUNCHED_PREFIX = "singify:punched:";
+
+// src/punched-badges.ts
+var ROW = ".main-trackList-trackListRow";
+var TITLE = ".main-trackList-rowTitle";
+var BADGE_CLASS = "singify-punched-badge";
+function rowUri(row) {
+  const fiberKey = Object.keys(row).find((k) => k.startsWith("__reactFiber"));
+  let fiber = fiberKey ? row[fiberKey] : null;
+  for (let depth = 0;fiber && depth < 30; depth++, fiber = fiber.return) {
+    const uri = fiber.memoizedProps?.uri ?? fiber.memoizedProps?.item?.uri;
+    if (typeof uri === "string" && uri.startsWith("spotify:"))
+      return uri;
+  }
+  return null;
+}
+function decorate(row, isPunched) {
+  const title = row.querySelector(TITLE);
+  if (!title)
+    return;
+  const uri = rowUri(row);
+  const want = uri != null && isPunched(uri);
+  const badge = title.querySelector(`.${BADGE_CLASS}`);
+  if (want && !badge) {
+    const el = document.createElement("span");
+    el.className = BADGE_CLASS;
+    el.textContent = "✓";
+    el.title = "Singify: punched in proper";
+    Object.assign(el.style, {
+      marginInlineStart: "6px",
+      color: "#1ed760",
+      fontWeight: "700"
+    });
+    title.appendChild(el);
+  } else if (!want && badge) {
+    badge.remove();
+  }
+}
+function startPunchedBadges(isPunched) {
+  const refresh = () => {
+    for (const row of document.querySelectorAll(ROW))
+      decorate(row, isPunched);
+  };
+  let pending = 0;
+  new MutationObserver(() => {
+    if (pending)
+      return;
+    pending = requestAnimationFrame(() => {
+      pending = 0;
+      refresh();
+    });
+  }).observe(document.body, { childList: true, subtree: true });
+  refresh();
+  return refresh;
+}
 
 // src/stats.ts
 function songLabel(r) {
@@ -3098,7 +3153,7 @@ function gatherOffsets() {
     return out;
   for (let i = 0;i < store.length; i++) {
     const k = store.key(i);
-    if (k && (k === DEFAULT_OFFSET_KEY || k.startsWith(OFFSET_PREFIX))) {
+    if (k && (k === DEFAULT_OFFSET_KEY || k.startsWith(OFFSET_PREFIX) || k.startsWith(PUNCHED_PREFIX))) {
       const v = store.getItem(k);
       if (v != null)
         out[k] = v;
@@ -3308,6 +3363,27 @@ function firstNoteMs(song) {
       return s.startMs;
   }
   return null;
+}
+function isPunched(uri) {
+  try {
+    return localStorage.getItem(PUNCHED_PREFIX + uri) === "1";
+  } catch {
+    return false;
+  }
+}
+var refreshBadges = () => {};
+function togglePunched() {
+  if (!currentTrackId) {
+    showReadout("Nothing playing to mark");
+    return;
+  }
+  const next = !isPunched(currentTrackId);
+  try {
+    localStorage.setItem(PUNCHED_PREFIX + currentTrackId, next ? "1" : "0");
+  } catch {}
+  mirrorOffsets();
+  refreshBadges();
+  showReadout(next ? "✓ Punched in proper — P locked" : "Mark removed — P unlocked");
 }
 var PUNCH_DOUBLE_MS = 400;
 var punchArmedAt = 0;
@@ -4553,7 +4629,13 @@ async function main() {
       toggleMics();
     } else if (e.key === "l" || e.key === "L") {
       loadLocalChart();
+    } else if ((e.key === "p" || e.key === "P") && e.shiftKey) {
+      togglePunched();
     } else if (e.key === "p" || e.key === "P") {
+      if (currentTrackId && isPunched(currentTrackId)) {
+        showReadout("✓ Locked — Shift+P to unmark");
+        return;
+      }
       const now = performance.now();
       if (now - punchArmedAt < PUNCH_DOUBLE_MS) {
         punchArmedAt = 0;
@@ -4582,6 +4664,7 @@ async function main() {
       toggleFps();
     }
   }, true);
+  refreshBadges = startPunchedBadges(isPunched);
   onSongChange();
 }
 main();

@@ -72,7 +72,9 @@ import {
   FPS_KEY,
   DEFAULT_OFFSET_KEY,
   OFFSET_PREFIX,
+  PUNCHED_PREFIX,
 } from "./storage-keys";
+import { startPunchedBadges } from "./punched-badges";
 import { StatsScreen } from "./stats-view";
 import type { StatRound } from "./stats";
 import {
@@ -233,6 +235,36 @@ function firstNoteMs(song: ParsedSong): number | null {
     if (s) return s.startMs;
   }
   return null;
+}
+
+// "Punched in proper" — the user's verdict that this track's sync is done. Stored
+// "1"/"0" rather than removed, so an unmark can't be resurrected by the disk
+// seed (it only fills MISSING keys). A marked track ignores P, so a stray
+// double-tap can't undo a sync you were happy with.
+function isPunched(uri: string): boolean {
+  try {
+    return localStorage.getItem(PUNCHED_PREFIX + uri) === "1";
+  } catch {
+    return false;
+  }
+}
+
+let refreshBadges = (): void => {};
+
+function togglePunched(): void {
+  if (!currentTrackId) {
+    showReadout("Nothing playing to mark");
+    return;
+  }
+  const next = !isPunched(currentTrackId);
+  try {
+    localStorage.setItem(PUNCHED_PREFIX + currentTrackId, next ? "1" : "0");
+  } catch {
+    /* storage blocked */
+  }
+  mirrorOffsets();
+  refreshBadges();
+  showReadout(next ? "✓ Punched in proper — P locked" : "Mark removed — P unlocked");
 }
 
 const PUNCH_DOUBLE_MS = 400; // max gap between the two P presses
@@ -1938,7 +1970,13 @@ async function main(): Promise<void> {
       void toggleMics();
     } else if (e.key === "l" || e.key === "L") {
       loadLocalChart(); // pick an UltraStar .txt (no USDB needed)
+    } else if ((e.key === "p" || e.key === "P") && e.shiftKey) {
+      togglePunched(); // mark/unmark this track as "punched in proper"
     } else if (e.key === "p" || e.key === "P") {
+      if (currentTrackId && isPunched(currentTrackId)) {
+        showReadout("✓ Locked — Shift+P to unmark");
+        return;
+      }
       // Double-press to punch, so a stray P can't wreck the sync. The position is
       // captured on the FIRST press — that's the tap that marks the word.
       const now = performance.now();
@@ -1976,6 +2014,8 @@ async function main(): Promise<void> {
     },
     true
   );
+
+  refreshBadges = startPunchedBadges(isPunched);
 
   // Prime with whatever is already playing.
   void onSongChange();

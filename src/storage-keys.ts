@@ -25,3 +25,5 @@ export const FPS_KEY = "singify:fps";
 export const DEFAULT_OFFSET_KEY = "singify:offsetMs";
 /** Per-track lyric offset — the full key is `${OFFSET_PREFIX}${trackId}`. */
 export const OFFSET_PREFIX = "singify:offset:";
+/** "Punched in proper" mark — `${PUNCHED_PREFIX}${trackUri}` = "1" while set. */
+export const PUNCHED_PREFIX = "singify:punched:";
