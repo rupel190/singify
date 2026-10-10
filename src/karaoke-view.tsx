@@ -251,6 +251,11 @@ function useFrame(
   return frame;
 }
 
+// Live-mic timing allowances (see scoring.TimingOptions). The lag is an estimate
+// — 2048-sample analysis window at 48 kHz (~43 ms) plus input buffering — not a
+// measurement; raise it if note starts still score as misses.
+const LIVE_TIMING = { micLagMs: 80, holdMs: 120, onsetGraceMs: 100 };
+
 /** One player's scoring engine: score keeper + marker smoother + sung trail. */
 interface Engine {
   keeper: ReturnType<typeof createScoreKeeper>;
@@ -653,7 +658,7 @@ export function KaraokeView(props: KaraokeViewProps) {
       let e = enginesRef.current.get(id);
       if (!e) {
         e = {
-          keeper: createScoreKeeper(song, difficultyRef.current),
+          keeper: createScoreKeeper(song, difficultyRef.current, LIVE_TIMING),
           smoother: createPitchSmoother(),
           trail: [],
         };

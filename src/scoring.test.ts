@@ -63,16 +63,63 @@ describe("rap notes (R / G) score on presence, not pitch", () => {
 describe("gradeForScore", () => {
   test("maps score bands to named tiers", () => {
     expect(gradeForScore(10000).name).toBe("Superstar");
-    expect(gradeForScore(9000).name).toBe("Superstar");
-    expect(gradeForScore(8999).name).toBe("Lead Singer");
-    expect(gradeForScore(6000).name).toBe("Rising Star");
-    expect(gradeForScore(4000).name).toBe("Hopeful");
-    expect(gradeForScore(2000).name).toBe("Amateur");
+    expect(gradeForScore(8500).name).toBe("Superstar");
+    expect(gradeForScore(8499).name).toBe("Lead Singer");
+    expect(gradeForScore(5500).name).toBe("Rising Star");
+    expect(gradeForScore(3500).name).toBe("Hopeful");
+    expect(gradeForScore(1500).name).toBe("Amateur");
+    expect(gradeForScore(1499).name).toBe("Tone Deaf");
     expect(gradeForScore(0).name).toBe("Tone Deaf");
   });
   test("stars rise with the tier", () => {
     expect(gradeForScore(10000).stars).toBe(5);
     expect(gradeForScore(0).stars).toBe(0);
+  });
+});
+
+describe("live timing allowances", () => {
+  const one = parse("#TITLE:T\n#ARTIST:A\n#BPM:60\n#GAP:0\n: 0 4 0 la\nE"); // 0–1000 ms
+
+  test("mic lag: a perfectly held note sung 80 ms late still scores full", () => {
+    const k = createScoreKeeper(one, "easy", { micLagMs: 80 });
+    singNote(k, 80, 1080, 0, 50);
+    expect(k.read().notePoints).toBe(9000);
+  });
+
+  test("without lag compensation the same late note loses points", () => {
+    const k = createScoreKeeper(one, "easy");
+    singNote(k, 0, 80, 7, 4); // still on the previous pitch
+    singNote(k, 80, 1000, 0, 46);
+    expect(k.read().notePoints).toBeLessThan(9000);
+  });
+
+  test("hold: a short consonant gap inside a note is not a miss", () => {
+    const k = createScoreKeeper(one, "easy", { holdMs: 120 });
+    singNote(k, 0, 400, 0, 20);
+    singNote(k, 400, 500, null, 5); // 100 ms gap
+    singNote(k, 500, 1000, 0, 25);
+    expect(k.read().notePoints).toBe(9000);
+  });
+
+  test("hold expires: a long silence still counts against you", () => {
+    const k = createScoreKeeper(one, "easy", { holdMs: 120 });
+    singNote(k, 0, 200, 0, 10);
+    singNote(k, 200, 1000, null, 40);
+    expect(k.read().notePoints).toBeLessThan(4000);
+  });
+
+  test("onset grace: a late entry is not held against the note", () => {
+    const k = createScoreKeeper(one, "easy", { onsetGraceMs: 100 });
+    singNote(k, 0, 100, null, 5);
+    singNote(k, 100, 1000, 0, 45);
+    expect(k.read().notePoints).toBe(9000);
+  });
+
+  test("notesReached counts notes playback got to", () => {
+    const k = createScoreKeeper(SONG);
+    singNote(k, 0, 1000, null);
+    expect(k.read().notesReached).toBe(1);
+    expect(k.read().notesTotal).toBe(3);
   });
 });
 

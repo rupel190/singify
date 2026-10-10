@@ -70,11 +70,11 @@ export interface Grade {
  * copy — and are deliberately easy to retune in one place.
  */
 export function gradeForScore(total: number): Grade {
-  if (total >= 9000) return { name: "Superstar", stars: 5 };
-  if (total >= 7500) return { name: "Lead Singer", stars: 4 };
-  if (total >= 6000) return { name: "Rising Star", stars: 3 };
-  if (total >= 4000) return { name: "Hopeful", stars: 2 };
-  if (total >= 2000) return { name: "Amateur", stars: 1 };
+  if (total >= 8500) return { name: "Superstar", stars: 5 };
+  if (total >= 7000) return { name: "Lead Singer", stars: 4 };
+  if (total >= 5500) return { name: "Rising Star", stars: 3 };
+  if (total >= 3500) return { name: "Hopeful", stars: 2 };
+  if (total >= 1500) return { name: "Amateur", stars: 1 };
   return { name: "Tone Deaf", stars: 0 };
 }
 
@@ -89,6 +89,24 @@ export interface ScoreState {
   notesSung: number;
   /** Total scored notes in the song. */
   notesTotal: number;
+  /** Notes playback has reached so far — how much of the song was actually played. */
+  notesReached: number;
+}
+
+/**
+ * Timing allowances for a live mic. All default to 0 (exact timing) so the pure
+ * core stays easy to reason about in tests; the live view passes real values.
+ */
+export interface TimingOptions {
+  /** The sung pitch arrives this late (analysis window + input buffer), so each
+   *  sample is credited to the note playing this long ago. */
+  micLagMs?: number;
+  /** A silent frame this soon after a voiced one keeps the last pitch — a
+   *  consonant or breath inside a note is not a miss. */
+  holdMs?: number;
+  /** A miss in a note's first this-many ms is ignored, not counted against it —
+   *  a slightly late entry costs nothing. Hits there still count. */
+  onsetGraceMs?: number;
 }
 
 interface NoteAcc {
@@ -119,9 +137,12 @@ export interface ScoreKeeper {
  */
 export function createScoreKeeper(
   song: ParsedSong,
-  difficulty: Difficulty = "easy"
+  difficulty: Difficulty = "easy",
+  timing: TimingOptions = {}
 ): ScoreKeeper {
   const tol = toleranceSemitones(difficulty);
+  const { micLagMs = 0, holdMs = 0, onsetGraceMs = 0 } = timing;
+  let lastVoiced: { ms: number; midi: number } | null = null;
 
   const notes: NoteAcc[] = [];
   let totalWeight = 0;
@@ -170,21 +191,28 @@ export function createScoreKeeper(
   }
 
   function sample(positionMs: number, sungMidi: number | null): void {
-    const n = activeNote(positionMs);
+    if (sungMidi != null) lastVoiced = { ms: positionMs, midi: sungMidi };
+    else if (lastVoiced && positionMs - lastVoiced.ms <= holdMs && positionMs >= lastVoiced.ms)
+      sungMidi = lastVoiced.midi;
+
+    const t = positionMs - micLagMs;
+    const n = activeNote(t);
     if (!n) return; // outside every note — nothing to credit
-    n.totalFrames++;
-    if (sungMidi == null) return; // silence never credits
-    if (n.rap) {
-      n.hitFrames++; // rap: any voiced input counts — rhythm, not pitch
-      return;
+
+    let hit = false;
+    if (sungMidi != null) {
+      // rap: any voiced input counts — rhythm, not pitch
+      hit = n.rap || Math.abs(foldToOctaveOf(sungMidi, n.pitch, n.pitch) - n.pitch) <= tol;
     }
-    const folded = foldToOctaveOf(sungMidi, n.pitch, n.pitch);
-    if (Math.abs(folded - n.pitch) <= tol) n.hitFrames++;
+    if (!hit && t - n.startMs < onsetGraceMs) return; // late entry: not held against you
+    n.totalFrames++;
+    if (hit) n.hitFrames++;
   }
 
   function read(): ScoreState {
     let notePoints = 0;
     let notesSung = 0;
+    let notesReached = 0;
     const lineWeight = new Map<number, number>();
     const lineCredit = new Map<number, number>();
 
@@ -192,6 +220,7 @@ export function createScoreKeeper(
       const f = n.totalFrames > 0 ? n.hitFrames / n.totalFrames : 0;
       notePoints += n.maxPoints * f;
       if (f > 0) notesSung++;
+      if (n.totalFrames > 0) notesReached++;
       lineWeight.set(n.lineIndex, (lineWeight.get(n.lineIndex) ?? 0) + n.weight);
       lineCredit.set(
         n.lineIndex,
@@ -215,6 +244,7 @@ export function createScoreKeeper(
       linePoints: Math.round(linePoints),
       notesSung,
       notesTotal: notes.length,
+      notesReached,
     };
   }
 
@@ -223,6 +253,7 @@ export function createScoreKeeper(
       n.hitFrames = 0;
       n.totalFrames = 0;
     }
+    lastVoiced = null;
   }
 
   return { sample, read, reset };
