@@ -854,8 +854,9 @@ function ensureOverlay(): HTMLDivElement {
     position: "fixed",
     inset: "0",
     zIndex: "999",
-    background: "rgba(10, 10, 14, 0.94)",
-    backdropFilter: "blur(6px)",
+    // Opaque, no backdrop blur: Spotify's page is hidden underneath (setVisible),
+    // so there is nothing to see through — and a full-screen blur re-ran every frame.
+    background: "rgb(10, 10, 14)",
     display: "none",
   } as CSSStyleDeclaration);
   document.body.appendChild(overlay);
@@ -1229,6 +1230,11 @@ function setVisible(next: boolean): void {
   visible = next;
   const el = ensureOverlay();
   el.style.display = visible ? "block" : "none";
+  // Hide Spotify's own page while the overlay covers it. Its library, carousels
+  // and image fades keep ~300 CSS animations running unseen, and the browser
+  // re-layerizes them every frame — measured 29 → 59 fps avg on hiding it.
+  const spotifyMain = document.getElementById("main");
+  if (spotifyMain) spotifyMain.style.display = visible ? "none" : "";
   if (visible) {
     renderOverlay();
     if (fpsWanted) startFps(); // debug frame-time readout, auto-shown while playing
