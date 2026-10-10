@@ -185,21 +185,26 @@ export function thresholdToSensitivity(threshold: number): number {
 // The RMS that reads as a "full" meter bar. Singing peaks well below 1.0, so the
 // meter tops out here rather than at unity — keeps the useful range legible.
 const METER_PEAK = 0.35;
+// The RMS at the bar's left edge (~-54 dBFS); anything quieter reads as empty.
+const METER_FLOOR = 0.002;
 
 /**
- * Map an RMS level (0..~METER_PEAK) to a 0..1 meter fraction on a perceptual
- * (square-root) scale. A linear bar crushes the gate + quiet detail into the
- * bottom few pixels; √ spreads them out. The live level AND the gate marker both
- * go through this, so the singer literally watches their voice cross the gate.
+ * Map an RMS level to a 0..1 meter fraction on a decibel (log) scale, from
+ * METER_FLOOR to METER_PEAK. The live level AND the gate marker both go through
+ * this, so the singer watches their voice cross the gate. A log scale puts the
+ * gates people actually use (sensitivity ~10–45) mid-bar; the old √ scale
+ * crammed them into the first third, where every pixel was a big jump.
  */
 export function rmsToMeter(rms: number): number {
-  return Math.min(1, Math.max(0, Math.sqrt(Math.max(0, rms) / METER_PEAK)));
+  if (!(rms > METER_FLOOR)) return 0;
+  return Math.min(1, Math.log(rms / METER_FLOOR) / Math.log(METER_PEAK / METER_FLOOR));
 }
 
 /** Inverse of rmsToMeter: a 0..1 meter fraction (e.g. a drag position) → RMS. */
 export function meterToRms(frac: number): number {
   const f = Math.min(1, Math.max(0, frac));
-  return f * f * METER_PEAK;
+  if (f === 0) return 0;
+  return METER_FLOOR * (METER_PEAK / METER_FLOOR) ** f;
 }
 
 export interface DetectOptions {

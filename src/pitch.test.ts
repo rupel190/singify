@@ -326,6 +326,14 @@ describe("mic meter mappings (sensitivity ↔ threshold, rms ↔ meter)", () => 
     expect(rmsToMeter(0.05)).toBeGreaterThan(rmsToMeter(0.01));
   });
 
+  test("everyday gates (sensitivity 10–45) land mid-bar, not in the first third", () => {
+    for (const sens of [10, 45]) {
+      const f = rmsToMeter(sensitivityToThreshold(sens));
+      expect(f).toBeGreaterThan(0.4);
+      expect(f).toBeLessThan(0.75);
+    }
+  });
+
   test("the gate sits on the same meter scale as the level (louder-than-gate reads as past it)", () => {
     // A voice at RMS 0.1 should clear the default-ish gate at sensitivity 60.
     const gateFrac = rmsToMeter(sensitivityToThreshold(60));
