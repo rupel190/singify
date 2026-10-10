@@ -367,20 +367,22 @@ function toleranceSemitones(difficulty) {
   return difficulty === "easy" ? 2 : difficulty === "medium" ? 1 : 0;
 }
 function gradeForScore(total) {
-  if (total >= 9000)
+  if (total >= 8500)
     return { name: "Superstar", stars: 5 };
-  if (total >= 7500)
+  if (total >= 7000)
     return { name: "Lead Singer", stars: 4 };
-  if (total >= 6000)
+  if (total >= 5500)
     return { name: "Rising Star", stars: 3 };
-  if (total >= 4000)
+  if (total >= 3500)
     return { name: "Hopeful", stars: 2 };
-  if (total >= 2000)
+  if (total >= 1500)
     return { name: "Amateur", stars: 1 };
   return { name: "Tone Deaf", stars: 0 };
 }
-function createScoreKeeper(song, difficulty = "easy") {
+function createScoreKeeper(song, difficulty = "easy", timing = {}) {
   const tol = toleranceSemitones(difficulty);
+  const { micLagMs = 0, holdMs = 0, onsetGraceMs = 0 } = timing;
+  let lastVoiced = null;
   const notes = [];
   let totalWeight = 0;
   const bonusLines = new Set;
@@ -426,23 +428,28 @@ function createScoreKeeper(song, difficulty = "easy") {
     return null;
   }
   function sample(positionMs, sungMidi) {
-    const n = activeNote(positionMs);
+    if (sungMidi != null)
+      lastVoiced = { ms: positionMs, midi: sungMidi };
+    else if (lastVoiced && positionMs - lastVoiced.ms <= holdMs && positionMs >= lastVoiced.ms)
+      sungMidi = lastVoiced.midi;
+    const t = positionMs - micLagMs;
+    const n = activeNote(t);
     if (!n)
       return;
-    n.totalFrames++;
-    if (sungMidi == null)
-      return;
-    if (n.rap) {
-      n.hitFrames++;
-      return;
+    let hit = false;
+    if (sungMidi != null) {
+      hit = n.rap || Math.abs(foldToOctaveOf(sungMidi, n.pitch, n.pitch) - n.pitch) <= tol;
     }
-    const folded = foldToOctaveOf(sungMidi, n.pitch, n.pitch);
-    if (Math.abs(folded - n.pitch) <= tol)
+    if (!hit && t - n.startMs < onsetGraceMs)
+      return;
+    n.totalFrames++;
+    if (hit)
       n.hitFrames++;
   }
   function read() {
     let notePoints = 0;
     let notesSung = 0;
+    let notesReached = 0;
     const lineWeight = new Map;
     const lineCredit = new Map;
     for (const n of notes) {
@@ -450,6 +457,8 @@ function createScoreKeeper(song, difficulty = "easy") {
       notePoints += n.maxPoints * f;
       if (f > 0)
         notesSung++;
+      if (n.totalFrames > 0)
+        notesReached++;
       lineWeight.set(n.lineIndex, (lineWeight.get(n.lineIndex) ?? 0) + n.weight);
       lineCredit.set(n.lineIndex, (lineCredit.get(n.lineIndex) ?? 0) + n.weight * f);
     }
@@ -467,7 +476,8 @@ function createScoreKeeper(song, difficulty = "easy") {
       notePoints: Math.round(notePoints),
       linePoints: Math.round(linePoints),
       notesSung,
-      notesTotal: notes.length
+      notesTotal: notes.length,
+      notesReached
     };
   }
   function reset() {
@@ -475,6 +485,7 @@ function createScoreKeeper(song, difficulty = "easy") {
       n.hitFrames = 0;
       n.totalFrames = 0;
     }
+    lastVoiced = null;
   }
   return { sample, read, reset };
 }
@@ -632,6 +643,7 @@ function useFrame(getPositionMs, computeFrame) {
   }, [getPositionMs, computeFrame]);
   return frame;
 }
+var LIVE_TIMING = { micLagMs: 80, holdMs: 120, onsetGraceMs: 100 };
 function ensureGoldShimmer() {
   if (typeof document === "undefined" || document.getElementById("singify-gold-shimmer"))
     return;
@@ -889,7 +901,7 @@ function KaraokeView(props) {
     let e = enginesRef.current.get(id);
     if (!e) {
       e = {
-        keeper: createScoreKeeper(song, difficultyRef.current),
+        keeper: createScoreKeeper(song, difficultyRef.current, LIVE_TIMING),
         smoother: createPitchSmoother(),
         trail: []
       };
@@ -2112,7 +2124,7 @@ function SessionHud(props) {
   }, "End"), /* @__PURE__ */ Spicetify.React.createElement("button", {
     style: btn,
     onClick: onRestartSong,
-    title: "Play this song from the top"
+    title: "Play this song from the top — R"
   }, "⟲ Restart"), /* @__PURE__ */ Spicetify.React.createElement("button", {
     style: btn,
     onClick: onResetScores,
@@ -4313,6 +4325,9 @@ function onRoundComplete(scores) {
     return;
   if (scores.length === 0)
     return;
+  const reached = Math.max(...scores.map((s) => s.score.notesReached / Math.max(1, s.score.notesTotal)));
+  if (reached < 0.5)
+    return;
   if (!competitiveMode)
     scoredTrackIds.add(currentTrackId);
   recordStatRound({
@@ -4688,8 +4703,11 @@ async function main() {
         return;
       }
       punchSync();
-    } else if (e.key === "r" || e.key === "R") {
+    } else if ((e.key === "r" || e.key === "R") && e.shiftKey) {
       reSearch();
+    } else if (e.key === "r" || e.key === "R") {
+      if (currentSong)
+        restartSong();
     } else if (e.key === "-") {
       setSensitivity(sensitivity - 5);
     } else if (e.key === "=") {
