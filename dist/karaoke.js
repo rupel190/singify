@@ -283,12 +283,17 @@ function thresholdToSensitivity(threshold) {
   return Math.min(100, Math.max(0, 100 * (Math.log(t / MAX) / Math.log(MIN / MAX))));
 }
 var METER_PEAK = 0.35;
+var METER_FLOOR = 0.002;
 function rmsToMeter(rms2) {
-  return Math.min(1, Math.max(0, Math.sqrt(Math.max(0, rms2) / METER_PEAK)));
+  if (!(rms2 > METER_FLOOR))
+    return 0;
+  return Math.min(1, Math.log(rms2 / METER_FLOOR) / Math.log(METER_PEAK / METER_FLOOR));
 }
 function meterToRms(frac) {
   const f = Math.min(1, Math.max(0, frac));
-  return f * f * METER_PEAK;
+  if (f === 0)
+    return 0;
+  return METER_FLOOR * (METER_PEAK / METER_FLOOR) ** f;
 }
 var _acf = null;
 function acfScratch(n) {
@@ -3848,8 +3853,7 @@ function ensureOverlay() {
     position: "fixed",
     inset: "0",
     zIndex: "999",
-    background: "rgba(10, 10, 14, 0.94)",
-    backdropFilter: "blur(6px)",
+    background: "rgb(10, 10, 14)",
     display: "none"
   });
   document.body.appendChild(overlay);
@@ -4122,6 +4126,9 @@ function setVisible(next) {
   visible = next;
   const el = ensureOverlay();
   el.style.display = visible ? "block" : "none";
+  const spotifyMain = document.getElementById("main");
+  if (spotifyMain)
+    spotifyMain.style.display = visible ? "none" : "";
   if (visible) {
     renderOverlay();
     if (fpsWanted)
