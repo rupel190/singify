@@ -936,7 +936,7 @@ export function SessionHud(props: {
         <button style={btn} onClick={onEnd}>
           End
         </button>
-        <button style={btn} onClick={onRestartSong} title="Play this song from the top">
+        <button style={btn} onClick={onRestartSong} title="Play this song from the top — R">
           ⟲ Restart
         </button>
         <button
