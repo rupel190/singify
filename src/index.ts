@@ -1490,8 +1490,11 @@ function onRoundComplete(scores: PlayerRoundScore[]): void {
   if (!competitiveMode) scoredTrackIds.add(currentTrackId);
 
   // Persist the round for cross-session stats — each singer tagged with the mic
-  // (device + gain + gate) they sang on, so gear can be compared over time.
-  recordStatRound({
+  // (device + gain + gate) they sang on, so gear can be compared over time. A
+  // round that never got through half the song (a seek to the end, an instant
+  // "sing again") isn't a performance, so it stays out of the history.
+  const reached = Math.max(...scores.map((s) => s.score.notesReached / Math.max(1, s.score.notesTotal)));
+  if (reached >= 0.5) recordStatRound({
     t: Date.now(),
     title: currentSong.headers.title,
     artist: currentSong.headers.artist,
@@ -2011,8 +2014,10 @@ async function main(): Promise<void> {
         return;
       }
       punchSync(); // tap on the first sung word to snap the offset
-    } else if (e.key === "r" || e.key === "R") {
+    } else if ((e.key === "r" || e.key === "R") && e.shiftKey) {
       void reSearch(); // force a fresh USDB search + picker for this track
+    } else if (e.key === "r" || e.key === "R") {
+      if (currentSong) restartSong(); // from the top, scores cleared
     } else if (e.key === "-") {
       setSensitivity(sensitivity - 5); // less sensitive (noisy room)
     } else if (e.key === "=") {
