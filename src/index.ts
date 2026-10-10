@@ -1487,14 +1487,15 @@ function onRoundComplete(scores: PlayerRoundScore[]): void {
   // guard is skipped there; every other session counts a track at most once.
   if (!competitiveMode && scoredTrackIds.has(currentTrackId)) return;
   if (scores.length === 0) return;
+  // A round that never got through half the song (a seek to the end, an instant
+  // "sing again") isn't a performance — it counts nowhere, not even this session.
+  const reached = Math.max(...scores.map((s) => s.score.notesReached / Math.max(1, s.score.notesTotal)));
+  if (reached < 0.5) return;
   if (!competitiveMode) scoredTrackIds.add(currentTrackId);
 
   // Persist the round for cross-session stats — each singer tagged with the mic
-  // (device + gain + gate) they sang on, so gear can be compared over time. A
-  // round that never got through half the song (a seek to the end, an instant
-  // "sing again") isn't a performance, so it stays out of the history.
-  const reached = Math.max(...scores.map((s) => s.score.notesReached / Math.max(1, s.score.notesTotal)));
-  if (reached >= 0.5) recordStatRound({
+  // (device + gain + gate) they sang on, so gear can be compared over time.
+  recordStatRound({
     t: Date.now(),
     title: currentSong.headers.title,
     artist: currentSong.headers.artist,
