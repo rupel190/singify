@@ -7,6 +7,7 @@ var MIC_SLOTS_KEY = "singify:micSlots";
 var PLAYER_SENS_KEY = "singify:playerSens";
 var AUTOSKIP_KEY = "singify:autoSkipNoChart";
 var FPS_KEY = "singify:fps";
+var PLAYLIST_PLAYED_KEY = "singify:playlistPlayed";
 var DEFAULT_OFFSET_KEY = "singify:offsetMs";
 var OFFSET_PREFIX = "singify:offset:";
 var PUNCHED_PREFIX = "singify:punched:";
@@ -1980,14 +1981,14 @@ function SessionSetup(props) {
     style: { ...sectionLabel, marginTop: 8 }
   }, "Or free play"), /* @__PURE__ */ Spicetify.React.createElement("div", {
     style: { display: "flex", alignItems: "center", gap: 10 }
-  }, [3, 5, 10].map((n) => /* @__PURE__ */ Spicetify.React.createElement("button", {
+  }, [1, 3, 5].map((n) => /* @__PURE__ */ Spicetify.React.createElement("button", {
     key: n,
     style: chip(n),
     onClick: () => onRounds(n)
-  }, n)), /* @__PURE__ */ Spicetify.React.createElement("button", {
+  }, "BO", n)), /* @__PURE__ */ Spicetify.React.createElement("button", {
     style: { ...primaryBtn(), marginLeft: "auto", whiteSpace: "nowrap" },
     onClick: onStart
-  }, "▶ ", rounds, " rounds")))));
+  }, "▶ Best of ", rounds)))));
 }
 function PlaceholderRow(props) {
   return /* @__PURE__ */ Spicetify.React.createElement("div", {
@@ -2710,6 +2711,9 @@ function summarize(s) {
 }
 
 // src/playlist-source.ts
+function sortByRecentlySung(playlists, played) {
+  return playlists.map((p, i) => ({ p, i, t: played[p.uri] ?? 0 })).sort((a, b) => b.t - a.t || a.i - b.i).map((x) => x.p);
+}
 function isPlaylistUri(uri) {
   return typeof uri === "string" && /^spotify:(?:user:[^:]+:)?playlist:/.test(uri);
 }
@@ -3364,7 +3368,8 @@ var SETTINGS_KEYS = [
   NOWLINE_KEY,
   MIC_SLOTS_KEY,
   PLAYER_SENS_KEY,
-  AUTOSKIP_KEY
+  AUTOSKIP_KEY,
+  PLAYLIST_PLAYED_KEY
 ];
 function ls() {
   try {
@@ -4982,7 +4987,7 @@ async function loadPlaylists() {
   if (activeScreen === "session-setup")
     renderOverlay();
   try {
-    playlists = await fetchPlaylists();
+    playlists = sortByRecentlySung(await fetchPlaylists(), readPlaylistPlayed());
   } finally {
     playlistsLoading = false;
     if (activeScreen === "session-setup")
@@ -5001,6 +5006,23 @@ function startSession() {
   activeScreen = "sing";
   renderOverlay();
 }
+function readPlaylistPlayed() {
+  try {
+    return JSON.parse(localStorage.getItem(PLAYLIST_PLAYED_KEY) ?? "{}");
+  } catch {
+    return {};
+  }
+}
+function markPlaylistPlayed(uri) {
+  const played = readPlaylistPlayed();
+  played[uri] = Date.now();
+  try {
+    localStorage.setItem(PLAYLIST_PLAYED_KEY, JSON.stringify(played));
+  } catch {
+    return;
+  }
+  mirrorSettings();
+}
 async function startPlaylistSession(ref) {
   Spicetify.showNotification?.(`Loading “${ref.name}”…`);
   const tracks = await fetchPlaylistTracks(ref.uri);
@@ -5009,6 +5031,7 @@ async function startPlaylistSession(ref) {
     return;
   }
   session = createSessionFromPlaylist(ref.name, tracks, setupRoster.map((p) => p.name));
+  markPlaylistPlayed(ref.uri);
   sessionRoster = setupRoster.map((p) => ({ ...p }));
   scoredTrackIds = new Set;
   lastRound = null;
