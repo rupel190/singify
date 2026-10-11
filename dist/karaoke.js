@@ -1,5 +1,21 @@
 // src/punch-header.ts
 var PUNCHED_TAG = "SINGIFYPUNCHED";
+function trackKey(trackId) {
+  return trackId.split(":").pop() ?? trackId;
+}
+function parsePunchedValue(value) {
+  const out = {};
+  for (const entry of (value ?? "").split(",")) {
+    const eq = entry.indexOf("=");
+    if (eq < 0)
+      continue;
+    const key = entry.slice(0, eq).trim();
+    const ms = parseFloat(entry.slice(eq + 1));
+    if (key && Number.isFinite(ms))
+      out[key] = Math.round(ms);
+  }
+  return out;
+}
 
 // src/ultrastar-parser.ts
 function isRapNote(t) {
@@ -108,7 +124,7 @@ function parseHeaders(lines) {
     end: raw.END ? parseFloat(raw.END.replace(",", ".")) : undefined,
     relative: (raw.RELATIVE ?? "").toLowerCase() === "yes",
     encoding: raw.ENCODING,
-    punchedOffsetMs: Number.isFinite(parseFloat(raw[PUNCHED_TAG] ?? "")) ? parseFloat(raw[PUNCHED_TAG]) : undefined
+    punchedOffsets: parsePunchedValue(raw[PUNCHED_TAG])
   };
 }
 function noteTypeFromToken(token) {
@@ -2876,6 +2892,8 @@ var FPS_KEY = "singify:fps";
 var DEFAULT_OFFSET_KEY = "singify:offsetMs";
 var OFFSET_PREFIX = "singify:offset:";
 var PUNCHED_PREFIX = "singify:punched:";
+var SYNC_CURVE_PREFIX = "singify:syncCurve:";
+var SYNC_BIAS_KEY = "singify:syncBias";
 
 // src/punched-badges.ts
 var ROW = ".main-trackList-trackListRow";
@@ -3213,7 +3231,7 @@ function gatherOffsets() {
     return out;
   for (let i = 0;i < store.length; i++) {
     const k = store.key(i);
-    if (k && (k === DEFAULT_OFFSET_KEY || k.startsWith(OFFSET_PREFIX) || k.startsWith(PUNCHED_PREFIX))) {
+    if (k && (k === DEFAULT_OFFSET_KEY || k === SYNC_BIAS_KEY || k.startsWith(OFFSET_PREFIX) || k.startsWith(PUNCHED_PREFIX) || k.startsWith(SYNC_CURVE_PREFIX))) {
       const v = store.getItem(k);
       if (v != null)
         out[k] = v;
@@ -3331,6 +3349,246 @@ if (typeof window !== "undefined") {
 // src/ui-scale.ts
 var UI_SCALE = 0.75;
 
+// src/autosync.ts
+function normalizeWord(w) {
+  return w.toLowerCase().replace(/ß/g, "ss").normalize("NFD").replace(/[̀-ͯ]/g, "").replace(/[^a-z0-9]/g, "");
+}
+function chartWords(song) {
+  const out = [];
+  for (const line of song.lines) {
+    let cur = "";
+    let curMs = 0;
+    const flush = () => {
+      const w = normalizeWord(cur);
+      if (w)
+        out.push({ w, ms: curMs });
+      cur = "";
+    };
+    for (const s of line.syllables) {
+      const text = s.text.replace(/~/g, "");
+      if (/^\s/.test(text))
+        flush();
+      if (!cur.trim())
+        curMs = s.startMs;
+      for (const part of text.split(/(\s+)/)) {
+        if (!part)
+          continue;
+        if (/^\s+$/.test(part))
+          flush();
+        else {
+          if (!cur.trim())
+            curMs = s.startMs;
+          cur += part;
+        }
+      }
+    }
+    flush();
+  }
+  return out;
+}
+function lyricWords(lines) {
+  const out = [];
+  lines.forEach((l, i) => {
+    for (const raw of l.words.split(/\s+/)) {
+      const w = normalizeWord(raw);
+      if (w)
+        out.push({ w, line: i });
+    }
+  });
+  return out;
+}
+function similarity(a, b) {
+  if (a === b)
+    return 1;
+  const n = a.length;
+  const m = b.length;
+  if (!n || !m)
+    return 0;
+  let prev = Array.from({ length: m + 1 }, (_, j) => j);
+  for (let i = 1;i <= n; i++) {
+    const cur = [i];
+    for (let j = 1;j <= m; j++) {
+      cur[j] = Math.min(prev[j] + 1, cur[j - 1] + 1, prev[j - 1] + (a[i - 1] === b[j - 1] ? 0 : 1));
+    }
+    prev = cur;
+  }
+  return 1 - prev[m] / Math.max(n, m);
+}
+function alignWords(a, b) {
+  const n = a.length;
+  const m = b.length;
+  const GAP = -1;
+  const score = (x, y) => x === y ? 2 : similarity(x, y) >= 0.75 ? 1 : -1;
+  const H = new Float64Array((n + 1) * (m + 1));
+  const T = new Uint8Array((n + 1) * (m + 1));
+  const at = (i2, j2) => i2 * (m + 1) + j2;
+  for (let i2 = 1;i2 <= n; i2++)
+    T[at(i2, 0)] = 2;
+  for (let j2 = 1;j2 <= m; j2++)
+    T[at(0, j2)] = 3;
+  for (let i2 = 1;i2 <= n; i2++) {
+    for (let j2 = 1;j2 <= m; j2++) {
+      const d = H[at(i2 - 1, j2 - 1)] + score(a[i2 - 1], b[j2 - 1]);
+      const u = H[at(i2 - 1, j2)] + GAP;
+      const l = H[at(i2, j2 - 1)] + GAP;
+      if (d >= u && d >= l) {
+        H[at(i2, j2)] = d;
+        T[at(i2, j2)] = 1;
+      } else if (u >= l) {
+        H[at(i2, j2)] = u;
+        T[at(i2, j2)] = 2;
+      } else {
+        H[at(i2, j2)] = l;
+        T[at(i2, j2)] = 3;
+      }
+    }
+  }
+  let bi = n;
+  let bj = m;
+  let best = H[at(n, m)];
+  for (let i2 = 0;i2 <= n; i2++)
+    if (H[at(i2, m)] > best)
+      [best, bi, bj] = [H[at(i2, m)], i2, m];
+  for (let j2 = 0;j2 <= m; j2++)
+    if (H[at(n, j2)] > best)
+      [best, bi, bj] = [H[at(n, j2)], n, j2];
+  const pairs = [];
+  let i = bi;
+  let j = bj;
+  while (i > 0 && j > 0) {
+    const t = T[at(i, j)];
+    if (t === 1) {
+      if (score(a[i - 1], b[j - 1]) > 0)
+        pairs.push([i - 1, j - 1]);
+      i--;
+      j--;
+    } else if (t === 2)
+      i--;
+    else
+      j--;
+  }
+  return pairs.reverse();
+}
+function median(xs) {
+  if (!xs.length)
+    return 0;
+  const s = [...xs].sort((a, b) => a - b);
+  const mid = s.length >> 1;
+  return s.length % 2 ? s[mid] : (s[mid - 1] + s[mid]) / 2;
+}
+function theilSen(anchors) {
+  const slopes = [];
+  for (let i = 0;i < anchors.length; i++) {
+    for (let j = i + 1;j < anchors.length; j++) {
+      const dt = anchors[j].spotifyMs - anchors[i].spotifyMs;
+      if (dt > 0)
+        slopes.push((anchors[j].offsetMs - anchors[i].offsetMs) / dt);
+    }
+  }
+  const slope = median(slopes);
+  const intercept = median(anchors.map((a) => a.offsetMs - slope * a.spotifyMs));
+  return { slope, intercept };
+}
+function levelRuns(anchors) {
+  const runs = [];
+  for (const a of anchors) {
+    const run = runs[runs.length - 1];
+    if (run && Math.abs(a.offsetMs - median(run.map((r) => r.offsetMs))) <= 500)
+      run.push(a);
+    else
+      runs.push([a]);
+  }
+  return runs.filter((r) => r.length >= 4);
+}
+function autoSync(song, lines) {
+  const cw = chartWords(song);
+  const lw = lyricWords(lines);
+  if (cw.length < 8 || lw.length < 8)
+    return null;
+  const pairs = alignWords(cw.map((x) => x.w), lw.map((x) => x.w));
+  const chartIdxOf = new Map(pairs.map(([c, l]) => [l, c]));
+  const anchors = [];
+  let first = 0;
+  while (first < lw.length) {
+    const line = lw[first].line;
+    let end = first;
+    while (end < lw.length && lw[end].line === line)
+      end++;
+    const c = chartIdxOf.get(first);
+    const next = Math.min(3, end - first - 1);
+    let aligned = 0;
+    for (let k = 1;k <= next; k++)
+      if (chartIdxOf.has(first + k))
+        aligned++;
+    if (c != null && next >= 1 && aligned >= Math.min(2, next)) {
+      anchors.push({ spotifyMs: lines[line].startMs, offsetMs: cw[c].ms - lines[line].startMs });
+    }
+    first = end;
+  }
+  const sungLines = new Set(lw.map((x) => x.line)).size;
+  if (anchors.length === 0)
+    return null;
+  const offsetMs = median(anchors.map((a) => a.offsetMs));
+  const spreadMs = median(anchors.map((a) => Math.abs(a.offsetMs - offsetMs)));
+  const within500 = anchors.filter((a) => Math.abs(a.offsetMs - offsetMs) <= 500).length / anchors.length;
+  const { slope, intercept } = theilSen(anchors);
+  const t0 = anchors[0].spotifyMs;
+  const t1 = anchors[anchors.length - 1].spotifyMs;
+  const drift = Math.abs(slope * (t1 - t0));
+  const residual = median(anchors.map((a) => Math.abs(a.offsetMs - (intercept + slope * a.spotifyMs))));
+  let shape = "noisy";
+  let curve = [{ atMs: 0, offsetMs }];
+  const runs = levelRuns(anchors);
+  const levels = runs.map((r) => median(r.map((a) => a.offsetMs)));
+  if (spreadMs <= 200 && drift < 1000)
+    shape = "constant";
+  else if (residual <= 250 && drift >= 1000) {
+    shape = "drift";
+    curve = [
+      { atMs: t0, offsetMs: intercept + slope * t0 },
+      { atMs: t1, offsetMs: intercept + slope * t1 }
+    ];
+  } else if (runs.length >= 2 && Math.max(...levels) - Math.min(...levels) > 1500) {
+    shape = "step";
+    curve = runs.flatMap((r, k) => [
+      { atMs: r[0].spotifyMs, offsetMs: levels[k] },
+      { atMs: r[r.length - 1].spotifyMs, offsetMs: levels[k] }
+    ]);
+  }
+  return {
+    anchors,
+    coverage: sungLines ? anchors.length / sungLines : 0,
+    offsetMs,
+    spreadMs,
+    within500,
+    shape,
+    slope,
+    curve
+  };
+}
+function offsetAt(curve, atMs) {
+  if (!curve.length)
+    return 0;
+  if (atMs <= curve[0].atMs)
+    return curve[0].offsetMs;
+  for (let i = 1;i < curve.length; i++) {
+    const a = curve[i - 1];
+    const b = curve[i];
+    if (atMs <= b.atMs) {
+      const span = b.atMs - a.atMs;
+      return span > 0 ? a.offsetMs + (atMs - a.atMs) / span * (b.offsetMs - a.offsetMs) : b.offsetMs;
+    }
+  }
+  return curve[curve.length - 1].offsetMs;
+}
+function isConfident(r) {
+  return r.shape === "constant" && r.anchors.length >= 8 && r.coverage >= 0.5 && r.spreadMs <= 200 && r.within500 >= 0.8;
+}
+function isMismatch(r) {
+  return (r.shape === "drift" || r.shape === "step") && r.anchors.length >= 8 && r.coverage >= 0.4;
+}
+var DEFAULT_SYNC_BIAS_MS = 333;
+
 // src/index.ts
 var lastKnownMs = 0;
 var lastKnownAt = 0;
@@ -3341,7 +3599,8 @@ function getBaseMs() {
   return lastKnownMs + (performance.now() - lastKnownAt);
 }
 function getCurrentMs() {
-  return getBaseMs() + offsetMs;
+  const base = getBaseMs();
+  return base + (syncCurve ? offsetAt(syncCurve, base) : 0) + offsetMs;
 }
 function onProgress(e) {
   lastKnownMs = Number(e.data) || 0;
@@ -3409,7 +3668,7 @@ function setOffset(next) {
 }
 var readoutEl = null;
 var readoutTimer = 0;
-function showReadout(text) {
+function showReadout(text, holdMs = 1200) {
   if (!readoutEl) {
     readoutEl = document.createElement("div");
     readoutEl.id = "singify-readout";
@@ -3436,7 +3695,7 @@ function showReadout(text) {
   readoutTimer = window.setTimeout(() => {
     if (readoutEl)
       readoutEl.style.opacity = "0";
-  }, 1200);
+  }, holdMs);
 }
 function showOffset() {
   const sign = offsetMs > 0 ? "+" : "";
@@ -3490,8 +3749,10 @@ function writePunchedToChart() {
   savePunched(currentTrackId, currentArtist(), currentTitle(), on ? offsetMs : null).catch((err) => console.error("[singify] punched header write failed:", err));
 }
 function adoptChartPunch(song) {
-  const fromFile = song.headers.punchedOffsetMs;
-  if (fromFile == null || !currentTrackId)
+  if (!currentTrackId)
+    return;
+  const fromFile = song.headers.punchedOffsets[trackKey(currentTrackId)];
+  if (fromFile == null)
     return;
   if (readNum(OFFSET_PREFIX + currentTrackId) == null)
     setOffset(fromFile);
@@ -3508,9 +3769,118 @@ function punchSync() {
     Spicetify.showNotification?.("Punch-sync: chart has no notes");
     return;
   }
+  saveCurve(null);
   setOffset(firstMs - getBaseMs());
   const sign = offsetMs > 0 ? "+" : "";
   showReadout(`⏱ Punched — first line synced · offset ${sign}${offsetMs} ms`);
+}
+var syncCurve = null;
+function loadCurve(uri) {
+  try {
+    const raw = localStorage.getItem(SYNC_CURVE_PREFIX + uri);
+    const curve = raw ? JSON.parse(raw) : null;
+    return curve && curve.length ? curve : null;
+  } catch {
+    return null;
+  }
+}
+function saveCurve(curve) {
+  syncCurve = curve;
+  if (!currentTrackId)
+    return;
+  try {
+    localStorage.setItem(SYNC_CURVE_PREFIX + currentTrackId, JSON.stringify(curve ?? []));
+  } catch {}
+  mirrorOffsets();
+}
+var BIAS_MIN_SAMPLES = 5;
+function readBiasSamples() {
+  try {
+    return JSON.parse(localStorage.getItem(SYNC_BIAS_KEY) ?? "{}");
+  } catch {
+    return {};
+  }
+}
+function syncBias() {
+  const xs = Object.values(readBiasSamples()).sort((a, b) => a - b);
+  if (xs.length < BIAS_MIN_SAMPLES)
+    return DEFAULT_SYNC_BIAS_MS;
+  const mid = xs.length >> 1;
+  return xs.length % 2 ? xs[mid] : (xs[mid - 1] + xs[mid]) / 2;
+}
+function recordBiasSample(uri, diffMs) {
+  if (Math.abs(diffMs) > 1500)
+    return;
+  const samples = readBiasSamples();
+  samples[uri] = Math.round(diffMs);
+  try {
+    localStorage.setItem(SYNC_BIAS_KEY, JSON.stringify(samples));
+  } catch {
+    return;
+  }
+  mirrorOffsets();
+}
+async function fetchSyncedLyrics(uri) {
+  const cosmos = Spicetify.CosmosAsync;
+  if (!cosmos?.get)
+    return null;
+  const id = uri.split(":").pop();
+  try {
+    const res = await cosmos.get(`https://spclient.wg.spotify.com/color-lyrics/v2/track/${id}?format=json&vocalRemoval=false&market=from_token`);
+    if (res?.lyrics?.syncType !== "LINE_SYNCED" || !res.lyrics.lines)
+      return null;
+    return res.lyrics.lines.map((l) => ({ startMs: Number(l.startTimeMs), words: l.words }));
+  } catch {
+    return null;
+  }
+}
+var pendingSync = null;
+var PROMPT_MS = 15000;
+function promptSync(text, apply) {
+  pendingSync = { apply, until: performance.now() + PROMPT_MS };
+  showReadout(text, PROMPT_MS);
+}
+function fmtSeconds(ms) {
+  return `${ms > 0 ? "+" : ""}${(ms / 1000).toFixed(1)} s`;
+}
+async function runAutoSync(uri, song) {
+  const lines = await fetchSyncedLyrics(uri);
+  if (!lines || currentTrackId !== uri || currentSong !== song)
+    return;
+  const r = autoSync(song, lines);
+  if (!r)
+    return;
+  const bias = syncBias();
+  if (isPunched(uri)) {
+    if (isConfident(r) && !syncCurve)
+      recordBiasSample(uri, r.offsetMs - offsetMs);
+    else if (isMismatch(r))
+      showReadout("⚠ This chart may not match Spotify's recording", 6000);
+    return;
+  }
+  if (isConfident(r)) {
+    const suggested = Math.round(r.offsetMs - bias);
+    const stored = readNum(OFFSET_PREFIX + uri);
+    if (stored != null && !syncCurve && Math.abs(suggested - stored) <= 2000)
+      return;
+    promptSync(`Auto-sync ${fmtSeconds(suggested)} — Enter to apply`, () => {
+      saveCurve(null);
+      setOffset(suggested);
+      showReadout(`✓ Auto-synced ${fmtSeconds(suggested)} — fine-tune with [ ]`, 2500);
+    });
+  } else if (isMismatch(r)) {
+    if (syncCurve) {
+      showReadout("⚠ Corrected sync active — this chart may be unreliable", 6000);
+      return;
+    }
+    const curve = r.curve.map((k) => ({ atMs: k.atMs, offsetMs: Math.round(k.offsetMs - bias) }));
+    const why = r.shape === "drift" ? `tempo off by ${Math.abs(r.slope * 100).toFixed(1)} %` : "a section doesn't match";
+    promptSync(`⚠ Chart may be unreliable (${why}) — Enter to try a corrected sync`, () => {
+      saveCurve(curve);
+      setOffset(0);
+      showReadout("✓ Corrected sync on — the chart may still be off in places", 3000);
+    });
+  }
 }
 function activeRoster() {
   return session ? sessionRoster : soloRoster;
@@ -4501,6 +4871,8 @@ async function onPick(candidate) {
     pickerCandidates = null;
     pickPending = null;
     currentSong = song;
+    saveCurve(null);
+    runAutoSync(currentTrackId, song);
   } catch (err) {
     pickPending = null;
     pickError = err instanceof Error ? err.message : "Download failed — try another match.";
@@ -4527,6 +4899,8 @@ async function onSongChange() {
   currentSong = null;
   currentTrackId = item.uri;
   offsetMs = loadOffsetForTrack(currentTrackId);
+  syncCurve = loadCurve(currentTrackId);
+  pendingSync = null;
   pickerCandidates = null;
   pickPending = null;
   pickError = null;
@@ -4540,6 +4914,7 @@ async function onSongChange() {
     if (res.status === "cached" || res.status === "downloaded" || res.status === "local") {
       currentSong = res.song;
       adoptChartPunch(res.song);
+      runAutoSync(item.uri, res.song);
       autoSkipStreak = 0;
     } else if (res.status === "needsPicker") {
       pickerQuery = { artist, title };
@@ -4727,6 +5102,16 @@ async function main() {
     const typing = target && (target.tagName === "INPUT" || target.tagName === "TEXTAREA" || target.isContentEditable);
     if (typing)
       return;
+    if (e.key === "Enter" && pendingSync) {
+      const p = pendingSync;
+      pendingSync = null;
+      if (performance.now() < p.until) {
+        p.apply();
+        e.preventDefault();
+        e.stopPropagation();
+        return;
+      }
+    }
     if (e.key === "k" || e.key === "K") {
       openFromKey();
     } else if (e.key === "q" || e.key === "Q") {
@@ -4739,6 +5124,7 @@ async function main() {
       setOffset(offsetMs + (e.code === "BracketLeft" ? -step : step));
       e.preventDefault();
     } else if (e.key === "\\") {
+      saveCurve(null);
       setOffset(0);
     } else if (e.key === "m" || e.key === "M") {
       toggleMics();
