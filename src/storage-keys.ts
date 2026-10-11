@@ -20,6 +20,8 @@ export const MIC_SLOTS_KEY = "singify:micSlots";
 export const PLAYER_SENS_KEY = "singify:playerSens";
 export const AUTOSKIP_KEY = "singify:autoSkipNoChart";
 export const FPS_KEY = "singify:fps";
+/** See-through stage: Spotify's page (a music video) shows behind the overlay — "1"/"0". */
+export const SEE_THROUGH_KEY = "singify:seeThrough";
 /** When a session last started from each playlist — JSON { playlistUri: ms }. */
 export const PLAYLIST_PLAYED_KEY = "singify:playlistPlayed";
 

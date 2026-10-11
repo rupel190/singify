@@ -81,6 +81,7 @@ import {
   NOCHART_PREFIX,
   UNRELIABLE_PREFIX,
   PLAYLIST_PLAYED_KEY,
+  SEE_THROUGH_KEY,
 } from "./storage-keys";
 import { startTrackBadges, type BadgeState } from "./track-badges";
 import { trackKey } from "./punch-header";
@@ -1164,8 +1165,8 @@ function ensureOverlay(): HTMLDivElement {
     position: "fixed",
     inset: "0",
     zIndex: "999",
-    // Opaque, no backdrop blur: Spotify's page is hidden underneath (setVisible),
-    // so there is nothing to see through — and a full-screen blur re-ran every frame.
+    // No backdrop blur — a full-screen blur re-ran every frame. The background
+    // itself is set by applyBackdrop (solid, or dimmed in see-through mode).
     background: "rgb(10, 10, 14)",
     display: "none",
   } as CSSStyleDeclaration);
@@ -1190,6 +1191,52 @@ function ensureOverlay(): HTMLDivElement {
  * the scale so it still covers the viewport after `zoom` shrinks it.
  */
 let layoutVersion = 0;
+
+// ── See-through stage (V) ────────────────────────────────────────────────────
+//
+// Normally Spotify's page is HIDDEN under the overlay: its library and carousels
+// keep ~300 CSS animations running unseen (measured 29 → 59 fps on hiding it).
+// See-through keeps the page — and a playing music video — visible behind a
+// dimmed background, with the page's CSS animations paused instead. Measured
+// with a video behind it: 57 fps solid vs 56 see-through.
+
+const SEE_THROUGH_DIM = 0.6;
+let seeThrough = (() => {
+  try {
+    return localStorage.getItem(SEE_THROUGH_KEY) === "1";
+  } catch {
+    return false;
+  }
+})();
+
+function applyBackdrop(): void {
+  const spotifyMain = document.getElementById("main");
+  const through = visible && seeThrough;
+  if (spotifyMain) spotifyMain.style.display = visible && !seeThrough ? "none" : "";
+  if (overlay) overlay.style.background = seeThrough ? `rgba(10, 10, 14, ${SEE_THROUGH_DIM})` : "rgb(10, 10, 14)";
+  let pause = document.getElementById("singify-pause-page") as HTMLStyleElement | null;
+  if (!pause) {
+    pause = document.createElement("style");
+    pause.id = "singify-pause-page";
+    document.head.appendChild(pause);
+  }
+  // The video is a <video>, not a CSS animation, so it keeps playing.
+  pause.textContent = through
+    ? "#main *,#main *::before,#main *::after{animation-play-state:paused!important;transition:none!important}"
+    : "";
+}
+
+function toggleSeeThrough(): void {
+  seeThrough = !seeThrough;
+  try {
+    localStorage.setItem(SEE_THROUGH_KEY, seeThrough ? "1" : "0");
+  } catch {
+    /* keep the in-memory value */
+  }
+  mirrorSettings();
+  applyBackdrop();
+  showReadout(seeThrough ? "See-through on — the video plays behind the stage" : "See-through off", 2000);
+}
 
 // One Back button for every menu screen, always in the same spot (where Stats
 // had its own), so backing out never means hunting for it.
@@ -1604,8 +1651,7 @@ function setVisible(next: boolean): void {
   // Hide Spotify's own page while the overlay covers it. Its library, carousels
   // and image fades keep ~300 CSS animations running unseen, and the browser
   // re-layerizes them every frame — measured 29 → 59 fps avg on hiding it.
-  const spotifyMain = document.getElementById("main");
-  if (spotifyMain) spotifyMain.style.display = visible ? "none" : "";
+  applyBackdrop();
   if (visible) {
     renderOverlay();
     if (fpsWanted) startFps(); // debug frame-time readout, auto-shown while playing
@@ -2418,6 +2464,8 @@ async function main(): Promise<void> {
       if (visible) renderOverlay();
       showReadout("Layout reset — every element back to its default size", 2500);
       e.preventDefault();
+    } else if (e.key === "v" || e.key === "V") {
+      toggleSeeThrough();
     } else if (e.key === "?" || e.key === "F1") {
       toggleHelp();
       e.preventDefault();

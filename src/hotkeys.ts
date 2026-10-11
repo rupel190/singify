@@ -26,6 +26,7 @@ export const HOTKEYS: Hotkey[] = [
   { keys: "- / =", what: "Mic sensitivity − / +", short: "sensitivity" },
   { keys: ", / .", what: "Hit-line nudge (visual)", short: "hit-line" },
   { keys: "L", what: "Load a local .txt chart", short: "load file" },
+  { keys: "V", what: "See-through: music video behind the stage", short: "see-through" },
   { keys: "Ctrl+0", what: "Reset every element's size (corner triangles)", short: "reset layout" },
   { keys: "Ctrl+F", what: "FPS meter", short: "fps" },
   { keys: "Esc", what: "Close", short: "close" },

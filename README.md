@@ -152,6 +152,7 @@ to test against real charts — no USDB account needed. Free CC-licensed charts:
 | --- | --- | --- | --- |
 | `K` / `S` | Sessions menu | `M` | Toggle mic(s) |
 | `?` / `F1` | All shortcuts | `A` | Auto-sync now (replaces the offset) |
+| `V` | See-through: music video behind the stage | | |
 | `Backspace` | Undo an auto-sync (while shown) | | |
 | `Enter` | Try a corrected sync on a drifting chart | | |
 | `Q` | Sing (starts 1 player, mic on, until End) | `L` | Load a local `.txt` chart |
