@@ -7,6 +7,7 @@ var MIC_SLOTS_KEY = "singify:micSlots";
 var PLAYER_SENS_KEY = "singify:playerSens";
 var AUTOSKIP_KEY = "singify:autoSkipNoChart";
 var FPS_KEY = "singify:fps";
+var SEE_THROUGH_KEY = "singify:seeThrough";
 var PLAYLIST_PLAYED_KEY = "singify:playlistPlayed";
 var DEFAULT_OFFSET_KEY = "singify:offsetMs";
 var OFFSET_PREFIX = "singify:offset:";
@@ -1494,6 +1495,7 @@ var HOTKEYS = [
   { keys: "- / =", what: "Mic sensitivity − / +", short: "sensitivity" },
   { keys: ", / .", what: "Hit-line nudge (visual)", short: "hit-line" },
   { keys: "L", what: "Load a local .txt chart", short: "load file" },
+  { keys: "V", what: "See-through: music video behind the stage", short: "see-through" },
   { keys: "Ctrl+0", what: "Reset every element's size (corner triangles)", short: "reset layout" },
   { keys: "Ctrl+F", what: "FPS meter", short: "fps" },
   { keys: "Esc", what: "Close", short: "close" },
@@ -3393,7 +3395,8 @@ var SETTINGS_KEYS = [
   MIC_SLOTS_KEY,
   PLAYER_SENS_KEY,
   AUTOSKIP_KEY,
-  PLAYLIST_PLAYED_KEY
+  PLAYLIST_PLAYED_KEY,
+  SEE_THROUGH_KEY
 ];
 function ls() {
   try {
@@ -4582,6 +4585,38 @@ function ensureOverlay() {
   return overlay;
 }
 var layoutVersion = 0;
+var SEE_THROUGH_DIM = 0.6;
+var seeThrough = (() => {
+  try {
+    return localStorage.getItem(SEE_THROUGH_KEY) === "1";
+  } catch {
+    return false;
+  }
+})();
+function applyBackdrop() {
+  const spotifyMain = document.getElementById("main");
+  const through = visible && seeThrough;
+  if (spotifyMain)
+    spotifyMain.style.display = visible && !seeThrough ? "none" : "";
+  if (overlay)
+    overlay.style.background = seeThrough ? `rgba(10, 10, 14, ${SEE_THROUGH_DIM})` : "rgb(10, 10, 14)";
+  let pause = document.getElementById("singify-pause-page");
+  if (!pause) {
+    pause = document.createElement("style");
+    pause.id = "singify-pause-page";
+    document.head.appendChild(pause);
+  }
+  pause.textContent = through ? "#main *,#main *::before,#main *::after{animation-play-state:paused!important;transition:none!important}" : "";
+}
+function toggleSeeThrough() {
+  seeThrough = !seeThrough;
+  try {
+    localStorage.setItem(SEE_THROUGH_KEY, seeThrough ? "1" : "0");
+  } catch {}
+  mirrorSettings();
+  applyBackdrop();
+  showReadout(seeThrough ? "See-through on — the video plays behind the stage" : "See-through off", 2000);
+}
 var BACK_BTN_STYLE = {
   position: "absolute",
   top: 28,
@@ -4862,9 +4897,7 @@ function setVisible(next) {
   visible = next;
   const el = ensureOverlay();
   el.style.display = visible ? "block" : "none";
-  const spotifyMain = document.getElementById("main");
-  if (spotifyMain)
-    spotifyMain.style.display = visible ? "none" : "";
+  applyBackdrop();
   if (visible) {
     renderOverlay();
     if (fpsWanted)
@@ -5470,6 +5503,8 @@ async function main() {
         renderOverlay();
       showReadout("Layout reset — every element back to its default size", 2500);
       e.preventDefault();
+    } else if (e.key === "v" || e.key === "V") {
+      toggleSeeThrough();
     } else if (e.key === "?" || e.key === "F1") {
       toggleHelp();
       e.preventDefault();
