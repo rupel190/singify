@@ -4593,9 +4593,43 @@ var seeThrough = (() => {
     return false;
   }
 })();
+var placeTimer = 0;
+var placedKey = "";
+function videoPictureRect() {
+  const main = document.getElementById("main");
+  for (const v of Array.from(main?.querySelectorAll("video") ?? [])) {
+    const r = v.getBoundingClientRect();
+    if (r.width < 50 || r.height < 50)
+      continue;
+    const vw = v.videoWidth;
+    const vh = v.videoHeight;
+    if (!vw || !vh)
+      return r;
+    const k = Math.min(r.width / vw, r.height / vh);
+    const w = vw * k;
+    const h = vh * k;
+    return new DOMRect(r.left + (r.width - w) / 2, r.top + (r.height - h) / 2, w, h);
+  }
+  return null;
+}
+function placeOverlay() {
+  if (!overlay)
+    return;
+  const target = visible && seeThrough ? videoPictureRect() ?? document.querySelector(".Root__main-view")?.getBoundingClientRect() ?? null : null;
+  const key = target ? [target.left, target.top, target.width, target.height].map(Math.round).join(",") : "full";
+  if (key === placedKey)
+    return;
+  placedKey = key;
+  Object.assign(overlay.style, target ? { inset: "auto", left: `${target.left}px`, top: `${target.top}px`, width: `${target.width}px`, height: `${target.height}px` } : { inset: "0", left: "", top: "", width: "", height: "" });
+}
 function applyBackdrop() {
   const spotifyMain = document.getElementById("main");
   const through = visible && seeThrough;
+  clearInterval(placeTimer);
+  placedKey = "";
+  placeOverlay();
+  if (through)
+    placeTimer = window.setInterval(placeOverlay, 500);
   if (spotifyMain)
     spotifyMain.style.display = visible && !seeThrough ? "none" : "";
   if (overlay)
@@ -4606,7 +4640,7 @@ function applyBackdrop() {
     pause.id = "singify-pause-page";
     document.head.appendChild(pause);
   }
-  pause.textContent = through ? "#main *,#main *::before,#main *::after{animation-play-state:paused!important;transition:none!important}" : "";
+  pause.textContent = through ? "#main *,#main *::before,#main *::after{animation-play-state:paused!important;transition:none!important}" + "#main video{background:#000!important}" : "";
 }
 function toggleSeeThrough() {
   seeThrough = !seeThrough;
