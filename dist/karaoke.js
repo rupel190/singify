@@ -2929,11 +2929,18 @@ var OFFSET_PREFIX = "singify:offset:";
 var PUNCHED_PREFIX = "singify:punched:";
 var SYNC_CURVE_PREFIX = "singify:syncCurve:";
 var SYNC_BIAS_KEY = "singify:syncBias";
+var AUTOSYNCED_PREFIX = "singify:autosynced:";
+var NOCHART_PREFIX = "singify:nochart:";
 
-// src/punched-badges.ts
+// src/track-badges.ts
 var ROW = ".main-trackList-trackListRow";
-var TITLE = ".main-trackList-rowTitle";
-var BADGE_CLASS = "singify-punched-badge";
+var TITLE = ".main-trackList-rowTitle, .main-trackList-rowMainContent > [data-encore-id=text]";
+var BADGE_CLASS = "singify-track-badge";
+var LOOK = {
+  punched: { text: "✓", color: "#1ed760", title: "Singify: punched in proper" },
+  auto: { text: "◐", color: "#1ed760", title: "Singify: auto-synced from Spotify's lyrics" },
+  nochart: { text: "∅", color: "rgba(255,255,255,0.35)", title: "Singify: no karaoke chart found" }
+};
 function rowUri(row) {
   const fiberKey = Object.keys(row).find((k) => k.startsWith("__reactFiber"));
   let fiber = fiberKey ? row[fiberKey] : null;
@@ -2944,32 +2951,35 @@ function rowUri(row) {
   }
   return null;
 }
-function decorate(row, isPunched) {
+function decorate(row, badgeFor) {
   const title = row.querySelector(TITLE);
   if (!title)
     return;
   const uri = rowUri(row);
-  const want = uri != null && isPunched(uri);
-  const badge = title.querySelector(`.${BADGE_CLASS}`);
-  if (want && !badge) {
-    const el = document.createElement("span");
-    el.className = BADGE_CLASS;
-    el.textContent = "✓";
-    el.title = "Singify: punched in proper";
-    Object.assign(el.style, {
-      marginInlineStart: "6px",
-      color: "#1ed760",
-      fontWeight: "700"
-    });
-    title.appendChild(el);
-  } else if (!want && badge) {
-    badge.remove();
+  const want = uri ? badgeFor(uri) : null;
+  let el = title.querySelector(`.${BADGE_CLASS}`);
+  if (!want) {
+    el?.remove();
+    return;
   }
+  if (el?.dataset.badge === want)
+    return;
+  if (!el) {
+    el = document.createElement("span");
+    el.className = BADGE_CLASS;
+    Object.assign(el.style, { marginInlineStart: "6px", fontWeight: "700" });
+    title.appendChild(el);
+  }
+  const look = LOOK[want];
+  el.dataset.badge = want;
+  el.textContent = look.text;
+  el.title = look.title;
+  el.style.color = look.color;
 }
-function startPunchedBadges(isPunched) {
+function startTrackBadges(badgeFor) {
   const refresh = () => {
     for (const row of document.querySelectorAll(ROW))
-      decorate(row, isPunched);
+      decorate(row, badgeFor);
   };
   let pending = 0;
   new MutationObserver(() => {
@@ -3266,7 +3276,7 @@ function gatherOffsets() {
     return out;
   for (let i = 0;i < store.length; i++) {
     const k = store.key(i);
-    if (k && (k === DEFAULT_OFFSET_KEY || k === SYNC_BIAS_KEY || k.startsWith(OFFSET_PREFIX) || k.startsWith(PUNCHED_PREFIX) || k.startsWith(SYNC_CURVE_PREFIX))) {
+    if (k && (k === DEFAULT_OFFSET_KEY || k === SYNC_BIAS_KEY || k.startsWith(OFFSET_PREFIX) || k.startsWith(PUNCHED_PREFIX) || k.startsWith(SYNC_CURVE_PREFIX) || k.startsWith(AUTOSYNCED_PREFIX) || k.startsWith(NOCHART_PREFIX))) {
       const v = store.getItem(k);
       if (v != null)
         out[k] = v;
@@ -3753,6 +3763,33 @@ function isPunched(uri) {
   }
 }
 var refreshBadges = () => {};
+function flag(prefix, uri) {
+  try {
+    return localStorage.getItem(prefix + uri) === "1";
+  } catch {
+    return false;
+  }
+}
+function setFlag(prefix, uri, on) {
+  if (flag(prefix, uri) === on)
+    return;
+  try {
+    localStorage.setItem(prefix + uri, on ? "1" : "0");
+  } catch {
+    return;
+  }
+  mirrorOffsets();
+  refreshBadges();
+}
+function badgeFor(uri) {
+  if (isPunched(uri))
+    return "punched";
+  if (flag(AUTOSYNCED_PREFIX, uri))
+    return "auto";
+  if (flag(NOCHART_PREFIX, uri))
+    return "nochart";
+  return null;
+}
 var punchedWriteTimer = 0;
 function syncPunchedChart() {
   clearTimeout(punchedWriteTimer);
@@ -3923,16 +3960,20 @@ async function runAutoSync(uri, song) {
   if (isConfident(r)) {
     const suggested = Math.round(r.offsetMs - bias);
     const stored = readNum(OFFSET_PREFIX + uri);
-    if (stored != null && !syncCurve && Math.abs(suggested - stored) <= 2000)
+    if (stored != null && !syncCurve && Math.abs(suggested - stored) <= 2000) {
+      setFlag(AUTOSYNCED_PREFIX, uri, true);
       return;
+    }
     const before = offsetMs;
     const beforeCurve = syncCurve;
     saveCurve(null);
     setOffset(suggested);
+    setFlag(AUTOSYNCED_PREFIX, uri, true);
     const was = stored != null ? ` (was ${fmtSeconds(stored)})` : "";
     promptSync(`✓ Auto-synced ${fmtSeconds(suggested)}${was} — Backspace to undo`, () => {
       saveCurve(beforeCurve);
       setOffset(before);
+      setFlag(AUTOSYNCED_PREFIX, uri, false);
       showReadout(`↶ Auto-sync undone — back to ${fmtSeconds(before)}`, 2500);
     }, "Backspace");
   } else if (isMismatch(r)) {
@@ -4943,6 +4984,7 @@ async function onPick(candidate) {
     pickPending = null;
     currentSong = song;
     saveCurve(null);
+    setFlag(NOCHART_PREFIX, currentTrackId, false);
     runAutoSync(currentTrackId, song);
   } catch (err) {
     pickPending = null;
@@ -4985,6 +5027,7 @@ async function onSongChange() {
     if (res.status === "cached" || res.status === "downloaded" || res.status === "local") {
       currentSong = res.song;
       adoptChartPunch(res.song);
+      setFlag(NOCHART_PREFIX, item.uri, false);
       runAutoSync(item.uri, res.song);
       autoSkipStreak = 0;
     } else if (res.status === "needsPicker") {
@@ -4995,6 +5038,7 @@ async function onSongChange() {
       }
     } else {
       noChart = true;
+      setFlag(NOCHART_PREFIX, item.uri, true);
       if (!(session && autoSkipNoChart)) {
         Spicetify.showNotification?.(`No karaoke chart for “${title}”`);
       }
@@ -5236,7 +5280,7 @@ async function main() {
       toggleFps();
     }
   }, true);
-  refreshBadges = startPunchedBadges(isPunched);
+  refreshBadges = startTrackBadges(badgeFor);
   onSongChange();
 }
 main();
