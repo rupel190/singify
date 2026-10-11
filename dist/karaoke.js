@@ -388,6 +388,8 @@ function createScoreKeeper(song, difficulty = "easy", timing = {}) {
   const tol = toleranceSemitones(difficulty);
   const { micLagMs = 0, holdMs = 0, onsetGraceMs = 0 } = timing;
   let lastVoiced = null;
+  let held = null;
+  const MAX_STEP_MS = 100;
   const notes = [];
   let totalWeight = 0;
   const bonusLines = new Set;
@@ -406,8 +408,9 @@ function createScoreKeeper(song, difficulty = "easy", timing = {}) {
         lineIndex: li,
         startMs: s.startMs,
         endMs: s.startMs + s.durationMs,
-        hitFrames: 0,
-        totalFrames: 0,
+        hitMs: 0,
+        totalMs: 0,
+        reached: false,
         rap: isRapNote(s.type)
       });
     }
@@ -438,18 +441,26 @@ function createScoreKeeper(song, difficulty = "easy", timing = {}) {
     else if (lastVoiced && positionMs - lastVoiced.ms <= holdMs && positionMs >= lastVoiced.ms)
       sungMidi = lastVoiced.midi;
     const t = positionMs - micLagMs;
+    if (held && held.judged) {
+      const until = Math.min(t, held.note.endMs, held.t + MAX_STEP_MS);
+      if (until > held.t) {
+        held.note.totalMs += until - held.t;
+        if (held.hit)
+          held.note.hitMs += until - held.t;
+      }
+    }
     const n = activeNote(t);
-    if (!n)
+    if (!n) {
+      held = null;
       return;
+    }
+    n.reached = true;
     let hit = false;
     if (sungMidi != null) {
       hit = n.rap || Math.abs(foldToOctaveOf(sungMidi, n.pitch, n.pitch) - n.pitch) <= tol;
     }
-    if (!hit && t - n.startMs < onsetGraceMs)
-      return;
-    n.totalFrames++;
-    if (hit)
-      n.hitFrames++;
+    const judged = hit || t - n.startMs >= onsetGraceMs;
+    held = { note: n, t, hit, judged };
   }
   function read() {
     let notePoints = 0;
@@ -458,11 +469,11 @@ function createScoreKeeper(song, difficulty = "easy", timing = {}) {
     const lineWeight = new Map;
     const lineCredit = new Map;
     for (const n of notes) {
-      const f = n.totalFrames > 0 ? n.hitFrames / n.totalFrames : 0;
+      const f = n.totalMs > 0 ? n.hitMs / n.totalMs : 0;
       notePoints += n.maxPoints * f;
       if (f > 0)
         notesSung++;
-      if (n.totalFrames > 0)
+      if (n.reached)
         notesReached++;
       lineWeight.set(n.lineIndex, (lineWeight.get(n.lineIndex) ?? 0) + n.weight);
       lineCredit.set(n.lineIndex, (lineCredit.get(n.lineIndex) ?? 0) + n.weight * f);
@@ -487,10 +498,12 @@ function createScoreKeeper(song, difficulty = "easy", timing = {}) {
   }
   function reset() {
     for (const n of notes) {
-      n.hitFrames = 0;
-      n.totalFrames = 0;
+      n.hitMs = 0;
+      n.totalMs = 0;
+      n.reached = false;
     }
     lastVoiced = null;
+    held = null;
   }
   return { sample, read, reset };
 }
@@ -2699,14 +2712,18 @@ async function startMicPitch(opts = {}) {
     ensureMonitorChain();
   const buf = new Float32Array(analyser.fftSize);
   let liveOpts = { ...detectOpts };
+  let latest = null;
+  const detectTimer = setInterval(() => {
+    if (stopped)
+      return;
+    analyser.getFloatTimeDomainData(buf);
+    latest = detectPitch(buf, { sampleRate: ctx.sampleRate, ...liveOpts });
+  }, 1000 / DETECT_HZ);
   return {
     sampleRate: ctx.sampleRate,
     applied,
     read() {
-      if (stopped)
-        return null;
-      analyser.getFloatTimeDomainData(buf);
-      return detectPitch(buf, { sampleRate: ctx.sampleRate, ...liveOpts });
+      return stopped ? null : latest;
     },
     level() {
       if (stopped)
@@ -2739,6 +2756,8 @@ async function startMicPitch(opts = {}) {
       if (stopped)
         return;
       stopped = true;
+      clearInterval(detectTimer);
+      latest = null;
       source.disconnect();
       gainNode.disconnect();
       if (monitorNode)
@@ -2749,6 +2768,7 @@ async function startMicPitch(opts = {}) {
     }
   };
 }
+var DETECT_HZ = 40;
 function clamp01(n) {
   return Math.min(1, Math.max(0, n));
 }
@@ -3327,6 +3347,31 @@ function onProgress(e) {
   lastKnownMs = Number(e.data) || 0;
   lastKnownAt = performance.now();
 }
+var seekedAt = 0;
+function seekTo(ms) {
+  try {
+    Spicetify.Player.seek?.(ms);
+  } catch (err) {
+    console.error("[singify] seek failed:", err);
+  }
+  lastKnownMs = ms;
+  lastKnownAt = performance.now();
+  seekedAt = lastKnownAt;
+}
+function resyncClock() {
+  const getProgress = Spicetify.Player.getProgress;
+  if (paused || typeof getProgress !== "function")
+    return;
+  if (performance.now() - seekedAt < 1500)
+    return;
+  const real = Number(getProgress.call(Spicetify.Player));
+  if (!Number.isFinite(real))
+    return;
+  if (Math.abs(real - getBaseMs()) > 300) {
+    lastKnownMs = real;
+    lastKnownAt = performance.now();
+  }
+}
 function onPlayPause() {
   lastKnownMs = getBaseMs();
   lastKnownAt = performance.now();
@@ -3638,11 +3683,7 @@ function restartSong() {
     renderOverlay();
 }
 function onReplay() {
-  try {
-    Spicetify.Player.seek?.(0);
-  } catch (err) {
-    console.error("[singify] replay seek failed:", err);
-  }
+  seekTo(0);
 }
 var SENS_SCALE = "v2";
 function v1Threshold(sensitivity) {
@@ -4664,6 +4705,7 @@ async function main() {
       renderOverlay();
   });
   Spicetify.Player.addEventListener("onprogress", onProgress);
+  setInterval(resyncClock, 500);
   Spicetify.Player.addEventListener("onplaypause", onPlayPause);
   Spicetify.Player.addEventListener("songchange", () => void onSongChange());
   const S = Spicetify;
