@@ -123,6 +123,33 @@ describe("live timing allowances", () => {
   });
 });
 
+describe("frame-rate independence", () => {
+  const one = parse("#TITLE:T\n#ARTIST:A\n#BPM:60\n#GAP:0\n: 0 4 0 la\nE"); // 0–1000 ms
+
+  test("a stutter covers its real duration, not one frame's worth", () => {
+    // Smooth on-pitch for 500 ms at 60 fps, then one 80 ms hitch frame while
+    // silent, then silent at 60 fps. Frame-counting would score the silent half
+    // lighter than the sung half; time-weighting scores both halves as time.
+    const k = createScoreKeeper(one, "easy");
+    for (let ms = 0; ms < 500; ms += 1000 / 60) k.sample(ms, 0);
+    k.sample(500, null);
+    for (let ms = 580; ms <= 1000; ms += 1000 / 60) k.sample(ms, null);
+    k.sample(1000, null);
+    expect(k.read().notePoints).toBeGreaterThan(4400);
+    expect(k.read().notePoints).toBeLessThan(4600);
+  });
+
+  test("30 fps and 120 fps score the same performance alike", () => {
+    const at = (fps: number) => {
+      const k = createScoreKeeper(one, "easy");
+      for (let ms = 0; ms <= 1000; ms += 1000 / fps) k.sample(ms, ms < 300 ? 0 : null);
+      k.sample(1000, null);
+      return k.read().notePoints;
+    };
+    expect(Math.abs(at(30) - at(120))).toBeLessThan(250);
+  });
+});
+
 describe("toleranceSemitones", () => {
   test("shrinks with difficulty", () => {
     expect(toleranceSemitones("easy")).toBe(2);
@@ -170,6 +197,7 @@ describe("createScoreKeeper", () => {
     // First half of note a on-pitch, second half silent → ~50% credit.
     singNote(k, 0, 500, 0, 5);
     singNote(k, 500, 1000, null, 5);
+    k.sample(1000, null); // the next frame closes the last reading's interval
     // a's max is 2250 → expect ~1125 note points from it.
     expect(k.read().notePoints).toBe(Math.round(2250 * 0.5));
   });

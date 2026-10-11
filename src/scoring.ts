@@ -12,7 +12,7 @@
  *   and a golden note is worth double a normal one of equal length — this is
  *   decided up front, before a note is sung.
  * - Each note then earns its max × (fraction of it sung on-pitch). "Fraction"
- *   is measured as hitFrames / totalFrames while the note is active, which
+ *   is measured as on-pitch time / judged time while the note is active, which
  *   approximates fraction-of-duration held correctly (silence counts against
  *   you, matching real engines).
  * - The 1000-point line bonus is split evenly across lines that contain scored
@@ -116,8 +116,9 @@ interface NoteAcc {
   lineIndex: number;
   startMs: number;
   endMs: number;
-  hitFrames: number;
-  totalFrames: number;
+  hitMs: number; // time sung on-pitch while this note was active
+  totalMs: number; // time this note was active and judged
+  reached: boolean; // playback got to this note at all
   rap: boolean; // pitch-agnostic — any voiced input counts as a hit
 }
 
@@ -143,6 +144,8 @@ export function createScoreKeeper(
   const tol = toleranceSemitones(difficulty);
   const { micLagMs = 0, holdMs = 0, onsetGraceMs = 0 } = timing;
   let lastVoiced: { ms: number; midi: number } | null = null;
+  let held: { note: NoteAcc; t: number; hit: boolean; judged: boolean } | null = null;
+  const MAX_STEP_MS = 100;
 
   const notes: NoteAcc[] = [];
   let totalWeight = 0;
@@ -162,8 +165,9 @@ export function createScoreKeeper(
         lineIndex: li,
         startMs: s.startMs,
         endMs: s.startMs + s.durationMs,
-        hitFrames: 0,
-        totalFrames: 0,
+        hitMs: 0,
+        totalMs: 0,
+        reached: false,
         rap: isRapNote(s.type),
       });
     }
@@ -194,19 +198,34 @@ export function createScoreKeeper(
     if (sungMidi != null) lastVoiced = { ms: positionMs, midi: sungMidi };
     else if (lastVoiced && positionMs - lastVoiced.ms <= holdMs && positionMs >= lastVoiced.ms)
       sungMidi = lastVoiced.midi;
-
     const t = positionMs - micLagMs;
-    const n = activeNote(t);
-    if (!n) return; // outside every note — nothing to credit
 
+    // Sample-and-hold, like a fixed physics step: the PREVIOUS reading stands
+    // for the time until this one, clipped at its note's end (and capped, so a
+    // pause can't credit seconds). Time-weighted, so the score doesn't depend
+    // on frame rate — a stutter frame covers its real duration.
+    if (held && held.judged) {
+      const until = Math.min(t, held.note.endMs, held.t + MAX_STEP_MS);
+      if (until > held.t) {
+        held.note.totalMs += until - held.t;
+        if (held.hit) held.note.hitMs += until - held.t;
+      }
+    }
+
+    const n = activeNote(t);
+    if (!n) {
+      held = null; // outside every note — nothing to credit
+      return;
+    }
+    n.reached = true;
     let hit = false;
     if (sungMidi != null) {
       // rap: any voiced input counts — rhythm, not pitch
       hit = n.rap || Math.abs(foldToOctaveOf(sungMidi, n.pitch, n.pitch) - n.pitch) <= tol;
     }
-    if (!hit && t - n.startMs < onsetGraceMs) return; // late entry: not held against you
-    n.totalFrames++;
-    if (hit) n.hitFrames++;
+    // A miss in the onset grace window is not held against the note (late entry).
+    const judged = hit || t - n.startMs >= onsetGraceMs;
+    held = { note: n, t, hit, judged };
   }
 
   function read(): ScoreState {
@@ -217,10 +236,10 @@ export function createScoreKeeper(
     const lineCredit = new Map<number, number>();
 
     for (const n of notes) {
-      const f = n.totalFrames > 0 ? n.hitFrames / n.totalFrames : 0;
+      const f = n.totalMs > 0 ? n.hitMs / n.totalMs : 0;
       notePoints += n.maxPoints * f;
       if (f > 0) notesSung++;
-      if (n.totalFrames > 0) notesReached++;
+      if (n.reached) notesReached++;
       lineWeight.set(n.lineIndex, (lineWeight.get(n.lineIndex) ?? 0) + n.weight);
       lineCredit.set(
         n.lineIndex,
@@ -250,10 +269,12 @@ export function createScoreKeeper(
 
   function reset(): void {
     for (const n of notes) {
-      n.hitFrames = 0;
-      n.totalFrames = 0;
+      n.hitMs = 0;
+      n.totalMs = 0;
+      n.reached = false;
     }
     lastVoiced = null;
+    held = null;
   }
 
   return { sample, read, reset };

@@ -202,13 +202,21 @@ export async function startMicPitch(opts: MicPitchOptions = {}): Promise<MicPitc
   // Detection options that can be tuned live (mic sensitivity = rmsThreshold).
   let liveOpts: LiveDetectOptions = { ...detectOpts };
 
+  // Pitch detection runs on its OWN fixed clock, like a game's physics tick: a
+  // steady DETECT_HZ no matter how fast the screen draws. read() just hands out
+  // the latest result, so a faster frame rate no longer means more detection work.
+  let latest: PitchReading | null = null;
+  const detectTimer = setInterval(() => {
+    if (stopped) return;
+    analyser.getFloatTimeDomainData(buf);
+    latest = detectPitch(buf, { sampleRate: ctx.sampleRate, ...liveOpts });
+  }, 1000 / DETECT_HZ);
+
   return {
     sampleRate: ctx.sampleRate,
     applied,
     read() {
-      if (stopped) return null;
-      analyser.getFloatTimeDomainData(buf);
-      return detectPitch(buf, { sampleRate: ctx.sampleRate, ...liveOpts });
+      return stopped ? null : latest;
     },
     level() {
       if (stopped) return 0;
@@ -238,6 +246,8 @@ export async function startMicPitch(opts: MicPitchOptions = {}): Promise<MicPitc
     stop() {
       if (stopped) return;
       stopped = true;
+      clearInterval(detectTimer);
+      latest = null;
       source.disconnect();
       gainNode.disconnect();
       if (monitorNode) monitorNode.disconnect();
@@ -246,6 +256,10 @@ export async function startMicPitch(opts: MicPitchOptions = {}): Promise<MicPitc
     },
   };
 }
+
+/** Pitch detections per second. The 2048-sample window spans ~43 ms at 48 kHz,
+ *  so 40 Hz (every 25 ms) still overlaps consecutive windows — no gaps. */
+const DETECT_HZ = 40;
 
 function clamp01(n: number): number {
   return Math.min(1, Math.max(0, n));
