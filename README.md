@@ -29,6 +29,9 @@ off the mic, solo or 1–4 players head-to-head.
 | ![Solo stage](docs/stage-solo.png)<br>**Solo stage** — pitch highway, live score, per-syllable lyric wipe, golden notes | ![Versus](docs/stage-versus.png)<br>**1–4 players** — one coloured lane each, per-player score + mic |
 | ![Session setup](docs/session-setup.png)<br>**Start a session** — roster, playlist, difficulty, round count | ![Results](docs/result.png)<br>**Session results** — winner, star tiers, per-song breakdown |
 
+![See-through stage](docs/see-through.webp)
+**See-through (`V`)** — the music video keeps playing behind the highway and lyrics.
+
 ## Why this exists
 
 The existing engines are good — USDX, Vocaluxe, Performous, UltraStar Play,
