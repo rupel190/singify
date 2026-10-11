@@ -1209,58 +1209,64 @@ let seeThrough = (() => {
   }
 })();
 
-// In see-through mode the stage sits exactly over the video PICTURE (not the
-// player box with its theme-coloured pillarbox bars), so Spotify's top bar,
-// sidebars and playbar stay visible and clickable. No video (an audio track) →
-// the main view; neither found → full screen, as before.
+// In see-through mode the stage spans the full width but stays BETWEEN Spotify's
+// top bar and playbar, so both remain usable. (Fitting it to the video picture
+// was fragile: the full-screen player lays the video out differently, and the
+// sidebar's small video got picked up.) Bars hidden → full screen.
 let placeTimer = 0;
 let placedKey = "";
 
-function videoPictureRect(): DOMRect | null {
-  const main = document.getElementById("main");
-  for (const v of Array.from(main?.querySelectorAll("video") ?? [])) {
+/** A video big enough to sing over is showing — not the sidebar's small one. */
+function bigVideoShowing(): boolean {
+  const area = window.innerWidth * window.innerHeight;
+  for (const v of Array.from(document.querySelectorAll("#main video") as NodeListOf<HTMLVideoElement>)) {
     const r = v.getBoundingClientRect();
-    if (r.width < 50 || r.height < 50) continue; // hidden / thumbnail
-    const vw = v.videoWidth;
-    const vh = v.videoHeight;
-    if (!vw || !vh) return r;
-    const k = Math.min(r.width / vw, r.height / vh); // object-fit: contain
-    const w = vw * k;
-    const h = vh * k;
-    return new DOMRect(r.left + (r.width - w) / 2, r.top + (r.height - h) / 2, w, h);
+    if (r.width * r.height >= area / 4 && v.readyState >= 2) return true;
   }
-  return null;
+  return false;
+}
+
+function visibleRect(sel: string): DOMRect | null {
+  const el = document.querySelector(sel);
+  const r = el?.getBoundingClientRect();
+  return r && r.width > 0 && r.height > 0 ? r : null;
 }
 
 function placeOverlay(): void {
   if (!overlay) return;
-  const target =
-    visible && seeThrough
-      ? videoPictureRect() ?? document.querySelector(".Root__main-view")?.getBoundingClientRect() ?? null
-      : null;
-  const key = target
-    ? [target.left, target.top, target.width, target.height].map(Math.round).join(",")
-    : "full";
-  if (key === placedKey) return; // nothing moved — leave the layout alone
+  let top = 0;
+  let bottom = window.innerHeight;
+  if (visible && seeThrough) {
+    const bar = visibleRect(".Root__globalNav, .Root__top-bar");
+    const play = visibleRect(".Root__now-playing-bar");
+    if (bar && bar.bottom < window.innerHeight / 3) top = bar.bottom;
+    if (play && play.top > (window.innerHeight * 2) / 3) bottom = play.top;
+  }
+  // Solid unless a real video is behind — over Spotify's busy pages the
+  // dimmed background made lyrics hard to read.
+  const through = visible && seeThrough;
+  const dim = through && bigVideoShowing();
+  const key = through ? `${Math.round(top)},${Math.round(bottom)},${dim}` : "full";
+  if (key === placedKey) return; // nothing changed — leave the layout alone
   placedKey = key;
   Object.assign(
     overlay.style,
-    target
-      ? { inset: "auto", left: `${target.left}px`, top: `${target.top}px`, width: `${target.width}px`, height: `${target.height}px` }
-      : { inset: "0", left: "", top: "", width: "", height: "" }
+    through
+      ? { inset: "auto", left: "0", right: "0", top: `${top}px`, height: `${bottom - top}px` }
+      : { inset: "0", left: "", right: "", top: "", height: "" }, // full screen, follows resizes
+    { background: dim ? `rgba(10, 10, 14, ${SEE_THROUGH_DIM})` : "rgb(10, 10, 14)" }
   );
 }
 
 function applyBackdrop(): void {
   const spotifyMain = document.getElementById("main");
   const through = visible && seeThrough;
+  if (spotifyMain) spotifyMain.style.display = visible && !seeThrough ? "none" : "";
   clearInterval(placeTimer);
   placedKey = "";
-  placeOverlay();
-  // Follow window/sidebar resizes and track changes; cheap, and a no-op when still.
+  placeOverlay(); // after #main is shown — its bars and video need a layout to measure
+  // Follow resizes, bars appearing (leaving full-screen video) and track changes.
   if (through) placeTimer = window.setInterval(placeOverlay, 500);
-  if (spotifyMain) spotifyMain.style.display = visible && !seeThrough ? "none" : "";
-  if (overlay) overlay.style.background = seeThrough ? `rgba(10, 10, 14, ${SEE_THROUGH_DIM})` : "rgb(10, 10, 14)";
   let pause = document.getElementById("singify-pause-page") as HTMLStyleElement | null;
   if (!pause) {
     pause = document.createElement("style");
