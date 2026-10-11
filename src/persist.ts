@@ -27,6 +27,8 @@ import {
   DEFAULT_OFFSET_KEY,
   OFFSET_PREFIX,
   PUNCHED_PREFIX,
+  SYNC_CURVE_PREFIX,
+  SYNC_BIAS_KEY,
 } from "./storage-keys";
 
 // The knobs mirrored to the on-disk "settings" store. Built from the shared key
@@ -67,10 +69,14 @@ function gatherOffsets(): Record<string, string> {
   if (!store) return out;
   for (let i = 0; i < store.length; i++) {
     const k = store.key(i);
-    // The punched mark rides along: it's a verdict on the offset, so it lives with it.
+    // The punched mark and the auto-sync data ride along: they're all about sync.
     if (
       k &&
-      (k === DEFAULT_OFFSET_KEY || k.startsWith(OFFSET_PREFIX) || k.startsWith(PUNCHED_PREFIX))
+      (k === DEFAULT_OFFSET_KEY ||
+        k === SYNC_BIAS_KEY ||
+        k.startsWith(OFFSET_PREFIX) ||
+        k.startsWith(PUNCHED_PREFIX) ||
+        k.startsWith(SYNC_CURVE_PREFIX))
     ) {
       const v = store.getItem(k);
       if (v != null) out[k] = v;

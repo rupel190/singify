@@ -27,3 +27,7 @@ export const DEFAULT_OFFSET_KEY = "singify:offsetMs";
 export const OFFSET_PREFIX = "singify:offset:";
 /** "Punched in proper" mark — `${PUNCHED_PREFIX}${trackUri}` = "1" while set. */
 export const PUNCHED_PREFIX = "singify:punched:";
+/** Auto-sync curve for a chart that drifts or jumps — `${SYNC_CURVE_PREFIX}${trackUri}` = JSON knots. */
+export const SYNC_CURVE_PREFIX = "singify:syncCurve:";
+/** Auto-sync bias samples learned from punched tracks — JSON { trackUri: ms }. */
+export const SYNC_BIAS_KEY = "singify:syncBias";

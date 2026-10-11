@@ -73,8 +73,11 @@ import {
   DEFAULT_OFFSET_KEY,
   OFFSET_PREFIX,
   PUNCHED_PREFIX,
+  SYNC_CURVE_PREFIX,
+  SYNC_BIAS_KEY,
 } from "./storage-keys";
 import { startPunchedBadges } from "./punched-badges";
+import { trackKey } from "./punch-header";
 import { StatsScreen } from "./stats-view";
 import type { StatRound } from "./stats";
 import {
@@ -88,6 +91,15 @@ import { sensitivityToThreshold, thresholdToSensitivity } from "./pitch";
 import type { Difficulty } from "./scoring";
 import { UI_SCALE } from "./ui-scale";
 import { parse, type ParsedSong } from "./ultrastar-parser";
+import {
+  autoSync,
+  isConfident,
+  isMismatch,
+  offsetAt,
+  DEFAULT_SYNC_BIAS_MS,
+  type LyricLine,
+  type OffsetKnot,
+} from "./autosync";
 import type { USDBSong } from "./usdb";
 
 // ── Playback clock (interpolated) ────────────────────────────────────────────
@@ -108,7 +120,10 @@ function getBaseMs(): number {
 }
 
 function getCurrentMs(): number {
-  return getBaseMs() + offsetMs;
+  const base = getBaseMs();
+  // A drifting or jumping chart carries an auto-sync curve; the per-track
+  // offset then rides on top of it as a fine-tune.
+  return base + (syncCurve ? offsetAt(syncCurve, base) : 0) + offsetMs;
 }
 
 function onProgress(e: SpicetifyPlayerEvent): void {
@@ -215,7 +230,7 @@ function setOffset(next: number): void {
 let readoutEl: HTMLDivElement | null = null;
 let readoutTimer = 0;
 
-function showReadout(text: string): void {
+function showReadout(text: string, holdMs = 1200): void {
   if (!readoutEl) {
     readoutEl = document.createElement("div");
     readoutEl.id = "singify-readout";
@@ -243,7 +258,7 @@ function showReadout(text: string): void {
   clearTimeout(readoutTimer);
   readoutTimer = window.setTimeout(() => {
     if (readoutEl) readoutEl.style.opacity = "0";
-  }, 1200);
+  }, holdMs);
 }
 
 function showOffset(): void {
@@ -323,8 +338,10 @@ function writePunchedToChart(): void {
 
 /** A chart that arrives carrying the mark: adopt it, and its offset unless this profile has its own. */
 function adoptChartPunch(song: ParsedSong): void {
-  const fromFile = song.headers.punchedOffsetMs;
-  if (fromFile == null || !currentTrackId) return;
+  if (!currentTrackId) return;
+  // Only THIS Spotify version's entry — another version of the song can be 30 s off.
+  const fromFile = song.headers.punchedOffsets[trackKey(currentTrackId)];
+  if (fromFile == null) return;
   if (readNum(OFFSET_PREFIX + currentTrackId) == null) setOffset(fromFile);
   if (!isPunched(currentTrackId)) setPunchedLocal(currentTrackId, true);
 }
@@ -340,9 +357,143 @@ function punchSync(): void {
     Spicetify.showNotification?.("Punch-sync: chart has no notes");
     return;
   }
+  saveCurve(null); // a hand punch overrides any auto-sync curve
   setOffset(firstMs - getBaseMs()); // snap the first line to this moment
   const sign = offsetMs > 0 ? "+" : "";
   showReadout(`⏱ Punched — first line synced · offset ${sign}${offsetMs} ms`);
+}
+
+// ── Auto-sync (Spotify's synced lyrics as the reference) ─────────────────────
+//
+// On chart load, fetch Spotify's line-synced lyrics for the track and match the
+// chart against them (autosync.ts). A confident single offset is SUGGESTED —
+// Enter applies it, nothing changes on its own. A chart that drifts or jumps
+// gets a warning, and Enter tries a corrected sync (an offset curve).
+// Punched tracks are never second-guessed; they teach the bias instead.
+
+let syncCurve: OffsetKnot[] | null = null; // this track's curve, bias already applied
+
+function loadCurve(uri: string): OffsetKnot[] | null {
+  try {
+    const raw = localStorage.getItem(SYNC_CURVE_PREFIX + uri);
+    const curve = raw ? (JSON.parse(raw) as OffsetKnot[]) : null;
+    return curve && curve.length ? curve : null;
+  } catch {
+    return null;
+  }
+}
+
+function saveCurve(curve: OffsetKnot[] | null): void {
+  syncCurve = curve;
+  if (!currentTrackId) return;
+  try {
+    // "[]" rather than removal, so the disk seed can't resurrect a cleared curve.
+    localStorage.setItem(SYNC_CURVE_PREFIX + currentTrackId, JSON.stringify(curve ?? []));
+  } catch {
+    /* storage blocked — keep the in-memory curve */
+  }
+  mirrorOffsets();
+}
+
+// Estimates run ~1/3 s above hand punches (measured on 44 tracks; cause
+// unknown). Learned per user from PUNCHED tracks only — the checkbox is the
+// trustworthy ground truth — once there are enough of them.
+const BIAS_MIN_SAMPLES = 5;
+
+function readBiasSamples(): Record<string, number> {
+  try {
+    return JSON.parse(localStorage.getItem(SYNC_BIAS_KEY) ?? "{}") as Record<string, number>;
+  } catch {
+    return {};
+  }
+}
+
+function syncBias(): number {
+  const xs = Object.values(readBiasSamples()).sort((a, b) => a - b);
+  if (xs.length < BIAS_MIN_SAMPLES) return DEFAULT_SYNC_BIAS_MS;
+  const mid = xs.length >> 1;
+  return xs.length % 2 ? xs[mid] : (xs[mid - 1] + xs[mid]) / 2;
+}
+
+function recordBiasSample(uri: string, diffMs: number): void {
+  if (Math.abs(diffMs) > 1500) return; // that's a different problem, not bias
+  const samples = readBiasSamples();
+  samples[uri] = Math.round(diffMs);
+  try {
+    localStorage.setItem(SYNC_BIAS_KEY, JSON.stringify(samples));
+  } catch {
+    return;
+  }
+  mirrorOffsets();
+}
+
+async function fetchSyncedLyrics(uri: string): Promise<LyricLine[] | null> {
+  const cosmos = Spicetify.CosmosAsync as { get?: (url: string) => Promise<unknown> } | undefined;
+  if (!cosmos?.get) return null;
+  const id = uri.split(":").pop();
+  try {
+    const res = (await cosmos.get(
+      `https://spclient.wg.spotify.com/color-lyrics/v2/track/${id}?format=json&vocalRemoval=false&market=from_token`
+    )) as { lyrics?: { syncType?: string; lines?: { startTimeMs: string; words: string }[] } };
+    if (res?.lyrics?.syncType !== "LINE_SYNCED" || !res.lyrics.lines) return null;
+    return res.lyrics.lines.map((l) => ({ startMs: Number(l.startTimeMs), words: l.words }));
+  } catch {
+    return null; // no lyrics for this track (404) or offline
+  }
+}
+
+// A suggestion waits for Enter for a while, then lapses.
+let pendingSync: { apply: () => void; until: number } | null = null;
+const PROMPT_MS = 15000;
+
+function promptSync(text: string, apply: () => void): void {
+  pendingSync = { apply, until: performance.now() + PROMPT_MS };
+  showReadout(text, PROMPT_MS);
+}
+
+function fmtSeconds(ms: number): string {
+  return `${ms > 0 ? "+" : ""}${(ms / 1000).toFixed(1)} s`;
+}
+
+async function runAutoSync(uri: string, song: ParsedSong): Promise<void> {
+  const lines = await fetchSyncedLyrics(uri);
+  if (!lines || currentTrackId !== uri || currentSong !== song) return; // moved on meanwhile
+  const r = autoSync(song, lines);
+  if (!r) return;
+  const bias = syncBias();
+
+  if (isPunched(uri)) {
+    if (isConfident(r) && !syncCurve) recordBiasSample(uri, r.offsetMs - offsetMs);
+    else if (isMismatch(r)) showReadout("⚠ This chart may not match Spotify's recording", 6000);
+    return;
+  }
+
+  if (isConfident(r)) {
+    const suggested = Math.round(r.offsetMs - bias);
+    const stored = readNum(OFFSET_PREFIX + uri);
+    // A tuned track only hears from us when it's way off (a punch on the wrong line).
+    if (stored != null && !syncCurve && Math.abs(suggested - stored) <= 2000) return;
+    promptSync(`Auto-sync ${fmtSeconds(suggested)} — Enter to apply`, () => {
+      saveCurve(null);
+      setOffset(suggested);
+      showReadout(`✓ Auto-synced ${fmtSeconds(suggested)} — fine-tune with [ ]`, 2500);
+    });
+  } else if (isMismatch(r)) {
+    if (syncCurve) {
+      showReadout("⚠ Corrected sync active — this chart may be unreliable", 6000);
+      return;
+    }
+    const curve = r.curve.map((k) => ({ atMs: k.atMs, offsetMs: Math.round(k.offsetMs - bias) }));
+    const why =
+      r.shape === "drift"
+        ? `tempo off by ${Math.abs(r.slope * 100).toFixed(1)} %`
+        : "a section doesn't match";
+    promptSync(`⚠ Chart may be unreliable (${why}) — Enter to try a corrected sync`, () => {
+      saveCurve(curve);
+      setOffset(0);
+      showReadout("✓ Corrected sync on — the chart may still be off in places", 3000);
+    });
+  }
 }
 
 // ── Mic pitch ────────────────────────────────────────────────────────────────
@@ -1689,6 +1840,8 @@ async function onPick(candidate: USDBSong): Promise<void> {
     pickerCandidates = null; // success — drop the picker, show the chart
     pickPending = null;
     currentSong = song;
+    saveCurve(null); // a different chart — any old curve was for the old one
+    void runAutoSync(currentTrackId, song);
   } catch (err) {
     // TODO(stage 2): on SessionExpiredError, re-login with stored credentials
     // and retry once before surfacing this.
@@ -1721,6 +1874,8 @@ async function onSongChange(): Promise<void> {
   currentSong = null;
   currentTrackId = item.uri;
   offsetMs = loadOffsetForTrack(currentTrackId); // this song's remembered tuning
+  syncCurve = loadCurve(currentTrackId);
+  pendingSync = null;
   pickerCandidates = null;
   pickPending = null;
   pickError = null;
@@ -1738,6 +1893,7 @@ async function onSongChange(): Promise<void> {
     ) {
       currentSong = res.song;
       adoptChartPunch(res.song);
+      void runAutoSync(item.uri, res.song);
       autoSkipStreak = 0; // a hit ends the chartless run
     } else if (res.status === "needsPicker") {
       pickerQuery = { artist, title };
@@ -2020,6 +2176,17 @@ async function main(): Promise<void> {
         target.isContentEditable);
     if (typing) return;
 
+    if (e.key === "Enter" && pendingSync) {
+      const p = pendingSync;
+      pendingSync = null;
+      if (performance.now() < p.until) {
+        p.apply();
+        e.preventDefault();
+        e.stopPropagation();
+        return;
+      }
+    }
+
     if (e.key === "k" || e.key === "K") {
       openFromKey(); // back to the song if one is loaded, else the menu
     } else if (e.key === "q" || e.key === "Q") {
@@ -2034,6 +2201,7 @@ async function main(): Promise<void> {
       setOffset(offsetMs + (e.code === "BracketLeft" ? -step : step));
       e.preventDefault();
     } else if (e.key === "\\") {
+      saveCurve(null);
       setOffset(0); // reset sync
     } else if (e.key === "m" || e.key === "M") {
       void toggleMics();
