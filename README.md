@@ -1,9 +1,10 @@
 # Spicetify Karaoke (singify)
 
 UltraStar karaoke **inside Spotify**, via Spicetify. When a song plays, singify
-fetches the matching UltraStar `.txt` from USDB, parses it, and renders a
-syllable-highlighted lyric scroll + pitch highway in a fullscreen overlay — then
-scores your singing off the mic, solo or 1–4 players head-to-head.
+fetches the matching UltraStar `.txt` from USDB, **lines it up with Spotify's own
+synced lyrics so it's in time by itself**, and renders a syllable-highlighted
+lyric scroll + pitch highway in a fullscreen overlay — then scores your singing
+off the mic, solo or 1–4 players head-to-head.
 
 **Stack:** Bun · TypeScript · Spicetify (Electron/Chromium renderer) · Linux (NixOS)
 
@@ -37,8 +38,9 @@ audio file, at the matching length, for every song anyone might want. Party's on
 somebody names a song, and you're in a file manager.
 
 singify skips that. The audio is whatever Spotify is already playing, so the
-library is Spotify's; the chart resolves itself in the background. You name a
-song, it's on.
+library is Spotify's; the chart resolves itself in the background, and
+[auto-sync](#auto-sync) times it against the recording that's actually playing.
+You name a song, it's on — nobody has to sit at the keyboard fixing sync.
 
 ## Why not fork one of them?
 
@@ -47,6 +49,36 @@ can analyse the backing track. Spotify never exposes decoded PCM (DRM), so that
 route is closed. singify rides only what Spotify *does* expose — the playback
 clock + the mic — overlaying the chart on whatever's already playing. That
 constraint is also what makes the library problem go away.
+
+## Auto-sync
+
+Same problem as subtitle sync: the chart was timed against one copy of the song,
+Spotify plays another. Spotify ships **line-synced lyrics** (Musixmatch) timed to
+the exact master that's playing, so they're the reference — no audio needed,
+which matters because Spotify's audio is DRM'd.
+
+On chart load, `autosync.ts` aligns the chart's words with Spotify's lyric words
+in order (Needleman–Wunsch, so the third chorus pairs with the third chorus).
+Every matched line is an anchor — chart time minus Spotify time — and the median
+is the offset. A straight-line fit through the anchors tells three cases apart:
+**constant** (one offset), **drift** (the chart's tempo is off) and **step** (the
+chart has a section the recording doesn't).
+
+- A confident constant offset is **applied by itself**; `Backspace` undoes it
+  while the notice shows. `A` reruns it on demand.
+- Tracks marked *punched* are never touched; an existing offset within 2 s of the
+  estimate is kept as a fine-tune.
+- Drift/step charts get a warning; `Enter` tries a corrected sync (an offset
+  curve). Usually the better fix is another chart (`Shift+R`).
+
+Measured against hand-tuned offsets: within ±0.5 s on about 4 of 5 songs, and
+where it disagreed by seconds it was usually the hand punch that was wrong. It
+needs Spotify to have synced lyrics for the track — roughly 60–70% of songs
+tested; the rest fall back to `P`. Estimates run ~330 ms ahead of hand punches,
+a bias singify subtracts and then learns per user from punched tracks.
+
+Track lists in Spotify show the verdict next to each title: **✓** punched,
+**◐** auto-synced, **∅** searched and no chart found.
 
 ## Approach: browser-first, Spotify later
 
@@ -79,6 +111,7 @@ auto-resolve, sessions and the localhost helper all work end-to-end.
 | `src/cache.ts` | ✅ query sanitisation, fuzzy matching, on-disk song cache · tested |
 | `src/resolver.ts` | ✅ cache + USDB flow, session-expiry re-login · tested |
 | `src/karaoke-view.tsx` | ✅ pitch highway + per-syllable wipe + coloured versus lanes · browser + **live in Spotify** |
+| `src/autosync.ts` | ✅ chart ↔ Spotify-lyrics word alignment, constant / drift / step offsets · tested · **live in Spotify** |
 | `src/index.ts` (extension) | ✅ clock, overlay, `songchange`, hotkeys, sessions · **live in Spotify** |
 | `server/helper.ts` (localhost bridge) | ✅ Bun HTTP server wrapping resolver/usdb/cache · CORS · lazy login + retry · has a USDB account |
 | `src/resolver-client.ts` (thin client) | ✅ browser/Spotify side; same signatures as `resolver.ts`, fetches the helper |
@@ -88,7 +121,7 @@ auto-resolve, sessions and the localhost helper all work end-to-end.
 | Config + credentials | ✅ `~/.config/singify/config.json`, loaded by the helper |
 | Stats + persistence (`stats.ts`, `persist.ts`, `server/store.ts`) | ✅ per-mic / per-singer aggregates · XDG-backed settings/offsets/stats mirrored via the helper |
 
-**Tests:** `bun test` → **192 pass** (parser + cache/resolver + pitch + scoring +
+**Tests:** `bun test` → **219 pass** (parser + cache/resolver + pitch + scoring +
 session + stats + store + helper). No live USDB calls; everything is
 fixture/mock/synthetic-tone.
 
@@ -97,7 +130,7 @@ fixture/mock/synthetic-tone.
 ```bash
 nix develop            # or `direnv allow` once, then it auto-loads (flake.nix)
 bun install            # first time only
-bun test               # 192 tests
+bun test               # 219 tests
 bun run dev            # browser harness → http://localhost:3000 (or next free port)
 bun run helper         # localhost bridge → http://127.0.0.1:4455 (USDB + cache)
 bun run build          # bundle → dist/karaoke.js
@@ -115,7 +148,8 @@ to test against real charts — no USDB account needed. Free CC-licensed charts:
 | Key | Action | Key | Action |
 | --- | --- | --- | --- |
 | `K` / `S` | Sessions menu | `M` | Toggle mic(s) |
-| `?` / `F1` | All shortcuts | `Backspace` | Undo an auto-sync (while shown) |
+| `?` / `F1` | All shortcuts | `A` | Auto-sync now (replaces the offset) |
+| `Backspace` | Undo an auto-sync (while shown) | | |
 | `Enter` | Try a corrected sync on a drifting chart | | |
 | `Q` | Sing (starts 1 player, mic on, until End) | `L` | Load a local `.txt` chart |
 | `[` / `]` | Nudge lyrics later / earlier — ±10 ms (Shift ±100, Ctrl ±1) | `P` | Punch-sync (tap on the first word) |
@@ -129,15 +163,16 @@ lyrics fire earlier), compensating for output latency and slightly-off UltraStar
 `GAP` values. It's a property of the *clock*, saved **per track**, so it lives in
 the adapters — `karaoke-view.tsx` never changed to add it.
 
-Punch-sync (`P`) sets it in one tap: `offset = firstNoteMs − currentPosition`.
-Tuning is self-validating — you punch, you hear it, you nudge. Nothing needs to
-check the number, and a large one is often correct: a chart cut against an album
-version rather than a single edit really can be seconds out. Of 107 tuned tracks
-here, half sit beyond ±2 s and roughly 80% play right.
+Usually nobody sets it: [auto-sync](#auto-sync) does. By hand, punch-sync (`P`)
+sets it in one tap: `offset = firstNoteMs − currentPosition`. A large offset is
+often correct — a chart cut against a music video rather than the album version
+really can be seconds out.
 
-Once it's right, `Shift+P` marks it *punched in proper*: the chart file gets a
-`#SINGIFYPUNCHED:<offset ms>` header (UltraStar ignores unknown tags), so a
-fresh profile opening that chart starts marked and pre-synced.
+Once it's right, `Shift+P` marks it *punched in proper*: auto-sync never touches
+it again, and the chart file gets a `#SINGIFYPUNCHED:<trackId>=<offset ms>`
+header (UltraStar ignores unknown tags) — keyed per Spotify track, because one
+chart often serves several releases of a song — so a fresh profile opening that
+chart starts marked and pre-synced.
 
 Two things follow from the value being *absolute*:
 
