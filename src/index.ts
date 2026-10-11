@@ -116,6 +116,36 @@ function onProgress(e: SpicetifyPlayerEvent): void {
   lastKnownAt = performance.now();
 }
 
+// Seek Spotify AND move our clock with it. The clock otherwise only re-anchors
+// on onprogress events, so after a bare seek the lyrics kept running from the
+// old position until one arrived.
+let seekedAt = 0;
+function seekTo(ms: number): void {
+  try {
+    (Spicetify.Player as { seek?: (ms: number) => void }).seek?.(ms);
+  } catch (err) {
+    console.error("[singify] seek failed:", err);
+  }
+  lastKnownMs = ms;
+  lastKnownAt = performance.now();
+  seekedAt = lastKnownAt;
+}
+
+// Safety net: compare against Spotify's own position twice a second and snap
+// when we've drifted (a seek from Spotify's UI, a missed event). Skipped for a
+// moment after our own seek, while Spotify may still report the old position.
+function resyncClock(): void {
+  const getProgress = (Spicetify.Player as { getProgress?: () => number }).getProgress;
+  if (paused || typeof getProgress !== "function") return;
+  if (performance.now() - seekedAt < 1500) return;
+  const real = Number(getProgress.call(Spicetify.Player));
+  if (!Number.isFinite(real)) return;
+  if (Math.abs(real - getBaseMs()) > 300) {
+    lastKnownMs = real;
+    lastKnownAt = performance.now();
+  }
+}
+
 function onPlayPause(): void {
   // Re-anchor off the *base* clock (never the offset-adjusted one) so resume
   // doesn't jump.
@@ -504,7 +534,7 @@ function resetScores(): void {
 
 /** HUD "⟲ Restart" — back to the top of the song, scoring from zero. */
 function restartSong(): void {
-  onReplay(); // seek(0); the view would reset on the jump anyway...
+  onReplay(); // seek(0) + clock to 0; the view resets on the jump back...
   scoreResetToken++; // ...but bump too, so the score clears even if the seek lags
   showReadout("⟲ Song restarted");
   if (visible) renderOverlay();
@@ -512,11 +542,7 @@ function restartSong(): void {
 
 /** "Sing again" from the result screen — restart the track from the top. */
 function onReplay(): void {
-  try {
-    (Spicetify.Player as { seek?: (ms: number) => void }).seek?.(0);
-  } catch (err) {
-    console.error("[singify] replay seek failed:", err);
-  }
+  seekTo(0);
 }
 
 // ── Mic sensitivity ──────────────────────────────────────────────────────────
@@ -1936,6 +1962,7 @@ async function main(): Promise<void> {
   });
 
   Spicetify.Player.addEventListener("onprogress", onProgress);
+  setInterval(resyncClock, 500);
   Spicetify.Player.addEventListener("onplaypause", onPlayPause);
   Spicetify.Player.addEventListener("songchange", () => void onSongChange());
 
