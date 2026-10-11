@@ -62,7 +62,8 @@ export function SessionSetup(props: {
   difficulty: Difficulty;
   onDifficulty: (d: Difficulty) => void;
   onStart: () => void;
-  onCancel: () => void;
+  /** Unused: the adapter draws the shared Back button. */
+  onCancel?: () => void;
   micOn: boolean;
   // Versus roster — every player sings at once on their OWN mic.
   players: PlayerSlot[];
@@ -137,16 +138,22 @@ export function SessionSetup(props: {
         {micOn ? "🎤 Mic on — you'll be scored" : "🎤 Mic is off — starting turns it on"}
       </div>
 
-      {/* Panel keeps the modes tidy in one column. */}
+      {/* Two columns — set up on the left, pick what to sing on the right — so
+          the whole screen fits without fighting the zoom. */}
       <div
         style={{
-          display: "flex",
-          flexDirection: "column",
-          gap: 12,
-          width: "min(560px, 84vw)",
+          display: "grid",
+          gridTemplateColumns: "minmax(0, 1fr) minmax(0, 1fr)",
+          gridTemplateAreas: '"roster lists" "options lists"',
+          alignItems: "start",
+          columnGap: 40,
+          rowGap: 20,
+          width: "min(1180px, 100%)",
           marginTop: 10,
         }}
       >
+        {/* Left: who sings, on which mic. */}
+        <div style={{ gridArea: "roster", display: "flex", flexDirection: "column", gap: 12, minWidth: 0 }}>
         {/* Roster — one slot is solo; add singers for VERSUS (all sing at once,
             each on their OWN mic). Every slot picks its input device + gain. */}
         <div style={sectionLabel}>
@@ -302,6 +309,10 @@ export function SessionSetup(props: {
             )}
           </div>
         </div>
+        </div>
+
+        {/* Right: what to sing — the current playlist, or pick one. */}
+        <div style={{ gridArea: "lists", display: "flex", flexDirection: "column", gap: 12, minWidth: 0 }}>
 
         {current && (
           <button
@@ -383,6 +394,10 @@ export function SessionSetup(props: {
           )}
         </div>
 
+        </div>
+
+        {/* Left, below the players: how to score, and free play. */}
+        <div style={{ gridArea: "options", display: "flex", flexDirection: "column", gap: 12, minWidth: 0 }}>
         <div style={{ ...sectionLabel, marginTop: 8 }}>Difficulty</div>
         <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
           {(["easy", "medium", "hard"] as Difficulty[]).map((d) => {
@@ -423,15 +438,13 @@ export function SessionSetup(props: {
               {n}
             </button>
           ))}
-          <button style={{ ...primaryBtn(), marginLeft: "auto" }} onClick={onStart}>
+          <button style={{ ...primaryBtn(), marginLeft: "auto", whiteSpace: "nowrap" }} onClick={onStart}>
             ▶ {rounds} rounds
           </button>
         </div>
+        </div>
       </div>
 
-      <button style={{ ...ghostBtn(), marginTop: 16 }} onClick={onCancel}>
-        Cancel
-      </button>
     </Center>
   );
 }
@@ -694,7 +707,8 @@ export function CompetitiveSetup(props: {
   onDifficulty: (d: Difficulty) => void;
   onDevice: (id: string | undefined) => void;
   onStart: () => void;
-  onCancel: () => void;
+  /** Unused: the adapter draws the shared Back button. */
+  onCancel?: () => void;
 }) {
   const React = Spicetify.React;
   const {
@@ -779,9 +793,6 @@ export function CompetitiveSetup(props: {
           style={{ ...primaryBtn(), opacity: track ? 1 : 0.45, cursor: track ? "pointer" : "default" }}
         >
           ⚔ Start duel
-        </button>
-        <button onClick={onCancel} style={ghostBtn()}>
-          Cancel
         </button>
       </div>
     </Center>

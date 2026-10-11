@@ -24,23 +24,15 @@ function fmt(n: number): string {
 export function StatsScreen(props: {
   rounds: StatRound[];
   helperDown?: boolean;
-  onBack: () => void;
+  /** Unused: the adapter draws the shared Back button. Kept for older callers. */
+  onBack?: () => void;
 }) {
   const React = Spicetify.React;
-  const { rounds, helperDown, onBack } = props;
+  const { rounds, helperDown } = props;
   const mics = aggregateByMic(rounds);
   const players = aggregateByPlayer(rounds);
   const recent = [...rounds].sort((a, b) => b.t - a.t).slice(0, 8);
 
-  const backBtn: React.CSSProperties = {
-    background: "transparent",
-    color: C.sub,
-    border: `1px solid ${C.border}`,
-    borderRadius: 20,
-    padding: "8px 18px",
-    font: "600 14px system-ui",
-    cursor: "pointer",
-  };
 
   return (
     <div
@@ -70,9 +62,6 @@ export function StatsScreen(props: {
             {rounds.length} {rounds.length === 1 ? "round" : "rounds"} recorded
           </div>
         </div>
-        <button onClick={onBack} style={backBtn}>
-          ← Back
-        </button>
       </div>
 
       {helperDown && (

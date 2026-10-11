@@ -1188,9 +1188,33 @@ function ensureOverlay(): HTMLDivElement {
  */
 let layoutVersion = 0;
 
-function renderScaled(el: unknown): void {
+// One Back button for every menu screen, always in the same spot (where Stats
+// had its own), so backing out never means hunting for it.
+const BACK_BTN_STYLE = {
+  position: "absolute",
+  top: 28,
+  right: 36,
+  zIndex: 30,
+  background: "rgba(10,10,14,0.6)",
+  color: "rgba(255,255,255,0.75)",
+  border: "1px solid rgba(255,255,255,0.18)",
+  borderRadius: 28,
+  padding: "11px 25px",
+  font: "600 20px system-ui, sans-serif",
+  cursor: "pointer",
+};
+
+function renderScaled(el: unknown, onBack?: () => void): void {
   if (!root) return;
   const React = Spicetify.React;
+  if (onBack) {
+    el = React.createElement(
+      "div",
+      { style: { position: "relative", height: "100%" } },
+      el as never,
+      React.createElement("button", { onClick: onBack, style: BACK_BTN_STYLE }, "← Back")
+    );
+  }
   root.render(
     React.createElement(
       "div",
@@ -1231,7 +1255,14 @@ function renderOverlay(): void {
         onStats: openStats,
       })
       )
-      )
+      ),
+      // Back from the menu: to the song if a session is running, else close.
+      () => {
+        if (session) {
+          activeScreen = "sing";
+          renderOverlay();
+        } else setVisible(false);
+      }
     );
     return;
   }
@@ -1241,11 +1272,11 @@ function renderOverlay(): void {
       React.createElement(StatsScreen, {
         rounds: statRounds,
         helperDown: statsHelperDown,
-        onBack: () => {
-          activeScreen = "home";
-          renderOverlay();
-        },
-      })
+      }),
+      () => {
+        activeScreen = "home";
+        renderOverlay();
+      }
     );
     return;
   }
@@ -1286,11 +1317,11 @@ function renderOverlay(): void {
           renderOverlay();
         },
         onStart: startCompetitive,
-        onCancel: () => {
-          activeScreen = "home";
-          renderOverlay();
-        },
-      })
+      }),
+      () => {
+        activeScreen = "home";
+        renderOverlay();
+      }
     );
     return;
   }
@@ -1353,13 +1384,13 @@ function renderOverlay(): void {
           renderOverlay();
         },
         onStart: startSession,
-        onCancel: () => {
-          stopPreviews();
-          activeScreen = "home";
-          renderOverlay();
-        },
         micOn: micsActive(),
-      })
+      }),
+      () => {
+        stopPreviews();
+        activeScreen = "home";
+        renderOverlay();
+      }
     );
     return;
   }

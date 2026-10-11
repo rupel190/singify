@@ -87,20 +87,9 @@ export function HomeMenu(props: HomeMenuProps) {
         <span style={sub}>one mic · same song · take turns · pure skill</span>
       </button>
 
-      <button
-        onClick={onStats}
-        style={{
-          background: "transparent",
-          color: "rgba(255,255,255,0.72)",
-          border: "1px solid rgba(255,255,255,0.14)",
-          borderRadius: 14,
-          padding: "12px 22px",
-          fontSize: 22,
-          fontWeight: 700,
-          cursor: "pointer",
-        }}
-      >
-        📊 Stats
+      <button onClick={onStats} style={card}>
+        <span style={title}>📊 Stats</span>
+        <span style={sub}>your scores over time · per singer · per mic</span>
       </button>
 
       <div
