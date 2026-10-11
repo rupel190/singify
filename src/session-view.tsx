@@ -880,7 +880,8 @@ export function SessionHud(props: {
             </span>
           )}
           <span style={{ fontSize: px(72), fontWeight: 800 }}>
-            Round <span style={{ color: ACCENT }}>{round}</span>/{target}
+            Round <span style={{ color: ACCENT }}>{round}</span>
+            {Number.isFinite(target) ? `/${target}` : ""}
           </span>
         </div>
         {/* Banked total per singer — the in-progress song is NOT in here; that
@@ -1115,7 +1116,7 @@ export function RoundEnd(props: {
   return (
     <Center zoom={2}>
       <div style={{ fontSize: 22, color: "rgba(255,255,255,0.6)", fontWeight: 700 }}>
-        Round {roundNumber} of {target} done
+        {Number.isFinite(target) ? `Round ${roundNumber} of ${target} done` : `Round ${roundNumber} done`}
       </div>
       <div style={{ fontSize: 30, fontWeight: 800 }}>{justFinished.title}</div>
 

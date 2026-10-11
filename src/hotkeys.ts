@@ -12,7 +12,7 @@ export interface Hotkey {
 
 export const HOTKEYS: Hotkey[] = [
   { keys: "K / S", what: "Sessions menu", short: "menu" },
-  { keys: "Q", what: "Sing the current track (1 player, mic on)", short: "sing" },
+  { keys: "Q", what: "Sing (starts 1 player, mic on, until End)", short: "sing" },
   { keys: "M", what: "Mics on / off", short: "mic" },
   { keys: "R", what: "Restart the song", short: "restart" },
   { keys: "Shift+R", what: "Re-search USDB (pick another chart)", short: "re-choose" },
@@ -20,7 +20,8 @@ export const HOTKEYS: Hotkey[] = [
   { keys: "Shift+P", what: "Mark “punched in proper” (locks P)", short: "mark punched" },
   { keys: "[ / ]", what: "Lyrics later / earlier (Shift ×10, Ctrl fine)", short: "offset" },
   { keys: "\\", what: "Reset sync", short: "reset sync" },
-  { keys: "Enter", what: "Accept an auto-sync suggestion", short: "accept sync" },
+  { keys: "Backspace", what: "Undo an auto-sync (while it's shown)", short: "undo sync" },
+  { keys: "Enter", what: "Try a corrected sync on a drifting chart (when offered)", short: "corrected sync" },
   { keys: "- / =", what: "Mic sensitivity − / +", short: "sensitivity" },
   { keys: ", / .", what: "Hit-line nudge (visual)", short: "hit-line" },
   { keys: "L", what: "Load a local .txt chart", short: "load file" },

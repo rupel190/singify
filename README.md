@@ -115,8 +115,9 @@ to test against real charts — no USDB account needed. Free CC-licensed charts:
 | Key | Action | Key | Action |
 | --- | --- | --- | --- |
 | `K` / `S` | Sessions menu | `M` | Toggle mic(s) |
-| `?` / `F1` | All shortcuts | `Enter` | Accept an auto-sync suggestion |
-| `Q` | Sing the current track (1 player, mic on) | `L` | Load a local `.txt` chart |
+| `?` / `F1` | All shortcuts | `Backspace` | Undo an auto-sync (while shown) |
+| `Enter` | Try a corrected sync on a drifting chart | | |
+| `Q` | Sing (starts 1 player, mic on, until End) | `L` | Load a local `.txt` chart |
 | `[` / `]` | Nudge lyrics later / earlier — ±10 ms (Shift ±100, Ctrl ±1) | `P` | Punch-sync (tap on the first word) |
 | `\` | Reset sync | `R` | Restart the song (scores cleared) |
 | `-` / `=` | Mic sensitivity − / + | `,` / `.` | Hit-line nudge (visual only) |

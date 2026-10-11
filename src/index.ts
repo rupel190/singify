@@ -403,10 +403,10 @@ function toggleHelp(): void {
 // ── Auto-sync (Spotify's synced lyrics as the reference) ─────────────────────
 //
 // On chart load, fetch Spotify's line-synced lyrics for the track and match the
-// chart against them (autosync.ts). A confident single offset is SUGGESTED —
-// Enter applies it, nothing changes on its own. A chart that drifts or jumps
-// gets a warning, and Enter tries a corrected sync (an offset curve).
-// Punched tracks are never second-guessed; they teach the bias instead.
+// chart against them (autosync.ts). A confident single offset is APPLIED, with
+// Backspace to undo — unless the track is punched (never touched) or already
+// within 2 s (a fine-tune). A chart that drifts or jumps gets a warning, and
+// Enter tries a corrected sync (an offset curve). Punched tracks teach the bias.
 
 let syncCurve: OffsetKnot[] | null = null; // this track's curve, bias already applied
 
@@ -479,12 +479,13 @@ async function fetchSyncedLyrics(uri: string): Promise<LyricLine[] | null> {
   }
 }
 
-// A suggestion waits for Enter for a while, then lapses.
-let pendingSync: { apply: () => void; until: number } | null = null;
+// One pending one-key action at a time — Enter to try a corrected sync, or
+// Backspace to undo an auto-sync — offered for a while, then lapsing.
+let pendingSync: { key: "Enter" | "Backspace"; apply: () => void; until: number } | null = null;
 const PROMPT_MS = 15000;
 
-function promptSync(text: string, apply: () => void): void {
-  pendingSync = { apply, until: performance.now() + PROMPT_MS };
+function promptSync(text: string, apply: () => void, key: "Enter" | "Backspace" = "Enter"): void {
+  pendingSync = { key, apply, until: performance.now() + PROMPT_MS };
   showReadout(text, PROMPT_MS);
 }
 
@@ -508,13 +509,23 @@ async function runAutoSync(uri: string, song: ParsedSong): Promise<void> {
   if (isConfident(r)) {
     const suggested = Math.round(r.offsetMs - bias);
     const stored = readNum(OFFSET_PREFIX + uri);
-    // A tuned track only hears from us when it's way off (a punch on the wrong line).
+    // An offset within 2 s is probably a fine-tune (auto-sync is good to ±0.5 s),
+    // so it stays. Further off is a wrong or accidental punch: fix it.
     if (stored != null && !syncCurve && Math.abs(suggested - stored) <= 2000) return;
-    promptSync(`Auto-sync ${fmtSeconds(suggested)} — Enter to apply`, () => {
-      saveCurve(null);
-      setOffset(suggested);
-      showReadout(`✓ Auto-synced ${fmtSeconds(suggested)} — fine-tune with [ ]`, 2500);
-    });
+    const before = offsetMs;
+    const beforeCurve = syncCurve;
+    saveCurve(null);
+    setOffset(suggested);
+    const was = stored != null ? ` (was ${fmtSeconds(stored)})` : "";
+    promptSync(
+      `✓ Auto-synced ${fmtSeconds(suggested)}${was} — Backspace to undo`,
+      () => {
+        saveCurve(beforeCurve);
+        setOffset(before);
+        showReadout(`↶ Auto-sync undone — back to ${fmtSeconds(before)}`, 2500);
+      },
+      "Backspace"
+    );
   } else if (isMismatch(r)) {
     if (syncCurve) {
       showReadout("⚠ Corrected sync active — this chart may be unreliable", 6000);
@@ -1473,11 +1484,12 @@ function openSing(): void {
 /**
  * Singing on a song with nothing set up → a 1-player session right away, so the
  * HUD (skip, end, restart, scores) and a live mic are there from the start.
- * Player 1 is the first saved slot — its name, mic, gain and gate.
+ * Player 1 is the first saved slot — its name, mic, gain and gate. Open-ended:
+ * it runs until End, which shows the results.
  */
 function startQuickSession(): void {
   const p1 = soloRoster[0] ?? newSlot(0, "P1");
-  session = createSession(setupRounds, [p1.name]);
+  session = createSession(Infinity, [p1.name]);
   sessionRoster = [{ ...p1 }];
   scoredTrackIds = new Set();
   lastRound = null;
@@ -2217,7 +2229,7 @@ async function main(): Promise<void> {
         target.isContentEditable);
     if (typing) return;
 
-    if (e.key === "Enter" && pendingSync) {
+    if (pendingSync && e.key === pendingSync.key) {
       const p = pendingSync;
       pendingSync = null;
       if (performance.now() < p.until) {

@@ -32,6 +32,13 @@ describe("session state", () => {
     expect(s.rounds).toEqual([]);
   });
 
+  test("an open-ended session (Infinity rounds) never completes on its own", () => {
+    let s = createSession(Infinity);
+    for (let i = 0; i < 50; i++) s = recordRound(s, round(`S${i}`, 100));
+    expect(isComplete(s)).toBe(false);
+    expect(roundsLeft(s)).toBe(Infinity);
+  });
+
   test("recordRound is immutable and appends", () => {
     const s0 = createSession(3);
     const s1 = recordRound(s0, round("A", 100));
