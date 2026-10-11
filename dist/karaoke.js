@@ -2711,8 +2711,8 @@ function summarize(s) {
 }
 
 // src/playlist-source.ts
-function sortByRecentlySung(playlists, played) {
-  return playlists.map((p, i) => ({ p, i, t: played[p.uri] ?? 0 })).sort((a, b) => b.t - a.t || a.i - b.i).map((x) => x.p);
+function sortByRecentlySung(playlists, played, spotifyPlayed = {}) {
+  return playlists.map((p, i) => ({ p, i, t: played[p.uri] ?? 0, s: spotifyPlayed[p.uri] ?? 0 })).sort((a, b) => b.t - a.t || b.s - a.s || a.i - b.i).map((x) => x.p);
 }
 function isPlaylistUri(uri) {
   return typeof uri === "string" && /^spotify:(?:user:[^:]+:)?playlist:/.test(uri);
@@ -2792,6 +2792,30 @@ async function fetchPlaylists() {
   } catch (err) {
     console.error("[singify] fetchPlaylists failed:", err);
     return [];
+  }
+}
+async function fetchSpotifyRecents() {
+  const api = platform()?.LibraryAPI;
+  if (!api?.getContents)
+    return {};
+  try {
+    const res = await api.getContents({
+      filters: ["2"],
+      sortOrder: api.getRecentsSortOrderId?.() ?? "6",
+      flattenTree: true,
+      limit: 1000,
+      offset: 0
+    });
+    const out = {};
+    for (const it of res?.items ?? []) {
+      const t = it.lastPlayedAt ? Date.parse(it.lastPlayedAt) : NaN;
+      if (it.uri && Number.isFinite(t))
+        out[it.uri] = t;
+    }
+    return out;
+  } catch (err) {
+    console.error("[singify] fetchSpotifyRecents failed:", err);
+    return {};
   }
 }
 function currentContextPlaylist() {
@@ -4987,7 +5011,8 @@ async function loadPlaylists() {
   if (activeScreen === "session-setup")
     renderOverlay();
   try {
-    playlists = sortByRecentlySung(await fetchPlaylists(), readPlaylistPlayed());
+    const [list, recents] = await Promise.all([fetchPlaylists(), fetchSpotifyRecents()]);
+    playlists = sortByRecentlySung(list, readPlaylistPlayed(), recents);
   } finally {
     playlistsLoading = false;
     if (activeScreen === "session-setup")
