@@ -32,6 +32,7 @@ import {
   AUTOSYNCED_PREFIX,
   NOCHART_PREFIX,
   UNRELIABLE_PREFIX,
+  UI_SIZE_PREFIX,
 } from "./storage-keys";
 
 // The knobs mirrored to the on-disk "settings" store. Built from the shared key
@@ -55,13 +56,20 @@ function ls(): Storage | null {
   }
 }
 
-function gather(keys: string[]): Record<string, string> {
+function gather(keys: string[], prefixes: string[] = []): Record<string, string> {
   const store = ls();
   const out: Record<string, string> = {};
   if (!store) return out;
   for (const k of keys) {
     const v = store.getItem(k);
     if (v != null) out[k] = v;
+  }
+  for (let i = 0; i < store.length; i++) {
+    const k = store.key(i);
+    if (k && prefixes.some((p) => k.startsWith(p))) {
+      const v = store.getItem(k);
+      if (v != null) out[k] = v;
+    }
   }
   return out;
 }
@@ -104,7 +112,7 @@ function debounce(fn: () => void, ms: number): () => void {
 // is a convenience — but swallowing it silently hides a broken helper. Log so it
 // shows up when someone wonders why disk seeding didn't take.
 const pushSettings = debounce(() => {
-  void saveStore("settings", gather(SETTINGS_KEYS)).catch((err) =>
+  void saveStore("settings", gather(SETTINGS_KEYS, [UI_SIZE_PREFIX])).catch((err) =>
     console.error("[singify] settings mirror failed:", err)
   );
 }, 600);

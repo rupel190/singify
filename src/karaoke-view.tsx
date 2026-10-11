@@ -17,6 +17,7 @@
  * the harness (which assigns a real React onto Spicetify.React).
  */
 
+import { Resizable } from "./resizable";
 import {
   getPosition,
   getPitchRange,
@@ -813,13 +814,11 @@ export function KaraokeView(props: KaraokeViewProps) {
           headroom up top for the mic banner. Each Lane measures itself, so N
           rows each size their notes to the height they got. */}
       <div style={{ flex: "1 1 auto", minHeight: 0, display: "flex", flexDirection: "column", justifyContent: "flex-end" }}>
-        <div
-          style={{
-            height: "75%",
-            minHeight: 160,
-            display: "flex",
-            flexDirection: "column",
-          }}
+        <Resizable
+          id="highway"
+          mode="height"
+          initial={75}
+          style={{ minHeight: 160, display: "flex", flexDirection: "column" }}
         >
           {laneEntries.flatMap((e, i) => {
             const lane = (
@@ -853,12 +852,12 @@ export function KaraokeView(props: KaraokeViewProps) {
             );
             return [divider, lane];
           })}
-        </div>
+        </Resizable>
       </div>
       {/* ── Lyric band (anchored at the bottom, like SingStar/UltraStar) ── */}
+      <Resizable id="lyrics" style={{ flex: "0 0 auto" }}>
       <div
         style={{
-          flex: "0 0 auto",
           display: "flex",
           flexDirection: "column",
           justifyContent: "flex-end",
@@ -886,6 +885,7 @@ export function KaraokeView(props: KaraokeViewProps) {
           );
         })}
       </div>
+      </Resizable>
     </div>
   );
 }

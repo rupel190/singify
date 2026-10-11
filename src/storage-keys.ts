@@ -37,3 +37,5 @@ export const AUTOSYNCED_PREFIX = "singify:autosynced:";
 export const NOCHART_PREFIX = "singify:nochart:";
 /** Auto-sync found the chart doesn't fit this recording — `${UNRELIABLE_PREFIX}${trackUri}` = "drift"/"step"/"0". */
 export const UNRELIABLE_PREFIX = "singify:unreliable:";
+/** Per-element UI size from the resize handles — `${UI_SIZE_PREFIX}<element id>`. */
+export const UI_SIZE_PREFIX = "singify:uiSize:";

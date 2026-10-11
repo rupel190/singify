@@ -82,6 +82,7 @@ import {
 import { startTrackBadges, type BadgeState } from "./track-badges";
 import { trackKey } from "./punch-header";
 import { HOTKEYS } from "./hotkeys";
+import { Resizable, readSize } from "./resizable";
 import { StatsScreen } from "./stats-view";
 import type { StatRound } from "./stats";
 import {
@@ -243,20 +244,21 @@ function showReadout(text: string, holdMs = 1200): void {
       bottom: "24px",
       left: "24px",
       zIndex: "1000",
-      padding: "32px 64px",
-      borderRadius: "72px",
+      padding: "20px 40px",
+      borderRadius: "48px",
       background: "rgba(10, 10, 14, 0.92)",
       color: "#fff",
-      font: "600 52px 'Spotify Circular', system-ui, sans-serif",
+      font: "600 38px 'Spotify Circular', system-ui, sans-serif",
       pointerEvents: "none",
       opacity: "0",
       transition: "opacity 180ms ease",
     } as CSSStyleDeclaration);
     // Lives on <body>, not inside the overlay, so it needs UI_SCALE applied by
     // hand to shrink along with everything else.
-    readoutEl.style.setProperty("zoom", String(UI_SCALE));
     document.body.appendChild(readoutEl);
   }
+  // Follows the HUD's resize handle — it's HUD information too.
+  readoutEl.style.setProperty("zoom", String(UI_SCALE * readSize("hud", 1)));
   readoutEl.textContent = text;
   readoutEl.style.opacity = "1";
   clearTimeout(readoutTimer);
@@ -1208,7 +1210,10 @@ function renderOverlay(): void {
       ? { artist: item.artists?.[0]?.name ?? "", title: item.name ?? "" }
       : null;
     renderScaled(
-      React.createElement(HomeMenu, {
+      React.createElement(
+        Resizable,
+        { id: "menu", fill: true, style: { height: "100%" } },
+        React.createElement(HomeMenu, {
         track,
         onQuickSing: () => {
           if (!session) startQuickSession();
@@ -1219,6 +1224,7 @@ function renderOverlay(): void {
         onCompetitive: openCompetitive,
         onStats: openStats,
       })
+      )
     );
     return;
   }
@@ -1401,14 +1407,18 @@ function renderOverlay(): void {
           onCancel,
         })
       : session
-        ? React.createElement(NoChartInSession, {
-            title: currentTitle(),
-            artist: currentArtist(),
-            onSkip: skipRound,
-            onReChoose: () => void reSearch(),
-            searched: !resolving,
-            helperDown,
-          })
+        ? React.createElement(
+            Resizable,
+            { id: "nochart", fill: true, style: { height: "100%" } },
+            React.createElement(NoChartInSession, {
+              title: currentTitle(),
+              artist: currentArtist(),
+              onSkip: skipRound,
+              onReChoose: () => void reSearch(),
+              searched: !resolving,
+              helperDown,
+            })
+          )
         : helperDown
           ? React.createElement(HelperDownNotice, {
               title: currentTitle(),
@@ -1507,12 +1517,22 @@ function renderOverlay(): void {
               gap: 24,
             },
           },
-          React.createElement("div", { style: { minWidth: 0 } }, hud),
-          React.createElement("div", { style: { minWidth: 0 } }, nowPlaying),
+          // Each element carries its own resize handle (resizable.tsx), so FHD and
+          // 4K can each get a layout that reads right.
+          React.createElement(
+            "div",
+            { style: { minWidth: 0, display: "flex" } },
+            hud && React.createElement(Resizable, { id: "hud" }, hud)
+          ),
+          React.createElement(
+            "div",
+            { style: { minWidth: 0 } },
+            nowPlaying && React.createElement(Resizable, { id: "nowplaying" }, nowPlaying)
+          ),
           React.createElement(
             "div",
             { style: { minWidth: 0, display: "flex", justifyContent: "flex-end" } },
-            micBanner
+            micBanner && React.createElement(Resizable, { id: "mics" }, micBanner)
           )
         )
       : null;
@@ -2254,6 +2274,7 @@ async function main(): Promise<void> {
     if (visible) renderOverlay();
   });
 
+  window.addEventListener("singify:layout", () => mirrorSettings()); // resize handles
   Spicetify.Player.addEventListener("onprogress", onProgress);
   setInterval(resyncClock, 500);
   Spicetify.Player.addEventListener("onplaypause", onPlayPause);
