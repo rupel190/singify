@@ -1209,9 +1209,56 @@ let seeThrough = (() => {
   }
 })();
 
+// In see-through mode the stage sits exactly over the video PICTURE (not the
+// player box with its theme-coloured pillarbox bars), so Spotify's top bar,
+// sidebars and playbar stay visible and clickable. No video (an audio track) →
+// the main view; neither found → full screen, as before.
+let placeTimer = 0;
+let placedKey = "";
+
+function videoPictureRect(): DOMRect | null {
+  const main = document.getElementById("main");
+  for (const v of Array.from(main?.querySelectorAll("video") ?? [])) {
+    const r = v.getBoundingClientRect();
+    if (r.width < 50 || r.height < 50) continue; // hidden / thumbnail
+    const vw = v.videoWidth;
+    const vh = v.videoHeight;
+    if (!vw || !vh) return r;
+    const k = Math.min(r.width / vw, r.height / vh); // object-fit: contain
+    const w = vw * k;
+    const h = vh * k;
+    return new DOMRect(r.left + (r.width - w) / 2, r.top + (r.height - h) / 2, w, h);
+  }
+  return null;
+}
+
+function placeOverlay(): void {
+  if (!overlay) return;
+  const target =
+    visible && seeThrough
+      ? videoPictureRect() ?? document.querySelector(".Root__main-view")?.getBoundingClientRect() ?? null
+      : null;
+  const key = target
+    ? [target.left, target.top, target.width, target.height].map(Math.round).join(",")
+    : "full";
+  if (key === placedKey) return; // nothing moved — leave the layout alone
+  placedKey = key;
+  Object.assign(
+    overlay.style,
+    target
+      ? { inset: "auto", left: `${target.left}px`, top: `${target.top}px`, width: `${target.width}px`, height: `${target.height}px` }
+      : { inset: "0", left: "", top: "", width: "", height: "" }
+  );
+}
+
 function applyBackdrop(): void {
   const spotifyMain = document.getElementById("main");
   const through = visible && seeThrough;
+  clearInterval(placeTimer);
+  placedKey = "";
+  placeOverlay();
+  // Follow window/sidebar resizes and track changes; cheap, and a no-op when still.
+  if (through) placeTimer = window.setInterval(placeOverlay, 500);
   if (spotifyMain) spotifyMain.style.display = visible && !seeThrough ? "none" : "";
   if (overlay) overlay.style.background = seeThrough ? `rgba(10, 10, 14, ${SEE_THROUGH_DIM})` : "rgb(10, 10, 14)";
   let pause = document.getElementById("singify-pause-page") as HTMLStyleElement | null;
@@ -1221,8 +1268,11 @@ function applyBackdrop(): void {
     document.head.appendChild(pause);
   }
   // The video is a <video>, not a CSS animation, so it keeps playing.
+  // Themes (Catppuccin) paint the video's pillarbox bars in their own colour;
+  // black reads as part of the picture, like vanilla Spotify.
   pause.textContent = through
-    ? "#main *,#main *::before,#main *::after{animation-play-state:paused!important;transition:none!important}"
+    ? "#main *,#main *::before,#main *::after{animation-play-state:paused!important;transition:none!important}" +
+      "#main video{background:#000!important}"
     : "";
 }
 
