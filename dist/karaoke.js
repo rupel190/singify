@@ -38,6 +38,16 @@ function writeSize(id, value) {
   }
   window.dispatchEvent(new Event("singify:layout"));
 }
+function resetAllSizes() {
+  try {
+    for (const k of Object.keys(localStorage))
+      if (k.startsWith(UI_SIZE_PREFIX))
+        localStorage.removeItem(k);
+  } catch {
+    return;
+  }
+  window.dispatchEvent(new Event("singify:layout"));
+}
 function ensureStyles() {
   if (typeof document === "undefined" || document.getElementById("singify-resizable"))
     return;
@@ -50,6 +60,7 @@ function Resizable(props) {
   const React = Spicetify.React;
   const { useState, useRef } = React;
   const { id, mode = "zoom", initial = mode === "zoom" ? 1 : 75, children, style, fill } = props;
+  const top = mode === "height" || props.corner === "tr";
   ensureStyles();
   const [value, setValue] = useState(() => readSize(id, initial));
   const boxRef = useRef(null);
@@ -75,8 +86,8 @@ function Resizable(props) {
     const dx = e.clientX - d.x;
     const dy = e.clientY - d.y;
     const rx = dx / Math.max(80, d.w);
-    const ry = dy / Math.max(80, d.h);
-    const next = mode === "zoom" ? d.start * (1 + (Math.abs(rx) > Math.abs(ry) ? rx : ry)) : d.start - ry * 100;
+    const ry = (top ? -dy : dy) / Math.max(80, d.h);
+    const next = mode === "zoom" ? d.start * (1 + (Math.abs(rx) > Math.abs(ry) ? rx : ry)) : d.start + ry * 100;
     setValue(Math.min(hi, Math.max(lo, next)));
   };
   const onUp = (e) => {
@@ -103,13 +114,13 @@ function Resizable(props) {
     style: {
       position: "absolute",
       right: 2,
-      [mode === "height" ? "top" : "bottom"]: 2,
+      [top ? "top" : "bottom"]: 2,
       width: handleSize,
       height: handleSize,
-      cursor: mode === "height" ? "ns-resize" : "nwse-resize",
+      cursor: mode === "height" ? "ns-resize" : top ? "nesw-resize" : "nwse-resize",
       touchAction: "none",
       zIndex: 20,
-      background: `linear-gradient(${mode === "height" ? "45deg" : "135deg"}, transparent 50%, rgba(255,255,255,0.75) 50%)`,
+      background: `linear-gradient(${top ? "45deg" : "135deg"}, transparent 50%, rgba(255,255,255,0.75) 50%)`,
       borderRadius: 3
     }
   });
@@ -1166,7 +1177,7 @@ function KaraokeView(props) {
       boxSizing: "border-box"
     }
   }, /* @__PURE__ */ Spicetify.React.createElement("div", {
-    style: { flex: "1 1 auto", minHeight: 0, display: "flex", flexDirection: "column", justifyContent: "flex-end" }
+    style: { flex: "1 1 auto", minHeight: "35%", display: "flex", flexDirection: "column", justifyContent: "flex-end" }
   }, /* @__PURE__ */ Spicetify.React.createElement(Resizable, {
     id: "highway",
     mode: "height",
@@ -1200,7 +1211,8 @@ function KaraokeView(props) {
     return [divider, lane];
   }))), /* @__PURE__ */ Spicetify.React.createElement(Resizable, {
     id: "lyrics",
-    style: { flex: "0 0 auto" }
+    corner: "tr",
+    style: { flex: "0 1 auto", maxHeight: "55%", overflow: "hidden" }
   }, /* @__PURE__ */ Spicetify.React.createElement("div", {
     style: {
       display: "flex",
@@ -1481,6 +1493,7 @@ var HOTKEYS = [
   { keys: "- / =", what: "Mic sensitivity − / +", short: "sensitivity" },
   { keys: ", / .", what: "Hit-line nudge (visual)", short: "hit-line" },
   { keys: "L", what: "Load a local .txt chart", short: "load file" },
+  { keys: "Ctrl+0", what: "Reset every element's size (corner triangles)", short: "reset layout" },
   { keys: "Ctrl+F", what: "FPS meter", short: "fps" },
   { keys: "Esc", what: "Close", short: "close" },
   { keys: "? / F1", what: "All shortcuts", short: "shortcuts" }
@@ -4553,11 +4566,13 @@ function ensureOverlay() {
   }
   return overlay;
 }
+var layoutVersion = 0;
 function renderScaled(el) {
   if (!root)
     return;
   const React = Spicetify.React;
   root.render(React.createElement("div", {
+    key: `layout${layoutVersion}`,
     style: { zoom: UI_SCALE, width: "100%", height: "100%" }
   }, el));
 }
@@ -4568,7 +4583,7 @@ function renderOverlay() {
   if (activeScreen === "home") {
     const item = Spicetify.Player.data?.item ?? Spicetify.Player.data?.track;
     const track = item ? { artist: item.artists?.[0]?.name ?? "", title: item.name ?? "" } : null;
-    renderScaled(React.createElement(Resizable, { id: "menu", fill: true, style: { height: "100%" } }, React.createElement(HomeMenu, {
+    renderScaled(React.createElement("div", { style: { display: "flex", alignItems: "center", justifyContent: "center", height: "100%" } }, React.createElement(Resizable, { id: "menu" }, React.createElement(HomeMenu, {
       track,
       onQuickSing: () => {
         if (!session)
@@ -4579,7 +4594,7 @@ function renderOverlay() {
       onStartSession: openSessionSetup,
       onCompetitive: openCompetitive,
       onStats: openStats
-    })));
+    }))));
     return;
   }
   if (activeScreen === "stats") {
@@ -4737,14 +4752,14 @@ function renderOverlay() {
     error: pickError,
     onPick,
     onCancel
-  }) : session ? React.createElement(Resizable, { id: "nochart", fill: true, style: { height: "100%" } }, React.createElement(NoChartInSession, {
+  }) : session ? React.createElement("div", { style: { display: "flex", alignItems: "center", justifyContent: "center", height: "100%" } }, React.createElement(Resizable, { id: "nochart" }, React.createElement(NoChartInSession, {
     title: currentTitle(),
     artist: currentArtist(),
     onSkip: skipRound,
     onReChoose: () => void reSearch(),
     searched: !resolving,
     helperDown
-  })) : helperDown ? React.createElement(HelperDownNotice, {
+  }))) : helperDown ? React.createElement(HelperDownNotice, {
     title: currentTitle(),
     artist: currentArtist(),
     onReChoose: () => void reSearch()
@@ -5395,7 +5410,14 @@ async function main() {
         return;
       }
     }
-    if (e.key === "?" || e.key === "F1") {
+    if (e.ctrlKey && (e.key === "0" || e.code === "Digit0")) {
+      resetAllSizes();
+      layoutVersion++;
+      if (visible)
+        renderOverlay();
+      showReadout("Layout reset — every element back to its default size", 2500);
+      e.preventDefault();
+    } else if (e.key === "?" || e.key === "F1") {
       toggleHelp();
       e.preventDefault();
     } else if (e.key === "s" || e.key === "S" || e.key === "k" || e.key === "K") {
