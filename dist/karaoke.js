@@ -2932,6 +2932,7 @@ var SYNC_CURVE_PREFIX = "singify:syncCurve:";
 var SYNC_BIAS_KEY = "singify:syncBias";
 var AUTOSYNCED_PREFIX = "singify:autosynced:";
 var NOCHART_PREFIX = "singify:nochart:";
+var UNRELIABLE_PREFIX = "singify:unreliable:";
 
 // src/track-badges.ts
 var ROW = ".main-trackList-trackListRow";
@@ -2939,6 +2940,7 @@ var TITLE = ".main-trackList-rowTitle, .main-trackList-rowMainContent > [data-en
 var BADGE_CLASS = "singify-track-badge";
 var LOOK = {
   punched: { text: "✓", color: "#1ed760", title: "Singify: punched in proper" },
+  unreliable: { text: "⚠︎", color: "#f5a623", title: "Singify: chart may not match this recording" },
   auto: { text: "◐", color: "#1ed760", title: "Singify: auto-synced from Spotify's lyrics" },
   nochart: { text: "∅", color: "rgba(255,255,255,0.35)", title: "Singify: no karaoke chart found" }
 };
@@ -2963,7 +2965,8 @@ function decorate(row, badgeFor) {
     el?.remove();
     return;
   }
-  if (el?.dataset.badge === want)
+  const key = want.kind + (want.note ?? "");
+  if (el?.dataset.badge === key)
     return;
   if (!el) {
     el = document.createElement("span");
@@ -2971,10 +2974,10 @@ function decorate(row, badgeFor) {
     Object.assign(el.style, { marginInlineStart: "6px", fontWeight: "700" });
     title.appendChild(el);
   }
-  const look = LOOK[want];
-  el.dataset.badge = want;
+  const look = LOOK[want.kind];
+  el.dataset.badge = key;
   el.textContent = look.text;
-  el.title = look.title;
+  el.title = want.note ? `${look.title} — ${want.note}` : look.title;
   el.style.color = look.color;
 }
 function startTrackBadges(badgeFor) {
@@ -3277,7 +3280,7 @@ function gatherOffsets() {
     return out;
   for (let i = 0;i < store.length; i++) {
     const k = store.key(i);
-    if (k && (k === DEFAULT_OFFSET_KEY || k === SYNC_BIAS_KEY || k.startsWith(OFFSET_PREFIX) || k.startsWith(PUNCHED_PREFIX) || k.startsWith(SYNC_CURVE_PREFIX) || k.startsWith(AUTOSYNCED_PREFIX) || k.startsWith(NOCHART_PREFIX))) {
+    if (k && (k === DEFAULT_OFFSET_KEY || k === SYNC_BIAS_KEY || k.startsWith(OFFSET_PREFIX) || k.startsWith(PUNCHED_PREFIX) || k.startsWith(SYNC_CURVE_PREFIX) || k.startsWith(AUTOSYNCED_PREFIX) || k.startsWith(NOCHART_PREFIX) || k.startsWith(UNRELIABLE_PREFIX))) {
       const v = store.getItem(k);
       if (v != null)
         out[k] = v;
@@ -3782,13 +3785,38 @@ function setFlag(prefix, uri, on) {
   mirrorOffsets();
   refreshBadges();
 }
+function readUnreliable(uri) {
+  try {
+    const v = localStorage.getItem(UNRELIABLE_PREFIX + uri);
+    return v === "drift" || v === "step" ? v : null;
+  } catch {
+    return null;
+  }
+}
+function setUnreliable(uri, kind) {
+  if (readUnreliable(uri) === kind)
+    return;
+  try {
+    localStorage.setItem(UNRELIABLE_PREFIX + uri, kind ?? "0");
+  } catch {
+    return;
+  }
+  mirrorOffsets();
+  refreshBadges();
+}
 function badgeFor(uri) {
   if (isPunched(uri))
-    return "punched";
+    return { kind: "punched" };
+  const bad = readUnreliable(uri);
+  if (bad) {
+    const why = bad === "drift" ? "its tempo drifts" : "a section differs";
+    const fix = loadCurve(uri) ? "; corrected sync on" : "";
+    return { kind: "unreliable", note: why + fix };
+  }
   if (flag(AUTOSYNCED_PREFIX, uri))
-    return "auto";
+    return { kind: "auto" };
   if (flag(NOCHART_PREFIX, uri))
-    return "nochart";
+    return { kind: "nochart" };
   return null;
 }
 var punchedWriteTimer = 0;
@@ -3962,6 +3990,10 @@ async function runAutoSync(uri, song, force = false) {
   }
   if (!r)
     return;
+  if (isMismatch(r))
+    setUnreliable(uri, r.shape === "drift" ? "drift" : "step");
+  else if (isConfident(r))
+    setUnreliable(uri, null);
   if (isPunched(uri) && !force) {
     if (isConfident(r) && !syncCurve)
       recordBiasSample(uri, r.offsetMs - offsetMs);
@@ -3997,6 +4029,7 @@ async function runAutoSync(uri, song, force = false) {
     const why = r.shape === "drift" ? `tempo off by ${Math.abs(r.slope * 100).toFixed(1)} %` : "a section doesn't match";
     promptSync(`⚠ Chart may be unreliable (${why}) — Enter to try a corrected sync`, () => {
       saveCurve(curve);
+      refreshBadges();
       setOffset(0);
       showReadout("✓ Corrected sync on — the chart may still be off in places", 3000);
     });
@@ -4997,6 +5030,7 @@ async function onPick(candidate) {
     currentSong = song;
     saveCurve(null);
     setFlag(NOCHART_PREFIX, currentTrackId, false);
+    setUnreliable(currentTrackId, null);
     runAutoSync(currentTrackId, song);
   } catch (err) {
     pickPending = null;
