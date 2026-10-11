@@ -433,13 +433,13 @@ export function SessionSetup(props: {
 
         <div style={{ ...sectionLabel, marginTop: 8 }}>Or free play</div>
         <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-          {[3, 5, 10].map((n) => (
+          {[1, 3, 5].map((n) => (
             <button key={n} style={chip(n)} onClick={() => onRounds(n)}>
-              {n}
+              BO{n}
             </button>
           ))}
           <button style={{ ...primaryBtn(), marginLeft: "auto", whiteSpace: "nowrap" }} onClick={onStart}>
-            ▶ {rounds} rounds
+            ▶ Best of {rounds}
           </button>
         </div>
         </div>

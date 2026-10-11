@@ -23,6 +23,21 @@ export interface PlaylistRef {
 
 // ── Pure mappers (tested) ────────────────────────────────────────────────────
 
+/**
+ * Playlists you've sung in singify first, most recent on top; the rest keep
+ * their library order. `played` maps playlist URI → when a session last
+ * started from it (ms).
+ */
+export function sortByRecentlySung(
+  playlists: PlaylistRef[],
+  played: Record<string, number>
+): PlaylistRef[] {
+  return playlists
+    .map((p, i) => ({ p, i, t: played[p.uri] ?? 0 }))
+    .sort((a, b) => b.t - a.t || a.i - b.i)
+    .map((x) => x.p);
+}
+
 /** True for a Spotify playlist URI (not a folder/album/artist/etc.). */
 export function isPlaylistUri(uri: unknown): uri is string {
   return typeof uri === "string" && /^spotify:(?:user:[^:]+:)?playlist:/.test(uri);

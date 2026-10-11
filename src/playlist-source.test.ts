@@ -1,11 +1,25 @@
 import { describe, test, expect } from "bun:test";
 import {
+  sortByRecentlySung,
   isPlaylistUri,
   toPlaylistRef,
   toSessionTrack,
   flattenRootlist,
   contextToPlaylistRef,
 } from "./playlist-source";
+
+describe("sortByRecentlySung", () => {
+  const pl = (uri: string) => ({ uri, name: uri, count: null });
+  test("sung playlists first, newest first; the rest keep library order", () => {
+    const lib = [pl("a"), pl("b"), pl("c"), pl("d")];
+    const out = sortByRecentlySung(lib, { c: 100, a: 300 });
+    expect(out.map((p) => p.uri)).toEqual(["a", "c", "b", "d"]);
+  });
+  test("nothing sung yet → library order untouched", () => {
+    const lib = [pl("x"), pl("y")];
+    expect(sortByRecentlySung(lib, {}).map((p) => p.uri)).toEqual(["x", "y"]);
+  });
+});
 
 describe("isPlaylistUri", () => {
   test("accepts modern and legacy user-scoped playlist URIs", () => {

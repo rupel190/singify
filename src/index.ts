@@ -46,6 +46,7 @@ import {
 } from "./session";
 import {
   fetchPlaylists,
+  sortByRecentlySung,
   fetchPlaylistTracks,
   playPlaylist,
   currentContextPlaylist,
@@ -78,6 +79,7 @@ import {
   AUTOSYNCED_PREFIX,
   NOCHART_PREFIX,
   UNRELIABLE_PREFIX,
+  PLAYLIST_PLAYED_KEY,
 } from "./storage-keys";
 import { startTrackBadges, type BadgeState } from "./track-badges";
 import { trackKey } from "./punch-header";
@@ -1789,7 +1791,7 @@ async function loadPlaylists(): Promise<void> {
   playlistsLoading = true;
   if (activeScreen === "session-setup") renderOverlay();
   try {
-    playlists = await fetchPlaylists();
+    playlists = sortByRecentlySung(await fetchPlaylists(), readPlaylistPlayed());
   } finally {
     playlistsLoading = false;
     if (activeScreen === "session-setup") renderOverlay();
@@ -1815,6 +1817,26 @@ function startSession(): void {
  * count to them, start playback from the top, and sing. Advancing rounds
  * (continue/skip) rides Spotify's own playlist ordering via Player.next().
  */
+function readPlaylistPlayed(): Record<string, number> {
+  try {
+    return JSON.parse(localStorage.getItem(PLAYLIST_PLAYED_KEY) ?? "{}") as Record<string, number>;
+  } catch {
+    return {};
+  }
+}
+
+/** Remember when this playlist was last sung, so it lists first next time. */
+function markPlaylistPlayed(uri: string): void {
+  const played = readPlaylistPlayed();
+  played[uri] = Date.now();
+  try {
+    localStorage.setItem(PLAYLIST_PLAYED_KEY, JSON.stringify(played));
+  } catch {
+    return;
+  }
+  mirrorSettings();
+}
+
 async function startPlaylistSession(ref: PlaylistRef): Promise<void> {
   Spicetify.showNotification?.(`Loading “${ref.name}”…`);
   const tracks = await fetchPlaylistTracks(ref.uri);
@@ -1823,6 +1845,7 @@ async function startPlaylistSession(ref: PlaylistRef): Promise<void> {
     return;
   }
   session = createSessionFromPlaylist(ref.name, tracks, setupRoster.map((p) => p.name));
+  markPlaylistPlayed(ref.uri);
   sessionRoster = setupRoster.map((p) => ({ ...p }));
   scoredTrackIds = new Set();
   lastRound = null;

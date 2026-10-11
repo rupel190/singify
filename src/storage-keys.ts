@@ -20,6 +20,8 @@ export const MIC_SLOTS_KEY = "singify:micSlots";
 export const PLAYER_SENS_KEY = "singify:playerSens";
 export const AUTOSKIP_KEY = "singify:autoSkipNoChart";
 export const FPS_KEY = "singify:fps";
+/** When a session last started from each playlist — JSON { playlistUri: ms }. */
+export const PLAYLIST_PLAYED_KEY = "singify:playlistPlayed";
 
 /** Baseline lyric offset for untuned tracks (doubles as the legacy global key). */
 export const DEFAULT_OFFSET_KEY = "singify:offsetMs";
