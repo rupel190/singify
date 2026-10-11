@@ -1344,6 +1344,7 @@ var HOTKEYS = [
   { keys: "Shift+P", what: "Mark “punched in proper” (locks P)", short: "mark punched" },
   { keys: "[ / ]", what: "Lyrics later / earlier (Shift ×10, Ctrl fine)", short: "offset" },
   { keys: "\\", what: "Reset sync", short: "reset sync" },
+  { keys: "A", what: "Auto-sync now (replaces the current offset)", short: "auto-sync" },
   { keys: "Backspace", what: "Undo an auto-sync (while it's shown)", short: "undo sync" },
   { keys: "Enter", what: "Try a corrected sync on a drifting chart (when offered)", short: "corrected sync" },
   { keys: "- / =", what: "Mic sensitivity − / +", short: "sensitivity" },
@@ -3942,15 +3943,26 @@ function promptSync(text, apply, key = "Enter") {
 function fmtSeconds(ms) {
   return `${ms > 0 ? "+" : ""}${(ms / 1000).toFixed(1)} s`;
 }
-async function runAutoSync(uri, song) {
+async function runAutoSync(uri, song, force = false) {
+  if (force)
+    showReadout("Auto-syncing…", 4000);
   const lines = await fetchSyncedLyrics(uri);
-  if (!lines || currentTrackId !== uri || currentSong !== song)
+  if (currentTrackId !== uri || currentSong !== song)
     return;
+  if (!lines) {
+    if (force)
+      showReadout("No synced lyrics on Spotify for this track — use P", 3500);
+    return;
+  }
   const r = autoSync(song, lines);
+  const bias = syncBias();
+  if (force && (!r || !isConfident(r) && !isMismatch(r))) {
+    showReadout("Auto-sync isn't sure about this chart — use P", 3500);
+    return;
+  }
   if (!r)
     return;
-  const bias = syncBias();
-  if (isPunched(uri)) {
+  if (isPunched(uri) && !force) {
     if (isConfident(r) && !syncCurve)
       recordBiasSample(uri, r.offsetMs - offsetMs);
     else if (isMismatch(r))
@@ -3960,7 +3972,7 @@ async function runAutoSync(uri, song) {
   if (isConfident(r)) {
     const suggested = Math.round(r.offsetMs - bias);
     const stored = readNum(OFFSET_PREFIX + uri);
-    if (stored != null && !syncCurve && Math.abs(suggested - stored) <= 2000) {
+    if (!force && stored != null && !syncCurve && Math.abs(suggested - stored) <= 2000) {
       setFlag(AUTOSYNCED_PREFIX, uri, true);
       return;
     }
@@ -5246,6 +5258,9 @@ async function main() {
     } else if (e.key === "\\") {
       saveCurve(null);
       setOffset(0);
+    } else if (e.key === "a" || e.key === "A") {
+      if (currentSong && currentTrackId)
+        runAutoSync(currentTrackId, currentSong, true);
     } else if (e.key === "m" || e.key === "M") {
       toggleMics();
     } else if (e.key === "l" || e.key === "L") {
