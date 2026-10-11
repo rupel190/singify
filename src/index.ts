@@ -75,8 +75,10 @@ import {
   PUNCHED_PREFIX,
   SYNC_CURVE_PREFIX,
   SYNC_BIAS_KEY,
+  AUTOSYNCED_PREFIX,
+  NOCHART_PREFIX,
 } from "./storage-keys";
-import { startPunchedBadges } from "./punched-badges";
+import { startTrackBadges, type TrackBadge } from "./track-badges";
 import { trackKey } from "./punch-header";
 import { HOTKEYS } from "./hotkeys";
 import { StatsScreen } from "./stats-view";
@@ -297,6 +299,34 @@ function isPunched(uri: string): boolean {
 }
 
 let refreshBadges = (): void => {};
+
+// Per-track flags behind the ◐ / ∅ badges. Stored "1"/"0" (never removed) like
+// the punched mark, so the disk seed can't resurrect a cleared one.
+function flag(prefix: string, uri: string): boolean {
+  try {
+    return localStorage.getItem(prefix + uri) === "1";
+  } catch {
+    return false;
+  }
+}
+
+function setFlag(prefix: string, uri: string, on: boolean): void {
+  if (flag(prefix, uri) === on) return;
+  try {
+    localStorage.setItem(prefix + uri, on ? "1" : "0");
+  } catch {
+    return;
+  }
+  mirrorOffsets();
+  refreshBadges();
+}
+
+function badgeFor(uri: string): TrackBadge | null {
+  if (isPunched(uri)) return "punched";
+  if (flag(AUTOSYNCED_PREFIX, uri)) return "auto";
+  if (flag(NOCHART_PREFIX, uri)) return "nochart";
+  return null;
+}
 let punchedWriteTimer = 0;
 
 function syncPunchedChart(): void {
@@ -511,17 +541,22 @@ async function runAutoSync(uri: string, song: ParsedSong): Promise<void> {
     const stored = readNum(OFFSET_PREFIX + uri);
     // An offset within 2 s is probably a fine-tune (auto-sync is good to ±0.5 s),
     // so it stays. Further off is a wrong or accidental punch: fix it.
-    if (stored != null && !syncCurve && Math.abs(suggested - stored) <= 2000) return;
+    if (stored != null && !syncCurve && Math.abs(suggested - stored) <= 2000) {
+      setFlag(AUTOSYNCED_PREFIX, uri, true); // your offset agrees with the lyrics
+      return;
+    }
     const before = offsetMs;
     const beforeCurve = syncCurve;
     saveCurve(null);
     setOffset(suggested);
+    setFlag(AUTOSYNCED_PREFIX, uri, true);
     const was = stored != null ? ` (was ${fmtSeconds(stored)})` : "";
     promptSync(
       `✓ Auto-synced ${fmtSeconds(suggested)}${was} — Backspace to undo`,
       () => {
         saveCurve(beforeCurve);
         setOffset(before);
+        setFlag(AUTOSYNCED_PREFIX, uri, false);
         showReadout(`↶ Auto-sync undone — back to ${fmtSeconds(before)}`, 2500);
       },
       "Backspace"
@@ -1894,6 +1929,7 @@ async function onPick(candidate: USDBSong): Promise<void> {
     pickPending = null;
     currentSong = song;
     saveCurve(null); // a different chart — any old curve was for the old one
+    setFlag(NOCHART_PREFIX, currentTrackId, false);
     void runAutoSync(currentTrackId, song);
   } catch (err) {
     // TODO(stage 2): on SessionExpiredError, re-login with stored credentials
@@ -1946,6 +1982,7 @@ async function onSongChange(): Promise<void> {
     ) {
       currentSong = res.song;
       adoptChartPunch(res.song);
+      setFlag(NOCHART_PREFIX, item.uri, false);
       void runAutoSync(item.uri, res.song);
       autoSkipStreak = 0; // a hit ends the chartless run
     } else if (res.status === "needsPicker") {
@@ -1958,6 +1995,7 @@ async function onSongChange(): Promise<void> {
       }
     } else {
       noChart = true;
+      setFlag(NOCHART_PREFIX, item.uri, true);
       if (!(session && autoSkipNoChart)) {
         Spicetify.showNotification?.(`No karaoke chart for “${title}”`);
       }
@@ -2302,7 +2340,7 @@ async function main(): Promise<void> {
     true
   );
 
-  refreshBadges = startPunchedBadges(isPunched);
+  refreshBadges = startTrackBadges(badgeFor);
 
   // Prime with whatever is already playing.
   void onSongChange();

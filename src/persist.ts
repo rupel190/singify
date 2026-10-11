@@ -29,6 +29,8 @@ import {
   PUNCHED_PREFIX,
   SYNC_CURVE_PREFIX,
   SYNC_BIAS_KEY,
+  AUTOSYNCED_PREFIX,
+  NOCHART_PREFIX,
 } from "./storage-keys";
 
 // The knobs mirrored to the on-disk "settings" store. Built from the shared key
@@ -76,7 +78,9 @@ function gatherOffsets(): Record<string, string> {
         k === SYNC_BIAS_KEY ||
         k.startsWith(OFFSET_PREFIX) ||
         k.startsWith(PUNCHED_PREFIX) ||
-        k.startsWith(SYNC_CURVE_PREFIX))
+        k.startsWith(SYNC_CURVE_PREFIX) ||
+        k.startsWith(AUTOSYNCED_PREFIX) ||
+        k.startsWith(NOCHART_PREFIX))
     ) {
       const v = store.getItem(k);
       if (v != null) out[k] = v;

@@ -31,3 +31,7 @@ export const PUNCHED_PREFIX = "singify:punched:";
 export const SYNC_CURVE_PREFIX = "singify:syncCurve:";
 /** Auto-sync bias samples learned from punched tracks — JSON { trackUri: ms }. */
 export const SYNC_BIAS_KEY = "singify:syncBias";
+/** Auto-sync set or confirmed this track's offset — `${AUTOSYNCED_PREFIX}${trackUri}` = "1"/"0". */
+export const AUTOSYNCED_PREFIX = "singify:autosynced:";
+/** A lookup found no chart for this track — `${NOCHART_PREFIX}${trackUri}` = "1"/"0". */
+export const NOCHART_PREFIX = "singify:nochart:";
