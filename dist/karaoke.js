@@ -1333,6 +1333,26 @@ function Chip(props) {
   }, props.label);
 }
 
+// src/hotkeys.ts
+var HOTKEYS = [
+  { keys: "K / S", what: "Sessions menu", short: "menu" },
+  { keys: "Q", what: "Sing the current track (1 player, mic on)", short: "sing" },
+  { keys: "M", what: "Mics on / off", short: "mic" },
+  { keys: "R", what: "Restart the song", short: "restart" },
+  { keys: "Shift+R", what: "Re-search USDB (pick another chart)", short: "re-choose" },
+  { keys: "P", what: "Punch-sync: tap on the first sung word", short: "punch" },
+  { keys: "Shift+P", what: "Mark “punched in proper” (locks P)", short: "mark punched" },
+  { keys: "[ / ]", what: "Lyrics later / earlier (Shift ×10, Ctrl fine)", short: "offset" },
+  { keys: "\\", what: "Reset sync", short: "reset sync" },
+  { keys: "Enter", what: "Accept an auto-sync suggestion", short: "accept sync" },
+  { keys: "- / =", what: "Mic sensitivity − / +", short: "sensitivity" },
+  { keys: ", / .", what: "Hit-line nudge (visual)", short: "hit-line" },
+  { keys: "L", what: "Load a local .txt chart", short: "load file" },
+  { keys: "Ctrl+F", what: "FPS meter", short: "fps" },
+  { keys: "Esc", what: "Close", short: "close" },
+  { keys: "? / F1", what: "All shortcuts", short: "shortcuts" }
+];
+
 // src/home-menu.tsx
 function HomeMenu(props) {
   const React = Spicetify.React;
@@ -1406,8 +1426,22 @@ function HomeMenu(props) {
       cursor: "pointer"
     }
   }, "\uD83D\uDCCA Stats"), /* @__PURE__ */ Spicetify.React.createElement("div", {
-    style: { fontSize: 26, color: "rgba(255,255,255,0.5)", marginTop: 10 }
-  }, "Q quick-sing · M mic · P punch-sync · R re-choose · L load file · [ ] offset"));
+    style: {
+      fontSize: 22,
+      color: "rgba(255,255,255,0.5)",
+      marginTop: 10,
+      display: "flex",
+      flexWrap: "wrap",
+      justifyContent: "center",
+      gap: "6px 22px",
+      maxWidth: 1100
+    }
+  }, HOTKEYS.map((h) => /* @__PURE__ */ Spicetify.React.createElement("span", {
+    key: h.keys,
+    style: { whiteSpace: "nowrap" }
+  }, /* @__PURE__ */ Spicetify.React.createElement("b", {
+    style: { color: "rgba(255,255,255,0.8)" }
+  }, h.keys), " ", h.short))));
 }
 
 // src/mic-meter.tsx
@@ -3774,25 +3808,6 @@ function punchSync() {
   const sign = offsetMs > 0 ? "+" : "";
   showReadout(`⏱ Punched — first line synced · offset ${sign}${offsetMs} ms`);
 }
-var HOTKEYS = [
-  ["K", "Back to the song (again → menu)"],
-  ["S", "Sessions menu"],
-  ["Q", "Quick Sing on the current track"],
-  ["M", "Mics on / off"],
-  ["R", "Restart the song"],
-  ["Shift+R", "Re-search USDB (pick another chart)"],
-  ["P", "Punch-sync: tap on the first sung word"],
-  ["Shift+P", "Mark “punched in proper” (locks P)"],
-  ["[ / ]", "Lyrics later / earlier (Shift ×10, Ctrl fine)"],
-  ["\\", "Reset sync"],
-  ["Enter", "Accept an auto-sync suggestion"],
-  ["- / =", "Mic sensitivity − / +"],
-  [", / .", "Hit-line nudge (visual)"],
-  ["L", "Load a local .txt chart"],
-  ["Ctrl+F", "FPS meter"],
-  ["Esc", "Close"],
-  ["? / F1", "This card"]
-];
 var helpEl = null;
 function toggleHelp() {
   if (!helpEl) {
@@ -3813,7 +3828,7 @@ function toggleHelp() {
       boxShadow: "0 12px 60px rgba(0,0,0,0.6)"
     });
     helpEl.style.setProperty("zoom", String(UI_SCALE));
-    const rows = HOTKEYS.map(([k, what]) => `<tr><td style="padding:6px 40px 6px 0;font-weight:700;color:#1ed760;white-space:nowrap">${k}</td><td style="padding:6px 0;color:rgba(255,255,255,0.85)">${what}</td></tr>`).join("");
+    const rows = HOTKEYS.map(({ keys: k, what }) => `<tr><td style="padding:6px 40px 6px 0;font-weight:700;color:#1ed760;white-space:nowrap">${k}</td><td style="padding:6px 0;color:rgba(255,255,255,0.85)">${what}</td></tr>`).join("");
     helpEl.innerHTML = `<div style="font-weight:800;font-size:40px;margin-bottom:24px">Singify shortcuts</div><table style="border-collapse:collapse">${rows}</table>`;
     helpEl.addEventListener("click", () => toggleHelp());
     document.body.appendChild(helpEl);
@@ -4343,6 +4358,8 @@ function renderOverlay() {
     renderScaled(React.createElement(HomeMenu, {
       track,
       onQuickSing: () => {
+        if (!session)
+          startQuickSession();
         activeScreen = "sing";
         renderOverlay();
       },
@@ -4600,8 +4617,21 @@ function openSing() {
     setVisible(false);
     return;
   }
+  if (!session)
+    startQuickSession();
   activeScreen = "sing";
   setVisible(true);
+}
+function startQuickSession() {
+  const p1 = soloRoster[0] ?? newSlot(0, "P1");
+  session = createSession(setupRounds, [p1.name]);
+  sessionRoster = [{ ...p1 }];
+  scoredTrackIds = new Set;
+  lastRound = null;
+  stopPreviews();
+  if (micsActive())
+    stopMics(true);
+  startMics();
 }
 function openHome() {
   if (visible && activeScreen === "home") {
@@ -4610,17 +4640,6 @@ function openHome() {
   }
   activeScreen = "home";
   setVisible(true);
-}
-function openFromKey() {
-  if (!visible && currentSong) {
-    activeScreen = "sing";
-    setVisible(true);
-  } else if (visible && activeScreen === "sing") {
-    activeScreen = "home";
-    renderOverlay();
-  } else {
-    openHome();
-  }
 }
 function openStats() {
   activeScreen = "stats";
@@ -4856,7 +4875,7 @@ function continueSession() {
   advanceQueue("continue the session");
 }
 var autoSkipNoChart = localStorage.getItem(AUTOSKIP_KEY) === "1";
-var AUTOSKIP_LIMIT = 8;
+var AUTOSKIP_LIMIT = 20;
 var autoSkipStreak = 0;
 function setAutoSkip(on) {
   autoSkipNoChart = on;
@@ -5161,10 +5180,8 @@ async function main() {
     if (e.key === "?" || e.key === "F1") {
       toggleHelp();
       e.preventDefault();
-    } else if (e.key === "s" || e.key === "S") {
+    } else if (e.key === "s" || e.key === "S" || e.key === "k" || e.key === "K") {
       openHome();
-    } else if (e.key === "k" || e.key === "K") {
-      openFromKey();
     } else if (e.key === "q" || e.key === "Q") {
       openSing();
     } else if (e.key === "Escape") {
