@@ -80,7 +80,8 @@ tested; the rest fall back to `P`. Estimates run ~330 ms ahead of hand punches,
 a bias singify subtracts and then learns per user from punched tracks.
 
 Track lists in Spotify show the verdict next to each title: **✓** punched,
-**◐** auto-synced, **∅** searched and no chart found.
+**⚠** chart doesn't fully match the recording, **◐** auto-synced, **∅** searched
+and no chart found.
 
 ## Approach: browser-first, Spotify later
 

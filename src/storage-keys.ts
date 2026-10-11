@@ -35,3 +35,5 @@ export const SYNC_BIAS_KEY = "singify:syncBias";
 export const AUTOSYNCED_PREFIX = "singify:autosynced:";
 /** A lookup found no chart for this track — `${NOCHART_PREFIX}${trackUri}` = "1"/"0". */
 export const NOCHART_PREFIX = "singify:nochart:";
+/** Auto-sync found the chart doesn't fit this recording — `${UNRELIABLE_PREFIX}${trackUri}` = "drift"/"step"/"0". */
+export const UNRELIABLE_PREFIX = "singify:unreliable:";

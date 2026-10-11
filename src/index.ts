@@ -77,8 +77,9 @@ import {
   SYNC_BIAS_KEY,
   AUTOSYNCED_PREFIX,
   NOCHART_PREFIX,
+  UNRELIABLE_PREFIX,
 } from "./storage-keys";
-import { startTrackBadges, type TrackBadge } from "./track-badges";
+import { startTrackBadges, type BadgeState } from "./track-badges";
 import { trackKey } from "./punch-header";
 import { HOTKEYS } from "./hotkeys";
 import { StatsScreen } from "./stats-view";
@@ -321,10 +322,36 @@ function setFlag(prefix: string, uri: string, on: boolean): void {
   refreshBadges();
 }
 
-function badgeFor(uri: string): TrackBadge | null {
-  if (isPunched(uri)) return "punched";
-  if (flag(AUTOSYNCED_PREFIX, uri)) return "auto";
-  if (flag(NOCHART_PREFIX, uri)) return "nochart";
+function readUnreliable(uri: string): "drift" | "step" | null {
+  try {
+    const v = localStorage.getItem(UNRELIABLE_PREFIX + uri);
+    return v === "drift" || v === "step" ? v : null;
+  } catch {
+    return null;
+  }
+}
+
+function setUnreliable(uri: string, kind: "drift" | "step" | null): void {
+  if (readUnreliable(uri) === kind) return;
+  try {
+    localStorage.setItem(UNRELIABLE_PREFIX + uri, kind ?? "0"); // "0", not removal — see flag()
+  } catch {
+    return;
+  }
+  mirrorOffsets();
+  refreshBadges();
+}
+
+function badgeFor(uri: string): BadgeState | null {
+  if (isPunched(uri)) return { kind: "punched" };
+  const bad = readUnreliable(uri);
+  if (bad) {
+    const why = bad === "drift" ? "its tempo drifts" : "a section differs";
+    const fix = loadCurve(uri) ? "; corrected sync on" : "";
+    return { kind: "unreliable", note: why + fix };
+  }
+  if (flag(AUTOSYNCED_PREFIX, uri)) return { kind: "auto" };
+  if (flag(NOCHART_PREFIX, uri)) return { kind: "nochart" };
   return null;
 }
 let punchedWriteTimer = 0;
@@ -542,6 +569,10 @@ async function runAutoSync(uri: string, song: ParsedSong, force = false): Promis
     return;
   }
   if (!r) return;
+  // The ⚠ badge: set on a drift/step verdict, cleared only by a clean match
+  // (an unsure, noisy result leaves the old verdict standing).
+  if (isMismatch(r)) setUnreliable(uri, r.shape === "drift" ? "drift" : "step");
+  else if (isConfident(r)) setUnreliable(uri, null);
 
   if (isPunched(uri) && !force) {
     if (isConfident(r) && !syncCurve) recordBiasSample(uri, r.offsetMs - offsetMs);
@@ -586,6 +617,7 @@ async function runAutoSync(uri: string, song: ParsedSong, force = false): Promis
         : "a section doesn't match";
     promptSync(`⚠ Chart may be unreliable (${why}) — Enter to try a corrected sync`, () => {
       saveCurve(curve);
+      refreshBadges(); // the ⚠ tooltip mentions the corrected sync
       setOffset(0);
       showReadout("✓ Corrected sync on — the chart may still be off in places", 3000);
     });
@@ -1943,6 +1975,7 @@ async function onPick(candidate: USDBSong): Promise<void> {
     currentSong = song;
     saveCurve(null); // a different chart — any old curve was for the old one
     setFlag(NOCHART_PREFIX, currentTrackId, false);
+    setUnreliable(currentTrackId, null); // the new chart gets its own verdict
     void runAutoSync(currentTrackId, song);
   } catch (err) {
     // TODO(stage 2): on SessionExpiredError, re-login with stored credentials

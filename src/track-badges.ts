@@ -3,6 +3,7 @@
  * own track lists (playlists, albums, Liked Songs, queue):
  *
  *   ✓  punched in proper — sync checked by ear
+ *   ⚠  chart doesn't fully match this recording (tempo drift / a section differs)
  *   ◐  auto-synced from Spotify's lyrics
  *   ∅  searched, no karaoke chart found
  *
@@ -14,7 +15,13 @@
  * badges just stop appearing; nothing else depends on them.
  */
 
-export type TrackBadge = "punched" | "auto" | "nochart";
+export type TrackBadge = "punched" | "unreliable" | "auto" | "nochart";
+
+/** What a row shows: a badge, plus optional detail for its tooltip. */
+export interface BadgeState {
+  kind: TrackBadge;
+  note?: string;
+}
 
 const ROW = ".main-trackList-trackListRow";
 // Older clients had a dedicated title class; 1.2.9x puts the title text first
@@ -24,6 +31,8 @@ const BADGE_CLASS = "singify-track-badge";
 
 const LOOK: Record<TrackBadge, { text: string; color: string; title: string }> = {
   punched: { text: "✓", color: "#1ed760", title: "Singify: punched in proper" },
+  // U+FE0E asks for the plain text glyph, not the colour emoji.
+  unreliable: { text: "⚠\uFE0E", color: "#f5a623", title: "Singify: chart may not match this recording" },
   auto: { text: "◐", color: "#1ed760", title: "Singify: auto-synced from Spotify's lyrics" },
   nochart: { text: "∅", color: "rgba(255,255,255,0.35)", title: "Singify: no karaoke chart found" },
 };
@@ -38,7 +47,7 @@ function rowUri(row: Element): string | null {
   return null;
 }
 
-function decorate(row: Element, badgeFor: (uri: string) => TrackBadge | null): void {
+function decorate(row: Element, badgeFor: (uri: string) => BadgeState | null): void {
   const title = row.querySelector(TITLE);
   if (!title) return;
   const uri = rowUri(row);
@@ -49,22 +58,23 @@ function decorate(row: Element, badgeFor: (uri: string) => TrackBadge | null): v
     el?.remove();
     return;
   }
-  if (el?.dataset.badge === want) return;
+  const key = want.kind + (want.note ?? "");
+  if (el?.dataset.badge === key) return;
   if (!el) {
     el = document.createElement("span");
     el.className = BADGE_CLASS;
     Object.assign(el.style, { marginInlineStart: "6px", fontWeight: "700" });
     title.appendChild(el);
   }
-  const look = LOOK[want];
-  el.dataset.badge = want;
+  const look = LOOK[want.kind];
+  el.dataset.badge = key;
   el.textContent = look.text;
-  el.title = look.title;
+  el.title = want.note ? `${look.title} — ${want.note}` : look.title;
   el.style.color = look.color;
 }
 
 /** Start decorating; returns `refresh()` to re-check every visible row after a change. */
-export function startTrackBadges(badgeFor: (uri: string) => TrackBadge | null): () => void {
+export function startTrackBadges(badgeFor: (uri: string) => BadgeState | null): () => void {
   const refresh = () => {
     for (const row of document.querySelectorAll(ROW)) decorate(row, badgeFor);
   };
