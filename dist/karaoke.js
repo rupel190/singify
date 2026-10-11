@@ -1561,17 +1561,12 @@ function HomeMenu(props) {
     style: sub
   }, "one mic · same song · take turns · pure skill")), /* @__PURE__ */ Spicetify.React.createElement("button", {
     onClick: onStats,
-    style: {
-      background: "transparent",
-      color: "rgba(255,255,255,0.72)",
-      border: "1px solid rgba(255,255,255,0.14)",
-      borderRadius: 14,
-      padding: "12px 22px",
-      fontSize: 22,
-      fontWeight: 700,
-      cursor: "pointer"
-    }
-  }, "\uD83D\uDCCA Stats"), /* @__PURE__ */ Spicetify.React.createElement("div", {
+    style: card
+  }, /* @__PURE__ */ Spicetify.React.createElement("span", {
+    style: title
+  }, "\uD83D\uDCCA Stats"), /* @__PURE__ */ Spicetify.React.createElement("span", {
+    style: sub
+  }, "your scores over time · per singer · per mic")), /* @__PURE__ */ Spicetify.React.createElement("div", {
     style: {
       fontSize: 22,
       color: "rgba(255,255,255,0.5)",
@@ -1763,12 +1758,17 @@ function SessionSetup(props) {
     }
   }, micOn ? "\uD83C\uDFA4 Mic on — you'll be scored" : "\uD83C\uDFA4 Mic is off — starting turns it on"), /* @__PURE__ */ Spicetify.React.createElement("div", {
     style: {
-      display: "flex",
-      flexDirection: "column",
-      gap: 12,
-      width: "min(560px, 84vw)",
+      display: "grid",
+      gridTemplateColumns: "minmax(0, 1fr) minmax(0, 1fr)",
+      gridTemplateAreas: '"roster lists" "options lists"',
+      alignItems: "start",
+      columnGap: 40,
+      rowGap: 20,
+      width: "min(1180px, 100%)",
       marginTop: 10
     }
+  }, /* @__PURE__ */ Spicetify.React.createElement("div", {
+    style: { gridArea: "roster", display: "flex", flexDirection: "column", gap: 12, minWidth: 0 }
   }, /* @__PURE__ */ Spicetify.React.createElement("div", {
     style: sectionLabel
   }, "Players", " ", players.length > 1 && /* @__PURE__ */ Spicetify.React.createElement("span", {
@@ -1885,7 +1885,9 @@ function SessionSetup(props) {
     }
   }, "+ Add singer"), devices.length === 0 && /* @__PURE__ */ Spicetify.React.createElement("span", {
     style: { fontSize: 12, color: "rgba(255,255,255,0.4)" }
-  }, "Grant mic access to see device names."))), current && /* @__PURE__ */ Spicetify.React.createElement("button", {
+  }, "Grant mic access to see device names.")))), /* @__PURE__ */ Spicetify.React.createElement("div", {
+    style: { gridArea: "lists", display: "flex", flexDirection: "column", gap: 12, minWidth: 0 }
+  }, current && /* @__PURE__ */ Spicetify.React.createElement("button", {
     onClick: () => onStartPlaylist(current),
     style: {
       display: "flex",
@@ -1950,7 +1952,9 @@ function SessionSetup(props) {
     style: { fontSize: 17, fontWeight: 700, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }
   }, p.name), /* @__PURE__ */ Spicetify.React.createElement("span", {
     style: { fontSize: 14, color: "rgba(255,255,255,0.5)", flexShrink: 0 }
-  }, p.count != null ? `${p.count} songs · ▶` : "▶")))), /* @__PURE__ */ Spicetify.React.createElement("div", {
+  }, p.count != null ? `${p.count} songs · ▶` : "▶"))))), /* @__PURE__ */ Spicetify.React.createElement("div", {
+    style: { gridArea: "options", display: "flex", flexDirection: "column", gap: 12, minWidth: 0 }
+  }, /* @__PURE__ */ Spicetify.React.createElement("div", {
     style: { ...sectionLabel, marginTop: 8 }
   }, "Difficulty"), /* @__PURE__ */ Spicetify.React.createElement("div", {
     style: { display: "flex", alignItems: "center", gap: 10 }
@@ -1981,12 +1985,9 @@ function SessionSetup(props) {
     style: chip(n),
     onClick: () => onRounds(n)
   }, n)), /* @__PURE__ */ Spicetify.React.createElement("button", {
-    style: { ...primaryBtn(), marginLeft: "auto" },
+    style: { ...primaryBtn(), marginLeft: "auto", whiteSpace: "nowrap" },
     onClick: onStart
-  }, "▶ ", rounds, " rounds"))), /* @__PURE__ */ Spicetify.React.createElement("button", {
-    style: { ...ghostBtn(), marginTop: 16 },
-    onClick: onCancel
-  }, "Cancel"));
+  }, "▶ ", rounds, " rounds")))));
 }
 function PlaceholderRow(props) {
   return /* @__PURE__ */ Spicetify.React.createElement("div", {
@@ -2234,10 +2235,7 @@ function CompetitiveSetup(props) {
     onClick: onStart,
     disabled: !track,
     style: { ...primaryBtn(), opacity: track ? 1 : 0.45, cursor: track ? "pointer" : "default" }
-  }, "⚔ Start duel"), /* @__PURE__ */ Spicetify.React.createElement("button", {
-    onClick: onCancel,
-    style: ghostBtn()
-  }, "Cancel")));
+  }, "⚔ Start duel")));
 }
 function SessionHud(props) {
   const React = Spicetify.React;
@@ -3183,19 +3181,10 @@ function fmt(n) {
 }
 function StatsScreen(props) {
   const React = Spicetify.React;
-  const { rounds, helperDown, onBack } = props;
+  const { rounds, helperDown } = props;
   const mics = aggregateByMic(rounds);
   const players = aggregateByPlayer(rounds);
   const recent = [...rounds].sort((a, b) => b.t - a.t).slice(0, 8);
-  const backBtn = {
-    background: "transparent",
-    color: C2.sub,
-    border: `1px solid ${C2.border}`,
-    borderRadius: 20,
-    padding: "8px 18px",
-    font: "600 14px system-ui",
-    cursor: "pointer"
-  };
   return /* @__PURE__ */ Spicetify.React.createElement("div", {
     style: {
       zoom: 1.4,
@@ -3218,10 +3207,7 @@ function StatsScreen(props) {
     style: { fontSize: 30, fontWeight: 800 }
   }, "\uD83D\uDCCA Stats"), /* @__PURE__ */ Spicetify.React.createElement("div", {
     style: { fontSize: 15, color: C2.sub, marginTop: 2 }
-  }, rounds.length, " ", rounds.length === 1 ? "round" : "rounds", " recorded")), /* @__PURE__ */ Spicetify.React.createElement("button", {
-    onClick: onBack,
-    style: backBtn
-  }, "← Back")), helperDown && /* @__PURE__ */ Spicetify.React.createElement("div", {
+  }, rounds.length, " ", rounds.length === 1 ? "round" : "rounds", " recorded"))), helperDown && /* @__PURE__ */ Spicetify.React.createElement("div", {
     style: {
       maxWidth: 820,
       margin: "0 auto 16px",
@@ -4567,10 +4553,26 @@ function ensureOverlay() {
   return overlay;
 }
 var layoutVersion = 0;
-function renderScaled(el) {
+var BACK_BTN_STYLE = {
+  position: "absolute",
+  top: 28,
+  right: 36,
+  zIndex: 30,
+  background: "rgba(10,10,14,0.6)",
+  color: "rgba(255,255,255,0.75)",
+  border: "1px solid rgba(255,255,255,0.18)",
+  borderRadius: 28,
+  padding: "11px 25px",
+  font: "600 20px system-ui, sans-serif",
+  cursor: "pointer"
+};
+function renderScaled(el, onBack) {
   if (!root)
     return;
   const React = Spicetify.React;
+  if (onBack) {
+    el = React.createElement("div", { style: { position: "relative", height: "100%" } }, el, React.createElement("button", { onClick: onBack, style: BACK_BTN_STYLE }, "← Back"));
+  }
   root.render(React.createElement("div", {
     key: `layout${layoutVersion}`,
     style: { zoom: UI_SCALE, width: "100%", height: "100%" }
@@ -4594,18 +4596,23 @@ function renderOverlay() {
       onStartSession: openSessionSetup,
       onCompetitive: openCompetitive,
       onStats: openStats
-    }))));
+    }))), () => {
+      if (session) {
+        activeScreen = "sing";
+        renderOverlay();
+      } else
+        setVisible(false);
+    });
     return;
   }
   if (activeScreen === "stats") {
     renderScaled(React.createElement(StatsScreen, {
       rounds: statRounds,
-      helperDown: statsHelperDown,
-      onBack: () => {
-        activeScreen = "home";
-        renderOverlay();
-      }
-    }));
+      helperDown: statsHelperDown
+    }), () => {
+      activeScreen = "home";
+      renderOverlay();
+    });
     return;
   }
   if (activeScreen === "competitive-setup") {
@@ -4640,12 +4647,11 @@ function renderOverlay() {
         competitiveDevice = id;
         renderOverlay();
       },
-      onStart: startCompetitive,
-      onCancel: () => {
-        activeScreen = "home";
-        renderOverlay();
-      }
-    }));
+      onStart: startCompetitive
+    }), () => {
+      activeScreen = "home";
+      renderOverlay();
+    });
     return;
   }
   if (activeScreen === "session-setup") {
@@ -4707,13 +4713,12 @@ function renderOverlay() {
         renderOverlay();
       },
       onStart: startSession,
-      onCancel: () => {
-        stopPreviews();
-        activeScreen = "home";
-        renderOverlay();
-      },
       micOn: micsActive()
-    }));
+    }), () => {
+      stopPreviews();
+      activeScreen = "home";
+      renderOverlay();
+    });
     return;
   }
   if (activeScreen === "round-end" && session && lastRound) {
