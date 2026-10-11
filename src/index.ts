@@ -523,14 +523,27 @@ function fmtSeconds(ms: number): string {
   return `${ms > 0 ? "+" : ""}${(ms / 1000).toFixed(1)} s`;
 }
 
-async function runAutoSync(uri: string, song: ParsedSong): Promise<void> {
+/**
+ * `force` is the A key: you asked, so it reports when it can't help, and it
+ * replaces whatever offset is there (even a punched one) — Backspace undoes.
+ */
+async function runAutoSync(uri: string, song: ParsedSong, force = false): Promise<void> {
+  if (force) showReadout("Auto-syncing…", 4000);
   const lines = await fetchSyncedLyrics(uri);
-  if (!lines || currentTrackId !== uri || currentSong !== song) return; // moved on meanwhile
+  if (currentTrackId !== uri || currentSong !== song) return; // moved on meanwhile
+  if (!lines) {
+    if (force) showReadout("No synced lyrics on Spotify for this track — use P", 3500);
+    return;
+  }
   const r = autoSync(song, lines);
-  if (!r) return;
   const bias = syncBias();
+  if (force && (!r || (!isConfident(r) && !isMismatch(r)))) {
+    showReadout("Auto-sync isn't sure about this chart — use P", 3500);
+    return;
+  }
+  if (!r) return;
 
-  if (isPunched(uri)) {
+  if (isPunched(uri) && !force) {
     if (isConfident(r) && !syncCurve) recordBiasSample(uri, r.offsetMs - offsetMs);
     else if (isMismatch(r)) showReadout("⚠ This chart may not match Spotify's recording", 6000);
     return;
@@ -541,7 +554,7 @@ async function runAutoSync(uri: string, song: ParsedSong): Promise<void> {
     const stored = readNum(OFFSET_PREFIX + uri);
     // An offset within 2 s is probably a fine-tune (auto-sync is good to ±0.5 s),
     // so it stays. Further off is a wrong or accidental punch: fix it.
-    if (stored != null && !syncCurve && Math.abs(suggested - stored) <= 2000) {
+    if (!force && stored != null && !syncCurve && Math.abs(suggested - stored) <= 2000) {
       setFlag(AUTOSYNCED_PREFIX, uri, true); // your offset agrees with the lyrics
       return;
     }
@@ -2298,6 +2311,8 @@ async function main(): Promise<void> {
     } else if (e.key === "\\") {
       saveCurve(null);
       setOffset(0); // reset sync
+    } else if (e.key === "a" || e.key === "A") {
+      if (currentSong && currentTrackId) void runAutoSync(currentTrackId, currentSong, true);
     } else if (e.key === "m" || e.key === "M") {
       void toggleMics();
     } else if (e.key === "l" || e.key === "L") {

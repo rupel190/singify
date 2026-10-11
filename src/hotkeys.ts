@@ -20,6 +20,7 @@ export const HOTKEYS: Hotkey[] = [
   { keys: "Shift+P", what: "Mark “punched in proper” (locks P)", short: "mark punched" },
   { keys: "[ / ]", what: "Lyrics later / earlier (Shift ×10, Ctrl fine)", short: "offset" },
   { keys: "\\", what: "Reset sync", short: "reset sync" },
+  { keys: "A", what: "Auto-sync now (replaces the current offset)", short: "auto-sync" },
   { keys: "Backspace", what: "Undo an auto-sync (while it's shown)", short: "undo sync" },
   { keys: "Enter", what: "Try a corrected sync on a drifting chart (when offered)", short: "corrected sync" },
   { keys: "- / =", what: "Mic sensitivity − / +", short: "sensitivity" },
