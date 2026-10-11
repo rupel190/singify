@@ -159,7 +159,11 @@ to test against real charts — no USDB account needed. Free CC-licensed charts:
 | `\` | Reset sync | `R` | Restart the song (scores cleared) |
 | `-` / `=` | Mic sensitivity − / + | `,` / `.` | Hit-line nudge (visual only) |
 | `Shift+P` | Mark "punched in proper" — ✓ in track lists, locks `P`, saved into the chart `.txt` | `Shift+R` | Re-search USDB (reopen the picker) |
-| `Ctrl+F` | FPS · ms overlay (debug; auto-shown while playing) | | |
+| `Ctrl+F` | FPS · ms overlay (debug; auto-shown while playing) | `Ctrl+0` | Reset every element's size |
+
+Every element (HUD, title, mic panel, highway, lyrics, menu) has a faint corner
+triangle: drag it to size that element, double-click to reset it. Sizes are saved
+per element, so an FHD and a 4K screen can each keep their own layout.
 
 The **offset** shifts the whole karaoke timeline against the audio (positive =
 lyrics fire earlier), compensating for output latency and slightly-off UltraStar

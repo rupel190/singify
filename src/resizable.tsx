@@ -41,6 +41,16 @@ function writeSize(id: string, value: number | null): void {
   window.dispatchEvent(new Event("singify:layout"));
 }
 
+/** Forget every element's size (Ctrl+0). Callers remount the UI to re-read them. */
+export function resetAllSizes(): void {
+  try {
+    for (const k of Object.keys(localStorage)) if (k.startsWith(UI_SIZE_PREFIX)) localStorage.removeItem(k);
+  } catch {
+    return;
+  }
+  window.dispatchEvent(new Event("singify:layout"));
+}
+
 /** Handles stay faint until you hover the element they size. */
 function ensureStyles(): void {
   if (typeof document === "undefined" || document.getElementById("singify-resizable")) return;
@@ -63,10 +73,13 @@ export function Resizable(props: {
   style?: Record<string, unknown>;
   /** Zoom mode: the content fills the box's height (full-screen, self-centring screens). */
   fill?: boolean;
+  /** Where the zoom handle sits: bottom-right (default) or top-right (drag up = bigger). */
+  corner?: "br" | "tr";
 }) {
   const React = Spicetify.React;
   const { useState, useRef } = React;
   const { id, mode = "zoom", initial = mode === "zoom" ? 1 : 75, children, style, fill } = props;
+  const top = mode === "height" || props.corner === "tr"; // handle on the top edge
   ensureStyles();
 
   const [value, setValue] = useState(() => readSize(id, initial));
@@ -94,11 +107,11 @@ export function Resizable(props: {
     // Zoom follows whichever way you drag more, relative to the element's size,
     // so a wide-and-short element (the lyrics) still responds to a vertical drag.
     const rx = dx / Math.max(80, d.w);
-    const ry = dy / Math.max(80, d.h);
+    const ry = (top ? -dy : dy) / Math.max(80, d.h); // a top handle grows upward
     const next =
       mode === "zoom"
         ? d.start * (1 + (Math.abs(rx) > Math.abs(ry) ? rx : ry))
-        : d.start - ry * 100; // dragging up makes it taller
+        : d.start + ry * 100; // dragging up makes it taller
     setValue(Math.min(hi, Math.max(lo, next)));
   };
   const onUp = (e: { pointerId: number; currentTarget: unknown }) => {
@@ -127,14 +140,14 @@ export function Resizable(props: {
       style={{
         position: "absolute",
         right: 2,
-        [mode === "height" ? "top" : "bottom"]: 2,
+        [top ? "top" : "bottom"]: 2,
         width: handleSize,
         height: handleSize,
-        cursor: mode === "height" ? "ns-resize" : "nwse-resize",
+        cursor: mode === "height" ? "ns-resize" : top ? "nesw-resize" : "nwse-resize",
         touchAction: "none",
         zIndex: 20,
         // A right-angled triangle tucked into the corner.
-        background: `linear-gradient(${mode === "height" ? "45deg" : "135deg"}, transparent 50%, rgba(255,255,255,0.75) 50%)`,
+        background: `linear-gradient(${top ? "45deg" : "135deg"}, transparent 50%, rgba(255,255,255,0.75) 50%)`,
         borderRadius: 3,
       }}
     />

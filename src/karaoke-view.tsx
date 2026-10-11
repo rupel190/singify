@@ -813,7 +813,8 @@ export function KaraokeView(props: KaraokeViewProps) {
           row. The growing box fills 75% of its space, bottom-aligned, leaving
           headroom up top for the mic banner. Each Lane measures itself, so N
           rows each size their notes to the height they got. */}
-      <div style={{ flex: "1 1 auto", minHeight: 0, display: "flex", flexDirection: "column", justifyContent: "flex-end" }}>
+      {/* The highway always keeps ≥35% of the stage, so oversized lyrics can't push it away. */}
+      <div style={{ flex: "1 1 auto", minHeight: "35%", display: "flex", flexDirection: "column", justifyContent: "flex-end" }}>
         <Resizable
           id="highway"
           mode="height"
@@ -855,7 +856,8 @@ export function KaraokeView(props: KaraokeViewProps) {
         </Resizable>
       </div>
       {/* ── Lyric band (anchored at the bottom, like SingStar/UltraStar) ── */}
-      <Resizable id="lyrics" style={{ flex: "0 0 auto" }}>
+      {/* Capped at 55% of the stage; handle top-right, clear of the FPS counter. */}
+      <Resizable id="lyrics" corner="tr" style={{ flex: "0 1 auto", maxHeight: "55%", overflow: "hidden" }}>
       <div
         style={{
           display: "flex",

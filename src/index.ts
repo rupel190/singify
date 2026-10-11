@@ -82,7 +82,7 @@ import {
 import { startTrackBadges, type BadgeState } from "./track-badges";
 import { trackKey } from "./punch-header";
 import { HOTKEYS } from "./hotkeys";
-import { Resizable, readSize } from "./resizable";
+import { Resizable, readSize, resetAllSizes } from "./resizable";
 import { StatsScreen } from "./stats-view";
 import type { StatRound } from "./stats";
 import {
@@ -1186,6 +1186,8 @@ function ensureOverlay(): HTMLDivElement {
  * exactly one place. The wrapper divides its own width and height back out of
  * the scale so it still covers the viewport after `zoom` shrinks it.
  */
+let layoutVersion = 0;
+
 function renderScaled(el: unknown): void {
   if (!root) return;
   const React = Spicetify.React;
@@ -1193,6 +1195,7 @@ function renderScaled(el: unknown): void {
     React.createElement(
       "div",
       {
+        key: `layout${layoutVersion}`, // bumped by Ctrl+0 so every handle re-reads its size
         style: { zoom: UI_SCALE, width: "100%", height: "100%" },
       },
       el as never
@@ -1211,8 +1214,11 @@ function renderOverlay(): void {
       : null;
     renderScaled(
       React.createElement(
+        "div",
+        { style: { display: "flex", alignItems: "center", justifyContent: "center", height: "100%" } },
+        React.createElement(
         Resizable,
-        { id: "menu", fill: true, style: { height: "100%" } },
+        { id: "menu" },
         React.createElement(HomeMenu, {
         track,
         onQuickSing: () => {
@@ -1224,6 +1230,7 @@ function renderOverlay(): void {
         onCompetitive: openCompetitive,
         onStats: openStats,
       })
+      )
       )
     );
     return;
@@ -1408,8 +1415,11 @@ function renderOverlay(): void {
         })
       : session
         ? React.createElement(
+            "div",
+            { style: { display: "flex", alignItems: "center", justifyContent: "center", height: "100%" } },
+            React.createElement(
             Resizable,
-            { id: "nochart", fill: true, style: { height: "100%" } },
+            { id: "nochart" },
             React.createElement(NoChartInSession, {
               title: currentTitle(),
               artist: currentArtist(),
@@ -1418,6 +1428,7 @@ function renderOverlay(): void {
               searched: !resolving,
               helperDown,
             })
+            )
           )
         : helperDown
           ? React.createElement(HelperDownNotice, {
@@ -2345,7 +2356,13 @@ async function main(): Promise<void> {
       }
     }
 
-    if (e.key === "?" || e.key === "F1") {
+    if (e.ctrlKey && (e.key === "0" || e.code === "Digit0")) {
+      resetAllSizes();
+      layoutVersion++;
+      if (visible) renderOverlay();
+      showReadout("Layout reset — every element back to its default size", 2500);
+      e.preventDefault();
+    } else if (e.key === "?" || e.key === "F1") {
       toggleHelp();
       e.preventDefault();
     } else if (e.key === "s" || e.key === "S" || e.key === "k" || e.key === "K") {
