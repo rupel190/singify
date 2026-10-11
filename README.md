@@ -52,6 +52,8 @@ constraint is also what makes the library problem go away.
 
 ## Auto-sync
 
+![Auto-sync: the offset is knocked off by hand with [ / ], then A snaps it back in time from Spotify's lyrics](docs/autosync.webp)
+
 Same problem as subtitle sync: the chart was timed against one copy of the song,
 Spotify plays another. Spotify ships **line-synced lyrics** (Musixmatch) timed to
 the exact master that's playing, so they're the reference — no audio needed,
