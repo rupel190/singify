@@ -8,6 +8,7 @@
  * milestone). A pure view — the adapter hands it the current track + callbacks.
  */
 
+import { HOTKEYS } from "./hotkeys";
 import { ACCENT } from "./theme";
 
 export interface HomeMenuProps {
@@ -102,8 +103,23 @@ export function HomeMenu(props: HomeMenuProps) {
         📊 Stats
       </button>
 
-      <div style={{ fontSize: 26, color: "rgba(255,255,255,0.5)", marginTop: 10 }}>
-        Q quick-sing · M mic · P punch-sync · R re-choose · L load file · [ ] offset
+      <div
+        style={{
+          fontSize: 22,
+          color: "rgba(255,255,255,0.5)",
+          marginTop: 10,
+          display: "flex",
+          flexWrap: "wrap",
+          justifyContent: "center",
+          gap: "6px 22px",
+          maxWidth: 1100,
+        }}
+      >
+        {HOTKEYS.map((h) => (
+          <span key={h.keys} style={{ whiteSpace: "nowrap" }}>
+            <b style={{ color: "rgba(255,255,255,0.8)" }}>{h.keys}</b> {h.short}
+          </span>
+        ))}
       </div>
     </div>
   );

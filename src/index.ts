@@ -78,6 +78,7 @@ import {
 } from "./storage-keys";
 import { startPunchedBadges } from "./punched-badges";
 import { trackKey } from "./punch-header";
+import { HOTKEYS } from "./hotkeys";
 import { StatsScreen } from "./stats-view";
 import type { StatRound } from "./stats";
 import {
@@ -365,25 +366,7 @@ function punchSync(): void {
 
 // ── Shortcuts card (? or F1) ─────────────────────────────────────────────────
 
-const HOTKEYS: [string, string][] = [
-  ["K", "Back to the song (again → menu)"],
-  ["S", "Sessions menu"],
-  ["Q", "Quick Sing on the current track"],
-  ["M", "Mics on / off"],
-  ["R", "Restart the song"],
-  ["Shift+R", "Re-search USDB (pick another chart)"],
-  ["P", "Punch-sync: tap on the first sung word"],
-  ["Shift+P", "Mark “punched in proper” (locks P)"],
-  ["[ / ]", "Lyrics later / earlier (Shift ×10, Ctrl fine)"],
-  ["\\", "Reset sync"],
-  ["Enter", "Accept an auto-sync suggestion"],
-  ["- / =", "Mic sensitivity − / +"],
-  [", / .", "Hit-line nudge (visual)"],
-  ["L", "Load a local .txt chart"],
-  ["Ctrl+F", "FPS meter"],
-  ["Esc", "Close"],
-  ["? / F1", "This card"],
-];
+
 
 let helpEl: HTMLDivElement | null = null;
 
@@ -407,7 +390,7 @@ function toggleHelp(): void {
     } as CSSStyleDeclaration);
     helpEl.style.setProperty("zoom", String(UI_SCALE));
     const rows = HOTKEYS.map(
-      ([k, what]) =>
+      ({ keys: k, what }) =>
         `<tr><td style="padding:6px 40px 6px 0;font-weight:700;color:#1ed760;white-space:nowrap">${k}</td><td style="padding:6px 0;color:rgba(255,255,255,0.85)">${what}</td></tr>`
     ).join("");
     helpEl.innerHTML = `<div style="font-weight:800;font-size:40px;margin-bottom:24px">Singify shortcuts</div><table style="border-collapse:collapse">${rows}</table>`;
@@ -1137,6 +1120,7 @@ function renderOverlay(): void {
       React.createElement(HomeMenu, {
         track,
         onQuickSing: () => {
+          if (!session) startQuickSession();
           activeScreen = "sing";
           renderOverlay();
         },
@@ -1481,8 +1465,25 @@ function openSing(): void {
     setVisible(false);
     return;
   }
+  if (!session) startQuickSession();
   activeScreen = "sing";
   setVisible(true);
+}
+
+/**
+ * Singing on a song with nothing set up → a 1-player session right away, so the
+ * HUD (skip, end, restart, scores) and a live mic are there from the start.
+ * Player 1 is the first saved slot — its name, mic, gain and gate.
+ */
+function startQuickSession(): void {
+  const p1 = soloRoster[0] ?? newSlot(0, "P1");
+  session = createSession(setupRounds, [p1.name]);
+  sessionRoster = [{ ...p1 }];
+  scoredTrackIds = new Set();
+  lastRound = null;
+  stopPreviews();
+  if (micsActive()) stopMics(true);
+  void startMics();
 }
 
 // K / Topbar button → the session menu; toggles closed if already there.
@@ -1493,20 +1494,6 @@ function openHome(): void {
   }
   activeScreen = "home";
   setVisible(true);
-}
-
-// K cycles closed → song → menu → closed: reopening lands on the chart you were
-// singing, and the menu is one more press away. No chart loaded → menu directly.
-function openFromKey(): void {
-  if (!visible && currentSong) {
-    activeScreen = "sing";
-    setVisible(true);
-  } else if (visible && activeScreen === "sing") {
-    activeScreen = "home";
-    renderOverlay();
-  } else {
-    openHome();
-  }
 }
 
 // 📊 Stats — show the screen immediately (empty), then fill it once the round
@@ -1820,7 +1807,7 @@ let autoSkipNoChart = localStorage.getItem(AUTOSKIP_KEY) === "1";
 // Without a cap, a long chartless stretch would race through the whole playlist
 // in seconds. After this many misses in a row, switch the toggle back off so the
 // stop is VISIBLE in the HUD rather than being invisible internal state.
-const AUTOSKIP_LIMIT = 8;
+const AUTOSKIP_LIMIT = 20;
 let autoSkipStreak = 0;
 
 function setAutoSkip(on: boolean): void {
@@ -2244,10 +2231,8 @@ async function main(): Promise<void> {
     if (e.key === "?" || e.key === "F1") {
       toggleHelp();
       e.preventDefault();
-    } else if (e.key === "s" || e.key === "S") {
-      openHome(); // the sessions menu (K also gets there)
-    } else if (e.key === "k" || e.key === "K") {
-      openFromKey(); // back to the song if one is loaded, else the menu
+    } else if (e.key === "s" || e.key === "S" || e.key === "k" || e.key === "K") {
+      openHome(); // the sessions menu
     } else if (e.key === "q" || e.key === "Q") {
       openSing(); // straight to Quick Sing on the current track
     } else if (e.key === "Escape") {
