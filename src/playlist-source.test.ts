@@ -15,6 +15,11 @@ describe("sortByRecentlySung", () => {
     const out = sortByRecentlySung(lib, { c: 100, a: 300 });
     expect(out.map((p) => p.uri)).toEqual(["a", "c", "b", "d"]);
   });
+  test("unsung playlists follow Spotify's last-played order", () => {
+    const lib = [pl("a"), pl("b"), pl("c"), pl("d")];
+    const out = sortByRecentlySung(lib, { d: 500 }, { b: 10, c: 20 });
+    expect(out.map((p) => p.uri)).toEqual(["d", "c", "b", "a"]);
+  });
   test("nothing sung yet → library order untouched", () => {
     const lib = [pl("x"), pl("y")];
     expect(sortByRecentlySung(lib, {}).map((p) => p.uri)).toEqual(["x", "y"]);

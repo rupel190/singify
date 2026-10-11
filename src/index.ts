@@ -47,6 +47,7 @@ import {
 import {
   fetchPlaylists,
   sortByRecentlySung,
+  fetchSpotifyRecents,
   fetchPlaylistTracks,
   playPlaylist,
   currentContextPlaylist,
@@ -1791,7 +1792,8 @@ async function loadPlaylists(): Promise<void> {
   playlistsLoading = true;
   if (activeScreen === "session-setup") renderOverlay();
   try {
-    playlists = sortByRecentlySung(await fetchPlaylists(), readPlaylistPlayed());
+    const [list, recents] = await Promise.all([fetchPlaylists(), fetchSpotifyRecents()]);
+    playlists = sortByRecentlySung(list, readPlaylistPlayed(), recents);
   } finally {
     playlistsLoading = false;
     if (activeScreen === "session-setup") renderOverlay();

@@ -24,17 +24,19 @@ export interface PlaylistRef {
 // ── Pure mappers (tested) ────────────────────────────────────────────────────
 
 /**
- * Playlists you've sung in singify first, most recent on top; the rest keep
- * their library order. `played` maps playlist URI → when a session last
- * started from it (ms).
+ * Playlists you've sung in singify first, most recent on top; then the rest by
+ * when Spotify last played them; then library order. `played` maps playlist URI
+ * → when a singify session last started from it, `spotifyPlayed` → Spotify's
+ * last-played time (both ms).
  */
 export function sortByRecentlySung(
   playlists: PlaylistRef[],
-  played: Record<string, number>
+  played: Record<string, number>,
+  spotifyPlayed: Record<string, number> = {}
 ): PlaylistRef[] {
   return playlists
-    .map((p, i) => ({ p, i, t: played[p.uri] ?? 0 }))
-    .sort((a, b) => b.t - a.t || a.i - b.i)
+    .map((p, i) => ({ p, i, t: played[p.uri] ?? 0, s: spotifyPlayed[p.uri] ?? 0 }))
+    .sort((a, b) => b.t - a.t || b.s - a.s || a.i - b.i)
     .map((x) => x.p);
 }
 
@@ -138,6 +140,10 @@ export function flattenRootlist(root: unknown): PlaylistRef[] {
 type PlatformShape = {
   RootlistAPI?: { getContents?: (opts?: unknown) => Promise<unknown> };
   PlaylistAPI?: { getContents?: (uri: string, opts?: unknown) => Promise<unknown> };
+  LibraryAPI?: {
+    getContents?: (opts?: unknown) => Promise<unknown>;
+    getRecentsSortOrderId?: () => string;
+  };
   PlayerAPI?: { play?: (ctx: unknown, opts: unknown, meta: unknown) => Promise<void> };
 };
 
@@ -156,6 +162,33 @@ export async function fetchPlaylists(): Promise<PlaylistRef[]> {
   } catch (err) {
     console.error("[singify] fetchPlaylists failed:", err);
     return [];
+  }
+}
+
+/**
+ * When Spotify last played each playlist in your library (its "Recents" sort),
+ * as { uri: ms }. {} if the API isn't there — the caller just loses that order.
+ */
+export async function fetchSpotifyRecents(): Promise<Record<string, number>> {
+  const api = platform()?.LibraryAPI;
+  if (!api?.getContents) return {};
+  try {
+    const res = (await api.getContents({
+      filters: ["2"], // Playlists
+      sortOrder: api.getRecentsSortOrderId?.() ?? "6",
+      flattenTree: true,
+      limit: 1000,
+      offset: 0,
+    })) as { items?: { uri?: string; lastPlayedAt?: string }[] };
+    const out: Record<string, number> = {};
+    for (const it of res?.items ?? []) {
+      const t = it.lastPlayedAt ? Date.parse(it.lastPlayedAt) : NaN;
+      if (it.uri && Number.isFinite(t)) out[it.uri] = t;
+    }
+    return out;
+  } catch (err) {
+    console.error("[singify] fetchSpotifyRecents failed:", err);
+    return {};
   }
 }
 
