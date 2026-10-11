@@ -3774,6 +3774,52 @@ function punchSync() {
   const sign = offsetMs > 0 ? "+" : "";
   showReadout(`⏱ Punched — first line synced · offset ${sign}${offsetMs} ms`);
 }
+var HOTKEYS = [
+  ["K", "Back to the song (again → menu)"],
+  ["S", "Sessions menu"],
+  ["Q", "Quick Sing on the current track"],
+  ["M", "Mics on / off"],
+  ["R", "Restart the song"],
+  ["Shift+R", "Re-search USDB (pick another chart)"],
+  ["P", "Punch-sync: tap on the first sung word"],
+  ["Shift+P", "Mark “punched in proper” (locks P)"],
+  ["[ / ]", "Lyrics later / earlier (Shift ×10, Ctrl fine)"],
+  ["\\", "Reset sync"],
+  ["Enter", "Accept an auto-sync suggestion"],
+  ["- / =", "Mic sensitivity − / +"],
+  [", / .", "Hit-line nudge (visual)"],
+  ["L", "Load a local .txt chart"],
+  ["Ctrl+F", "FPS meter"],
+  ["Esc", "Close"],
+  ["? / F1", "This card"]
+];
+var helpEl = null;
+function toggleHelp() {
+  if (!helpEl) {
+    helpEl = document.createElement("div");
+    helpEl.id = "singify-help";
+    Object.assign(helpEl.style, {
+      position: "fixed",
+      top: "50%",
+      left: "50%",
+      transform: "translate(-50%, -50%)",
+      zIndex: "1001",
+      padding: "48px 64px",
+      borderRadius: "32px",
+      background: "rgba(10, 10, 14, 0.96)",
+      color: "#fff",
+      font: "500 30px 'Spotify Circular', system-ui, sans-serif",
+      display: "none",
+      boxShadow: "0 12px 60px rgba(0,0,0,0.6)"
+    });
+    helpEl.style.setProperty("zoom", String(UI_SCALE));
+    const rows = HOTKEYS.map(([k, what]) => `<tr><td style="padding:6px 40px 6px 0;font-weight:700;color:#1ed760;white-space:nowrap">${k}</td><td style="padding:6px 0;color:rgba(255,255,255,0.85)">${what}</td></tr>`).join("");
+    helpEl.innerHTML = `<div style="font-weight:800;font-size:40px;margin-bottom:24px">Singify shortcuts</div><table style="border-collapse:collapse">${rows}</table>`;
+    helpEl.addEventListener("click", () => toggleHelp());
+    document.body.appendChild(helpEl);
+  }
+  helpEl.style.display = helpEl.style.display === "block" ? "none" : "block";
+}
 var syncCurve = null;
 function loadCurve(uri) {
   try {
@@ -5112,12 +5158,19 @@ async function main() {
         return;
       }
     }
-    if (e.key === "k" || e.key === "K") {
+    if (e.key === "?" || e.key === "F1") {
+      toggleHelp();
+      e.preventDefault();
+    } else if (e.key === "s" || e.key === "S") {
+      openHome();
+    } else if (e.key === "k" || e.key === "K") {
       openFromKey();
     } else if (e.key === "q" || e.key === "Q") {
       openSing();
     } else if (e.key === "Escape") {
-      if (visible)
+      if (helpEl?.style.display === "block")
+        toggleHelp();
+      else if (visible)
         setVisible(false);
     } else if (e.code === "BracketLeft" || e.code === "BracketRight") {
       const step = e.ctrlKey ? 1 : e.shiftKey ? 100 : OFFSET_STEP;
