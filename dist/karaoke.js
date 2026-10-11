@@ -4595,45 +4595,51 @@ var seeThrough = (() => {
 })();
 var placeTimer = 0;
 var placedKey = "";
-function videoPictureRect() {
-  const main = document.getElementById("main");
-  for (const v of Array.from(main?.querySelectorAll("video") ?? [])) {
+function bigVideoShowing() {
+  const area = window.innerWidth * window.innerHeight;
+  for (const v of Array.from(document.querySelectorAll("#main video"))) {
     const r = v.getBoundingClientRect();
-    if (r.width < 50 || r.height < 50)
-      continue;
-    const vw = v.videoWidth;
-    const vh = v.videoHeight;
-    if (!vw || !vh)
-      return r;
-    const k = Math.min(r.width / vw, r.height / vh);
-    const w = vw * k;
-    const h = vh * k;
-    return new DOMRect(r.left + (r.width - w) / 2, r.top + (r.height - h) / 2, w, h);
+    if (r.width * r.height >= area / 4 && v.readyState >= 2)
+      return true;
   }
-  return null;
+  return false;
+}
+function visibleRect(sel) {
+  const el = document.querySelector(sel);
+  const r = el?.getBoundingClientRect();
+  return r && r.width > 0 && r.height > 0 ? r : null;
 }
 function placeOverlay() {
   if (!overlay)
     return;
-  const target = visible && seeThrough ? videoPictureRect() ?? document.querySelector(".Root__main-view")?.getBoundingClientRect() ?? null : null;
-  const key = target ? [target.left, target.top, target.width, target.height].map(Math.round).join(",") : "full";
+  let top = 0;
+  let bottom = window.innerHeight;
+  if (visible && seeThrough) {
+    const bar = visibleRect(".Root__globalNav, .Root__top-bar");
+    const play = visibleRect(".Root__now-playing-bar");
+    if (bar && bar.bottom < window.innerHeight / 3)
+      top = bar.bottom;
+    if (play && play.top > window.innerHeight * 2 / 3)
+      bottom = play.top;
+  }
+  const through = visible && seeThrough;
+  const dim = through && bigVideoShowing();
+  const key = through ? `${Math.round(top)},${Math.round(bottom)},${dim}` : "full";
   if (key === placedKey)
     return;
   placedKey = key;
-  Object.assign(overlay.style, target ? { inset: "auto", left: `${target.left}px`, top: `${target.top}px`, width: `${target.width}px`, height: `${target.height}px` } : { inset: "0", left: "", top: "", width: "", height: "" });
+  Object.assign(overlay.style, through ? { inset: "auto", left: "0", right: "0", top: `${top}px`, height: `${bottom - top}px` } : { inset: "0", left: "", right: "", top: "", height: "" }, { background: dim ? `rgba(10, 10, 14, ${SEE_THROUGH_DIM})` : "rgb(10, 10, 14)" });
 }
 function applyBackdrop() {
   const spotifyMain = document.getElementById("main");
   const through = visible && seeThrough;
+  if (spotifyMain)
+    spotifyMain.style.display = visible && !seeThrough ? "none" : "";
   clearInterval(placeTimer);
   placedKey = "";
   placeOverlay();
   if (through)
     placeTimer = window.setInterval(placeOverlay, 500);
-  if (spotifyMain)
-    spotifyMain.style.display = visible && !seeThrough ? "none" : "";
-  if (overlay)
-    overlay.style.background = seeThrough ? `rgba(10, 10, 14, ${SEE_THROUGH_DIM})` : "rgb(10, 10, 14)";
   let pause = document.getElementById("singify-pause-page");
   if (!pause) {
     pause = document.createElement("style");
