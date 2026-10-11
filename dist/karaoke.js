@@ -1,3 +1,134 @@
+// src/storage-keys.ts
+var SENS_KEY = "singify:sensitivity";
+var SENS_SCALE_KEY = "singify:sensitivityScale";
+var DIFFICULTY_KEY = "singify:difficulty";
+var NOWLINE_KEY = "singify:nowLinePx";
+var MIC_SLOTS_KEY = "singify:micSlots";
+var PLAYER_SENS_KEY = "singify:playerSens";
+var AUTOSKIP_KEY = "singify:autoSkipNoChart";
+var FPS_KEY = "singify:fps";
+var DEFAULT_OFFSET_KEY = "singify:offsetMs";
+var OFFSET_PREFIX = "singify:offset:";
+var PUNCHED_PREFIX = "singify:punched:";
+var SYNC_CURVE_PREFIX = "singify:syncCurve:";
+var SYNC_BIAS_KEY = "singify:syncBias";
+var AUTOSYNCED_PREFIX = "singify:autosynced:";
+var NOCHART_PREFIX = "singify:nochart:";
+var UNRELIABLE_PREFIX = "singify:unreliable:";
+var UI_SIZE_PREFIX = "singify:uiSize:";
+
+// src/resizable.tsx
+var LIMITS = { zoom: [0.4, 3], height: [20, 100] };
+function readSize(id, fallback) {
+  try {
+    const v = Number(localStorage.getItem(UI_SIZE_PREFIX + id));
+    return Number.isFinite(v) && v > 0 ? v : fallback;
+  } catch {
+    return fallback;
+  }
+}
+function writeSize(id, value) {
+  try {
+    if (value == null)
+      localStorage.removeItem(UI_SIZE_PREFIX + id);
+    else
+      localStorage.setItem(UI_SIZE_PREFIX + id, String(Math.round(value * 1000) / 1000));
+  } catch {
+    return;
+  }
+  window.dispatchEvent(new Event("singify:layout"));
+}
+function ensureStyles() {
+  if (typeof document === "undefined" || document.getElementById("singify-resizable"))
+    return;
+  const st = document.createElement("style");
+  st.id = "singify-resizable";
+  st.textContent = ".singify-rs>.singify-rs-handle{opacity:0;transition:opacity 150ms}" + ".singify-rs:hover>.singify-rs-handle{opacity:.55}" + ".singify-rs>.singify-rs-handle:hover,.singify-rs>.singify-rs-handle.dragging{opacity:1}";
+  document.head.appendChild(st);
+}
+function Resizable(props) {
+  const React = Spicetify.React;
+  const { useState, useRef } = React;
+  const { id, mode = "zoom", initial = mode === "zoom" ? 1 : 75, children, style, fill } = props;
+  ensureStyles();
+  const [value, setValue] = useState(() => readSize(id, initial));
+  const boxRef = useRef(null);
+  const drag = useRef(null);
+  const [dragging, setDragging] = useState(false);
+  const [lo, hi] = LIMITS[mode];
+  const onDown = (e) => {
+    const box = boxRef.current;
+    if (!box)
+      return;
+    e.preventDefault();
+    e.stopPropagation();
+    const r = box.getBoundingClientRect();
+    const parent = box.parentElement?.getBoundingClientRect();
+    drag.current = { x: e.clientX, y: e.clientY, start: value, w: r.width, h: mode === "height" ? parent?.height ?? r.height : r.height };
+    e.currentTarget.setPointerCapture?.(e.pointerId);
+    setDragging(true);
+  };
+  const onMove = (e) => {
+    const d = drag.current;
+    if (!d)
+      return;
+    const dx = e.clientX - d.x;
+    const dy = e.clientY - d.y;
+    const rx = dx / Math.max(80, d.w);
+    const ry = dy / Math.max(80, d.h);
+    const next = mode === "zoom" ? d.start * (1 + (Math.abs(rx) > Math.abs(ry) ? rx : ry)) : d.start - ry * 100;
+    setValue(Math.min(hi, Math.max(lo, next)));
+  };
+  const onUp = (e) => {
+    if (!drag.current)
+      return;
+    drag.current = null;
+    setDragging(false);
+    e.currentTarget.releasePointerCapture?.(e.pointerId);
+    writeSize(id, value);
+  };
+  const reset = () => {
+    setValue(initial);
+    writeSize(id, null);
+  };
+  const handleSize = 22;
+  const handle = /* @__PURE__ */ Spicetify.React.createElement("div", {
+    className: "singify-rs-handle" + (dragging ? " dragging" : ""),
+    title: "Drag to resize · double-click to reset",
+    onPointerDown: onDown,
+    onPointerMove: onMove,
+    onPointerUp: onUp,
+    onDoubleClick: reset,
+    onMouseDown: (e) => e.preventDefault(),
+    style: {
+      position: "absolute",
+      right: 2,
+      [mode === "height" ? "top" : "bottom"]: 2,
+      width: handleSize,
+      height: handleSize,
+      cursor: mode === "height" ? "ns-resize" : "nwse-resize",
+      touchAction: "none",
+      zIndex: 20,
+      background: `linear-gradient(${mode === "height" ? "45deg" : "135deg"}, transparent 50%, rgba(255,255,255,0.75) 50%)`,
+      borderRadius: 3
+    }
+  });
+  if (mode === "height") {
+    return /* @__PURE__ */ Spicetify.React.createElement("div", {
+      ref: boxRef,
+      className: "singify-rs",
+      style: { position: "relative", height: `${value}%`, ...style }
+    }, children, handle);
+  }
+  return /* @__PURE__ */ Spicetify.React.createElement("div", {
+    ref: boxRef,
+    className: "singify-rs",
+    style: { position: "relative", ...style }
+  }, /* @__PURE__ */ Spicetify.React.createElement("div", {
+    style: { zoom: value, height: fill ? "100%" : undefined }
+  }, children), handle);
+}
+
 // src/punch-header.ts
 var PUNCHED_TAG = "SINGIFYPUNCHED";
 function trackKey(trackId) {
@@ -1036,13 +1167,11 @@ function KaraokeView(props) {
     }
   }, /* @__PURE__ */ Spicetify.React.createElement("div", {
     style: { flex: "1 1 auto", minHeight: 0, display: "flex", flexDirection: "column", justifyContent: "flex-end" }
-  }, /* @__PURE__ */ Spicetify.React.createElement("div", {
-    style: {
-      height: "75%",
-      minHeight: 160,
-      display: "flex",
-      flexDirection: "column"
-    }
+  }, /* @__PURE__ */ Spicetify.React.createElement(Resizable, {
+    id: "highway",
+    mode: "height",
+    initial: 75,
+    style: { minHeight: 160, display: "flex", flexDirection: "column" }
   }, laneEntries.flatMap((e, i) => {
     const lane = /* @__PURE__ */ Spicetify.React.createElement(Lane, {
       key: e?.id ?? `lane${i}`,
@@ -1069,9 +1198,11 @@ function KaraokeView(props) {
       }
     });
     return [divider, lane];
-  }))), /* @__PURE__ */ Spicetify.React.createElement("div", {
+  }))), /* @__PURE__ */ Spicetify.React.createElement(Resizable, {
+    id: "lyrics",
+    style: { flex: "0 0 auto" }
+  }, /* @__PURE__ */ Spicetify.React.createElement("div", {
     style: {
-      flex: "0 0 auto",
       display: "flex",
       flexDirection: "column",
       justifyContent: "flex-end",
@@ -1098,7 +1229,7 @@ function KaraokeView(props) {
       isCurrent,
       positionMs
     });
-  })));
+  }))));
 }
 function LyricLine(props) {
   const React = Spicetify.React;
@@ -2916,24 +3047,6 @@ async function helperHealth() {
   }
 }
 
-// src/storage-keys.ts
-var SENS_KEY = "singify:sensitivity";
-var SENS_SCALE_KEY = "singify:sensitivityScale";
-var DIFFICULTY_KEY = "singify:difficulty";
-var NOWLINE_KEY = "singify:nowLinePx";
-var MIC_SLOTS_KEY = "singify:micSlots";
-var PLAYER_SENS_KEY = "singify:playerSens";
-var AUTOSKIP_KEY = "singify:autoSkipNoChart";
-var FPS_KEY = "singify:fps";
-var DEFAULT_OFFSET_KEY = "singify:offsetMs";
-var OFFSET_PREFIX = "singify:offset:";
-var PUNCHED_PREFIX = "singify:punched:";
-var SYNC_CURVE_PREFIX = "singify:syncCurve:";
-var SYNC_BIAS_KEY = "singify:syncBias";
-var AUTOSYNCED_PREFIX = "singify:autosynced:";
-var NOCHART_PREFIX = "singify:nochart:";
-var UNRELIABLE_PREFIX = "singify:unreliable:";
-
 // src/track-badges.ts
 var ROW = ".main-trackList-trackListRow";
 var TITLE = ".main-trackList-rowTitle, .main-trackList-rowMainContent > [data-encore-id=text]";
@@ -3261,7 +3374,7 @@ function ls() {
     return null;
   }
 }
-function gather(keys) {
+function gather(keys, prefixes = []) {
   const store = ls();
   const out = {};
   if (!store)
@@ -3270,6 +3383,14 @@ function gather(keys) {
     const v = store.getItem(k);
     if (v != null)
       out[k] = v;
+  }
+  for (let i = 0;i < store.length; i++) {
+    const k = store.key(i);
+    if (k && prefixes.some((p) => k.startsWith(p))) {
+      const v = store.getItem(k);
+      if (v != null)
+        out[k] = v;
+    }
   }
   return out;
 }
@@ -3296,7 +3417,7 @@ function debounce(fn, ms) {
   };
 }
 var pushSettings = debounce(() => {
-  saveStore("settings", gather(SETTINGS_KEYS)).catch((err) => console.error("[singify] settings mirror failed:", err));
+  saveStore("settings", gather(SETTINGS_KEYS, [UI_SIZE_PREFIX])).catch((err) => console.error("[singify] settings mirror failed:", err));
 }, 600);
 var pushOffsets = debounce(() => {
   saveStore("offsets", gatherOffsets()).catch((err) => console.error("[singify] offsets mirror failed:", err));
@@ -3726,18 +3847,18 @@ function showReadout(text, holdMs = 1200) {
       bottom: "24px",
       left: "24px",
       zIndex: "1000",
-      padding: "32px 64px",
-      borderRadius: "72px",
+      padding: "20px 40px",
+      borderRadius: "48px",
       background: "rgba(10, 10, 14, 0.92)",
       color: "#fff",
-      font: "600 52px 'Spotify Circular', system-ui, sans-serif",
+      font: "600 38px 'Spotify Circular', system-ui, sans-serif",
       pointerEvents: "none",
       opacity: "0",
       transition: "opacity 180ms ease"
     });
-    readoutEl.style.setProperty("zoom", String(UI_SCALE));
     document.body.appendChild(readoutEl);
   }
+  readoutEl.style.setProperty("zoom", String(UI_SCALE * readSize("hud", 1)));
   readoutEl.textContent = text;
   readoutEl.style.opacity = "1";
   clearTimeout(readoutTimer);
@@ -4447,7 +4568,7 @@ function renderOverlay() {
   if (activeScreen === "home") {
     const item = Spicetify.Player.data?.item ?? Spicetify.Player.data?.track;
     const track = item ? { artist: item.artists?.[0]?.name ?? "", title: item.name ?? "" } : null;
-    renderScaled(React.createElement(HomeMenu, {
+    renderScaled(React.createElement(Resizable, { id: "menu", fill: true, style: { height: "100%" } }, React.createElement(HomeMenu, {
       track,
       onQuickSing: () => {
         if (!session)
@@ -4458,7 +4579,7 @@ function renderOverlay() {
       onStartSession: openSessionSetup,
       onCompetitive: openCompetitive,
       onStats: openStats
-    }));
+    })));
     return;
   }
   if (activeScreen === "stats") {
@@ -4616,14 +4737,14 @@ function renderOverlay() {
     error: pickError,
     onPick,
     onCancel
-  }) : session ? React.createElement(NoChartInSession, {
+  }) : session ? React.createElement(Resizable, { id: "nochart", fill: true, style: { height: "100%" } }, React.createElement(NoChartInSession, {
     title: currentTitle(),
     artist: currentArtist(),
     onSkip: skipRound,
     onReChoose: () => void reSearch(),
     searched: !resolving,
     helperDown
-  }) : helperDown ? React.createElement(HelperDownNotice, {
+  })) : helperDown ? React.createElement(HelperDownNotice, {
     title: currentTitle(),
     artist: currentArtist(),
     onReChoose: () => void reSearch()
@@ -4681,7 +4802,7 @@ function renderOverlay() {
       alignItems: "start",
       gap: 24
     }
-  }, React.createElement("div", { style: { minWidth: 0 } }, hud), React.createElement("div", { style: { minWidth: 0 } }, nowPlaying), React.createElement("div", { style: { minWidth: 0, display: "flex", justifyContent: "flex-end" } }, micBanner)) : null;
+  }, React.createElement("div", { style: { minWidth: 0, display: "flex" } }, hud && React.createElement(Resizable, { id: "hud" }, hud)), React.createElement("div", { style: { minWidth: 0 } }, nowPlaying && React.createElement(Resizable, { id: "nowplaying" }, nowPlaying)), React.createElement("div", { style: { minWidth: 0, display: "flex", justifyContent: "flex-end" } }, micBanner && React.createElement(Resizable, { id: "mics" }, micBanner))) : null;
   if (topRow) {
     renderScaled(React.createElement("div", { style: { position: "relative", height: "100%" } }, topRow, singContent));
     return;
@@ -5240,6 +5361,7 @@ async function main() {
     if (visible)
       renderOverlay();
   });
+  window.addEventListener("singify:layout", () => mirrorSettings());
   Spicetify.Player.addEventListener("onprogress", onProgress);
   setInterval(resyncClock, 500);
   Spicetify.Player.addEventListener("onplaypause", onPlayPause);
