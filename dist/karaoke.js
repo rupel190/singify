@@ -1336,7 +1336,7 @@ function Chip(props) {
 // src/hotkeys.ts
 var HOTKEYS = [
   { keys: "K / S", what: "Sessions menu", short: "menu" },
-  { keys: "Q", what: "Sing the current track (1 player, mic on)", short: "sing" },
+  { keys: "Q", what: "Sing (starts 1 player, mic on, until End)", short: "sing" },
   { keys: "M", what: "Mics on / off", short: "mic" },
   { keys: "R", what: "Restart the song", short: "restart" },
   { keys: "Shift+R", what: "Re-search USDB (pick another chart)", short: "re-choose" },
@@ -1344,7 +1344,8 @@ var HOTKEYS = [
   { keys: "Shift+P", what: "Mark “punched in proper” (locks P)", short: "mark punched" },
   { keys: "[ / ]", what: "Lyrics later / earlier (Shift ×10, Ctrl fine)", short: "offset" },
   { keys: "\\", what: "Reset sync", short: "reset sync" },
-  { keys: "Enter", what: "Accept an auto-sync suggestion", short: "accept sync" },
+  { keys: "Backspace", what: "Undo an auto-sync (while it's shown)", short: "undo sync" },
+  { keys: "Enter", what: "Try a corrected sync on a drifting chart (when offered)", short: "corrected sync" },
   { keys: "- / =", what: "Mic sensitivity − / +", short: "sensitivity" },
   { keys: ", / .", what: "Hit-line nudge (visual)", short: "hit-line" },
   { keys: "L", what: "Load a local .txt chart", short: "load file" },
@@ -2155,7 +2156,7 @@ function SessionHud(props) {
     style: { fontSize: px(72), fontWeight: 800 }
   }, "Round ", /* @__PURE__ */ Spicetify.React.createElement("span", {
     style: { color: ACCENT }
-  }, round), "/", target)), /* @__PURE__ */ Spicetify.React.createElement("div", {
+  }, round), Number.isFinite(target) ? `/${target}` : "")), /* @__PURE__ */ Spicetify.React.createElement("div", {
     style: { display: "flex", flexDirection: "column", lineHeight: 1.05 }
   }, /* @__PURE__ */ Spicetify.React.createElement("span", {
     style: {
@@ -2298,7 +2299,7 @@ function RoundEnd(props) {
     zoom: 2
   }, /* @__PURE__ */ Spicetify.React.createElement("div", {
     style: { fontSize: 22, color: "rgba(255,255,255,0.6)", fontWeight: 700 }
-  }, "Round ", roundNumber, " of ", target, " done"), /* @__PURE__ */ Spicetify.React.createElement("div", {
+  }, Number.isFinite(target) ? `Round ${roundNumber} of ${target} done` : `Round ${roundNumber} done`), /* @__PURE__ */ Spicetify.React.createElement("div", {
     style: { fontSize: 30, fontWeight: 800 }
   }, justFinished.title), versus ? /* @__PURE__ */ Spicetify.React.createElement("div", {
     style: {
@@ -3897,8 +3898,8 @@ async function fetchSyncedLyrics(uri) {
 }
 var pendingSync = null;
 var PROMPT_MS = 15000;
-function promptSync(text, apply) {
-  pendingSync = { apply, until: performance.now() + PROMPT_MS };
+function promptSync(text, apply, key = "Enter") {
+  pendingSync = { key, apply, until: performance.now() + PROMPT_MS };
   showReadout(text, PROMPT_MS);
 }
 function fmtSeconds(ms) {
@@ -3924,11 +3925,16 @@ async function runAutoSync(uri, song) {
     const stored = readNum(OFFSET_PREFIX + uri);
     if (stored != null && !syncCurve && Math.abs(suggested - stored) <= 2000)
       return;
-    promptSync(`Auto-sync ${fmtSeconds(suggested)} — Enter to apply`, () => {
-      saveCurve(null);
-      setOffset(suggested);
-      showReadout(`✓ Auto-synced ${fmtSeconds(suggested)} — fine-tune with [ ]`, 2500);
-    });
+    const before = offsetMs;
+    const beforeCurve = syncCurve;
+    saveCurve(null);
+    setOffset(suggested);
+    const was = stored != null ? ` (was ${fmtSeconds(stored)})` : "";
+    promptSync(`✓ Auto-synced ${fmtSeconds(suggested)}${was} — Backspace to undo`, () => {
+      saveCurve(beforeCurve);
+      setOffset(before);
+      showReadout(`↶ Auto-sync undone — back to ${fmtSeconds(before)}`, 2500);
+    }, "Backspace");
   } else if (isMismatch(r)) {
     if (syncCurve) {
       showReadout("⚠ Corrected sync active — this chart may be unreliable", 6000);
@@ -4624,7 +4630,7 @@ function openSing() {
 }
 function startQuickSession() {
   const p1 = soloRoster[0] ?? newSlot(0, "P1");
-  session = createSession(setupRounds, [p1.name]);
+  session = createSession(Infinity, [p1.name]);
   sessionRoster = [{ ...p1 }];
   scoredTrackIds = new Set;
   lastRound = null;
@@ -5167,7 +5173,7 @@ async function main() {
     const typing = target && (target.tagName === "INPUT" || target.tagName === "TEXTAREA" || target.isContentEditable);
     if (typing)
       return;
-    if (e.key === "Enter" && pendingSync) {
+    if (pendingSync && e.key === pendingSync.key) {
       const p = pendingSync;
       pendingSync = null;
       if (performance.now() < p.until) {
