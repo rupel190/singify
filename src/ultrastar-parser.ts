@@ -30,7 +30,7 @@
 
 // ── Types ──────────────────────────────────────────────────────────────────
 
-import { PUNCHED_TAG } from "./punch-header";
+import { PUNCHED_TAG, parsePunchedValue } from "./punch-header";
 export type NoteType = "normal" | "golden" | "freestyle" | "rap" | "golden-rap";
 
 /** Rap notes (R / G) are pitch-agnostic — scored on presence, not pitch. */
@@ -75,9 +75,9 @@ export interface USHeaders {
   end?: number;         // ms to stop at (some files)
   relative: boolean;
   encoding?: string;
-  /** Singify's "punched in proper" mark: the tuned offset, if the file carries one. */
-  punchedOffsetMs?: number;
-  [key: string]: string | number | boolean | undefined;
+  /** Singify's "punched in proper" offsets from the chart file, by Spotify track ID. */
+  punchedOffsets: Record<string, number>;
+  [key: string]: string | number | boolean | Record<string, number> | undefined;
 }
 
 export interface ParsedSong {
@@ -221,9 +221,7 @@ function parseHeaders(lines: string[]): USHeaders {
     end: raw.END ? parseFloat(raw.END.replace(",", ".")) : undefined,
     relative: (raw.RELATIVE ?? "").toLowerCase() === "yes",
     encoding: raw.ENCODING,
-    punchedOffsetMs: Number.isFinite(parseFloat(raw[PUNCHED_TAG] ?? ""))
-      ? parseFloat(raw[PUNCHED_TAG])
-      : undefined,
+    punchedOffsets: parsePunchedValue(raw[PUNCHED_TAG]),
   };
 }
 

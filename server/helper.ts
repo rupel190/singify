@@ -254,7 +254,7 @@ async function startHelper(): Promise<void> {
     async markPunched(trackId, artist, title, offsetMs) {
       const path = localCharts.resolve(artist, title)?.path ?? (await songPath(trackId));
       if (!path) return null;
-      await writeFile(path, setPunchedHeader(await readFile(path, "utf8"), offsetMs), "utf8");
+      await writeFile(path, setPunchedHeader(await readFile(path, "utf8"), trackId, offsetMs), "utf8");
       return path;
     },
   });
