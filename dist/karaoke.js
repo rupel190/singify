@@ -1505,7 +1505,7 @@ var HOTKEYS = [
 // src/home-menu.tsx
 function HomeMenu(props) {
   const React = Spicetify.React;
-  const { track, onQuickSing, onStartSession, onCompetitive, onStats } = props;
+  const { track, onQuickSing, onStartSession, onCompetitive, onStats, onMics, micStatus } = props;
   const card = {
     display: "flex",
     flexDirection: "column",
@@ -1562,14 +1562,30 @@ function HomeMenu(props) {
     style: title
   }, "⚔ Competitive"), /* @__PURE__ */ Spicetify.React.createElement("span", {
     style: sub
-  }, "one mic · same song · take turns · pure skill")), /* @__PURE__ */ Spicetify.React.createElement("button", {
+  }, "one mic · same song · take turns · pure skill")), /* @__PURE__ */ Spicetify.React.createElement("div", {
+    style: { display: "flex", gap: 16, width: "min(640px, 88vw)" }
+  }, /* @__PURE__ */ Spicetify.React.createElement("button", {
+    onClick: onMics,
+    style: { ...card, width: "auto", flex: "1 1 0", minWidth: 0 }
+  }, /* @__PURE__ */ Spicetify.React.createElement("span", {
+    style: title
+  }, "\uD83C\uDF99 Mics"), /* @__PURE__ */ Spicetify.React.createElement("span", {
+    style: {
+      ...sub,
+      color: micStatus.includes("⚠") ? "#ff6b6b" : sub.color,
+      whiteSpace: "nowrap",
+      overflow: "hidden",
+      textOverflow: "ellipsis",
+      maxWidth: "100%"
+    }
+  }, micStatus)), /* @__PURE__ */ Spicetify.React.createElement("button", {
     onClick: onStats,
-    style: card
+    style: { ...card, width: "auto", flex: "1 1 0", minWidth: 0 }
   }, /* @__PURE__ */ Spicetify.React.createElement("span", {
     style: title
   }, "\uD83D\uDCCA Stats"), /* @__PURE__ */ Spicetify.React.createElement("span", {
     style: sub
-  }, "your scores over time · per singer · per mic")), /* @__PURE__ */ Spicetify.React.createElement("div", {
+  }, "scores over time"))), /* @__PURE__ */ Spicetify.React.createElement("div", {
     style: {
       fontSize: 22,
       color: "rgba(255,255,255,0.5)",
@@ -1703,6 +1719,9 @@ function MicMeter(props) {
 }
 
 // src/session-view.tsx
+function micConnected(p, devices) {
+  return !p.deviceId || devices.length === 0 || devices.some((d) => d.deviceId === p.deviceId);
+}
 function stars(n) {
   return "★".repeat(n) + "☆".repeat(Math.max(0, 5 - n));
 }
@@ -1721,14 +1740,8 @@ function SessionSetup(props) {
     onCancel,
     micOn,
     players,
-    onName,
-    onDevice,
-    onGain,
-    onAddPlayer,
-    onRemovePlayer,
     devices,
-    levelFor,
-    onSensitivity
+    onEditMics
   } = props;
   const MAX_PLAYERS = 4;
   const chip = (n) => ({
@@ -1775,120 +1788,43 @@ function SessionSetup(props) {
   }, /* @__PURE__ */ Spicetify.React.createElement("div", {
     style: sectionLabel
   }, "Players", " ", players.length > 1 && /* @__PURE__ */ Spicetify.React.createElement("span", {
-    style: { color: ACCENT }
-  }, "· versus — everyone sings at once")), /* @__PURE__ */ Spicetify.React.createElement("div", {
-    style: { display: "flex", flexDirection: "column", gap: 8 }
-  }, players.map((p, i) => /* @__PURE__ */ Spicetify.React.createElement("div", {
-    key: i,
-    style: {
-      display: "flex",
-      flexDirection: "column",
-      gap: 8,
-      padding: "10px 12px",
-      borderRadius: 10,
-      background: "rgba(255,255,255,0.05)",
-      border: "1px solid rgba(255,255,255,0.1)"
-    }
-  }, /* @__PURE__ */ Spicetify.React.createElement("div", {
-    style: { display: "flex", alignItems: "center", gap: 10 }
-  }, /* @__PURE__ */ Spicetify.React.createElement("span", {
-    style: {
-      color: PLAYER_COLORS[i % PLAYER_COLORS.length],
-      fontWeight: 800,
-      fontSize: 16
-    }
-  }, "●"), /* @__PURE__ */ Spicetify.React.createElement("input", {
-    value: p.name,
-    onChange: (e) => onName(i, e.target.value),
-    maxLength: 16,
-    style: {
-      width: 96,
-      background: "transparent",
-      border: "none",
-      borderBottom: "1px solid rgba(255,255,255,0.15)",
-      color: "#fff",
-      fontSize: 15,
-      fontWeight: 600,
-      outline: "none"
-    }
-  }), /* @__PURE__ */ Spicetify.React.createElement("select", {
-    value: p.deviceId ?? "",
-    onChange: (e) => onDevice(i, e.target.value || undefined),
-    style: {
-      flex: "1 1 auto",
-      minWidth: 0,
-      background: "rgba(0,0,0,0.3)",
-      border: "1px solid rgba(255,255,255,0.12)",
-      borderRadius: 8,
-      color: "#fff",
-      fontSize: 13,
-      padding: "5px 8px"
-    }
-  }, /* @__PURE__ */ Spicetify.React.createElement("option", {
-    value: ""
-  }, "Default mic"), devices.map((d) => /* @__PURE__ */ Spicetify.React.createElement("option", {
-    key: d.deviceId,
-    value: d.deviceId
-  }, d.label))), players.length > 1 && /* @__PURE__ */ Spicetify.React.createElement("button", {
-    onClick: () => onRemovePlayer(i),
-    title: "Remove",
-    style: {
-      border: "none",
-      background: "transparent",
-      color: "rgba(255,255,255,0.5)",
-      cursor: "pointer",
-      fontSize: 18,
-      lineHeight: 1,
-      padding: "0 2px",
-      flexShrink: 0
-    }
-  }, "×")), /* @__PURE__ */ Spicetify.React.createElement("div", {
-    style: { display: "flex", alignItems: "center", gap: 12 }
-  }, /* @__PURE__ */ Spicetify.React.createElement("div", {
-    style: { flex: "1 1 auto", minWidth: 0 }
-  }, /* @__PURE__ */ Spicetify.React.createElement(MicMeter, {
-    getLevel: () => levelFor(i),
-    sensitivity: p.sensitivity,
-    onSensitivity: (n) => onSensitivity(i, n),
-    color: PLAYER_COLORS[i % PLAYER_COLORS.length],
-    height: 14
-  })), /* @__PURE__ */ Spicetify.React.createElement("div", {
-    style: { display: "flex", alignItems: "center", gap: 6, flexShrink: 0 },
-    title: "Input gain — where this mic's level sits on the meter"
-  }, /* @__PURE__ */ Spicetify.React.createElement("span", {
-    style: { fontSize: 12, color: "rgba(255,255,255,0.4)" }
-  }, "gain"), /* @__PURE__ */ Spicetify.React.createElement("input", {
-    type: "range",
-    min: 25,
-    max: 300,
-    value: Math.round(p.gain * 100),
-    onChange: (e) => onGain(i, Number(e.target.value) / 100),
-    style: { width: 84 }
-  }), /* @__PURE__ */ Spicetify.React.createElement("span", {
-    style: {
-      fontSize: 12,
-      color: "rgba(255,255,255,0.55)",
-      width: 36,
-      textAlign: "right",
-      fontVariantNumeric: "tabular-nums"
-    }
-  }, Math.round(p.gain * 100), "%"))))), /* @__PURE__ */ Spicetify.React.createElement("div", {
-    style: { display: "flex", alignItems: "center", gap: 10 }
-  }, players.length < MAX_PLAYERS && /* @__PURE__ */ Spicetify.React.createElement("button", {
-    onClick: onAddPlayer,
-    style: {
-      padding: "8px 12px",
-      borderRadius: 10,
-      border: "1px dashed rgba(255,255,255,0.2)",
-      background: "transparent",
-      color: "rgba(255,255,255,0.7)",
-      cursor: "pointer",
-      fontSize: 14,
-      fontWeight: 700
-    }
-  }, "+ Add singer"), devices.length === 0 && /* @__PURE__ */ Spicetify.React.createElement("span", {
-    style: { fontSize: 12, color: "rgba(255,255,255,0.4)" }
-  }, "Grant mic access to see device names.")))), /* @__PURE__ */ Spicetify.React.createElement("div", {
+    style: { color: ACCENT },
+    title: "Everyone sings at once, each on their own mic"
+  }, "· versus")), /* @__PURE__ */ Spicetify.React.createElement("div", {
+    style: { display: "flex", flexDirection: "column", gap: 6 }
+  }, players.map((p, i) => {
+    const ok = micConnected(p, devices);
+    const dev = p.deviceId ? devices.find((d) => d.deviceId === p.deviceId)?.label ?? p.deviceLabel ?? "Saved mic" : "Default mic";
+    return /* @__PURE__ */ Spicetify.React.createElement("div", {
+      key: i,
+      style: {
+        display: "flex",
+        alignItems: "center",
+        gap: 10,
+        padding: "8px 12px",
+        borderRadius: 10,
+        background: "rgba(255,255,255,0.05)",
+        border: `1px solid ${ok ? "rgba(255,255,255,0.1)" : "#ff6b6b"}`,
+        fontSize: 15
+      }
+    }, /* @__PURE__ */ Spicetify.React.createElement("span", {
+      style: { color: PLAYER_COLORS[i % PLAYER_COLORS.length], fontWeight: 800 }
+    }, "●"), /* @__PURE__ */ Spicetify.React.createElement("span", {
+      style: { fontWeight: 700 }
+    }, p.name), /* @__PURE__ */ Spicetify.React.createElement("span", {
+      style: {
+        marginLeft: "auto",
+        fontSize: 13,
+        color: ok ? "rgba(255,255,255,0.55)" : "#ff6b6b",
+        whiteSpace: "nowrap",
+        overflow: "hidden",
+        textOverflow: "ellipsis"
+      }
+    }, ok ? dev : `⚠ ${dev} — not connected`));
+  })), /* @__PURE__ */ Spicetify.React.createElement("button", {
+    onClick: onEditMics,
+    style: { ...ghostBtn(), alignSelf: "flex-start", fontSize: 15, padding: "8px 16px" }
+  }, "\uD83C\uDF99 Edit mics")), /* @__PURE__ */ Spicetify.React.createElement("div", {
     style: { gridArea: "lists", display: "flex", flexDirection: "column", gap: 12, minWidth: 0 }
   }, current && /* @__PURE__ */ Spicetify.React.createElement("button", {
     onClick: () => onStartPlaylist(current),
@@ -1991,6 +1927,148 @@ function SessionSetup(props) {
     style: { ...primaryBtn(), marginLeft: "auto", whiteSpace: "nowrap" },
     onClick: onStart
   }, "▶ Best of ", rounds)))));
+}
+function MicSetup(props) {
+  const React = Spicetify.React;
+  const { players, devices, levelFor, onName, onDevice, onGain, onSensitivity, onAddPlayer, onRemovePlayer } = props;
+  const MAX_PLAYERS = 4;
+  const sectionLabel = {
+    alignSelf: "flex-start",
+    fontSize: 13,
+    fontWeight: 700,
+    letterSpacing: 1,
+    textTransform: "uppercase",
+    color: "rgba(255,255,255,0.45)"
+  };
+  const missing = players.filter((p) => !micConnected(p, devices)).length;
+  return /* @__PURE__ */ Spicetify.React.createElement(Center, {
+    zoom: 1.5
+  }, /* @__PURE__ */ Spicetify.React.createElement("div", {
+    style: { fontSize: 34, fontWeight: 800 }
+  }, "\uD83C\uDF99 Mics"), /* @__PURE__ */ Spicetify.React.createElement("div", {
+    style: { fontSize: 15, color: missing ? "#ff6b6b" : "rgba(255,255,255,0.55)", fontWeight: 600 }
+  }, missing ? `${missing} mic${missing > 1 ? "s" : ""} not connected — using the default mic until ${missing > 1 ? "they're" : "it's"} back` : "Saved for every session — set it once"), /* @__PURE__ */ Spicetify.React.createElement("div", {
+    style: { display: "flex", flexDirection: "column", gap: 12, width: "min(640px, 100%)", marginTop: 10 }
+  }, /* @__PURE__ */ Spicetify.React.createElement("div", {
+    style: sectionLabel
+  }, "Players", " ", players.length > 1 && /* @__PURE__ */ Spicetify.React.createElement("span", {
+    style: { color: ACCENT }
+  }, "· versus — everyone sings at once")), /* @__PURE__ */ Spicetify.React.createElement("div", {
+    style: { display: "flex", flexDirection: "column", gap: 8 }
+  }, players.map((p, i) => /* @__PURE__ */ Spicetify.React.createElement("div", {
+    key: i,
+    style: {
+      display: "flex",
+      flexDirection: "column",
+      gap: 8,
+      padding: "10px 12px",
+      borderRadius: 10,
+      background: "rgba(255,255,255,0.05)",
+      border: `1px solid ${micConnected(p, devices) ? "rgba(255,255,255,0.1)" : "#ff6b6b"}`
+    }
+  }, /* @__PURE__ */ Spicetify.React.createElement("div", {
+    style: { display: "flex", alignItems: "center", gap: 10 }
+  }, /* @__PURE__ */ Spicetify.React.createElement("span", {
+    style: {
+      color: PLAYER_COLORS[i % PLAYER_COLORS.length],
+      fontWeight: 800,
+      fontSize: 16
+    }
+  }, "●"), /* @__PURE__ */ Spicetify.React.createElement("input", {
+    value: p.name,
+    onChange: (e) => onName(i, e.target.value),
+    maxLength: 16,
+    style: {
+      width: 96,
+      background: "transparent",
+      border: "none",
+      borderBottom: "1px solid rgba(255,255,255,0.15)",
+      color: "#fff",
+      fontSize: 15,
+      fontWeight: 600,
+      outline: "none"
+    }
+  }), /* @__PURE__ */ Spicetify.React.createElement("select", {
+    value: p.deviceId ?? "",
+    title: micConnected(p, devices) ? undefined : "This mic isn't connected — the default mic is used until it's back",
+    onChange: (e) => onDevice(i, e.target.value || undefined),
+    style: {
+      flex: "1 1 auto",
+      minWidth: 0,
+      background: "rgba(0,0,0,0.3)",
+      border: `1px solid ${micConnected(p, devices) ? "rgba(255,255,255,0.12)" : "#ff6b6b"}`,
+      borderRadius: 8,
+      color: "#fff",
+      fontSize: 13,
+      padding: "5px 8px"
+    }
+  }, /* @__PURE__ */ Spicetify.React.createElement("option", {
+    value: ""
+  }, "Default mic"), !micConnected(p, devices) && p.deviceId && /* @__PURE__ */ Spicetify.React.createElement("option", {
+    value: p.deviceId
+  }, "⚠ ", p.deviceLabel ?? "Saved mic", " — not connected"), devices.map((d) => /* @__PURE__ */ Spicetify.React.createElement("option", {
+    key: d.deviceId,
+    value: d.deviceId
+  }, d.label))), players.length > 1 && /* @__PURE__ */ Spicetify.React.createElement("button", {
+    onClick: () => onRemovePlayer(i),
+    title: "Remove",
+    style: {
+      border: "none",
+      background: "transparent",
+      color: "rgba(255,255,255,0.5)",
+      cursor: "pointer",
+      fontSize: 18,
+      lineHeight: 1,
+      padding: "0 2px",
+      flexShrink: 0
+    }
+  }, "×")), /* @__PURE__ */ Spicetify.React.createElement("div", {
+    style: { display: "flex", alignItems: "center", gap: 12 }
+  }, /* @__PURE__ */ Spicetify.React.createElement("div", {
+    style: { flex: "1 1 auto", minWidth: 0 }
+  }, /* @__PURE__ */ Spicetify.React.createElement(MicMeter, {
+    getLevel: () => levelFor(i),
+    sensitivity: p.sensitivity,
+    onSensitivity: (n) => onSensitivity(i, n),
+    color: PLAYER_COLORS[i % PLAYER_COLORS.length],
+    height: 14
+  })), /* @__PURE__ */ Spicetify.React.createElement("div", {
+    style: { display: "flex", alignItems: "center", gap: 6, flexShrink: 0 },
+    title: "Input gain — where this mic's level sits on the meter"
+  }, /* @__PURE__ */ Spicetify.React.createElement("span", {
+    style: { fontSize: 12, color: "rgba(255,255,255,0.4)" }
+  }, "gain"), /* @__PURE__ */ Spicetify.React.createElement("input", {
+    type: "range",
+    min: 25,
+    max: 300,
+    value: Math.round(p.gain * 100),
+    onChange: (e) => onGain(i, Number(e.target.value) / 100),
+    style: { width: 84 }
+  }), /* @__PURE__ */ Spicetify.React.createElement("span", {
+    style: {
+      fontSize: 12,
+      color: "rgba(255,255,255,0.55)",
+      width: 36,
+      textAlign: "right",
+      fontVariantNumeric: "tabular-nums"
+    }
+  }, Math.round(p.gain * 100), "%"))))), /* @__PURE__ */ Spicetify.React.createElement("div", {
+    style: { display: "flex", alignItems: "center", gap: 10 }
+  }, players.length < MAX_PLAYERS && /* @__PURE__ */ Spicetify.React.createElement("button", {
+    onClick: onAddPlayer,
+    style: {
+      padding: "8px 12px",
+      borderRadius: 10,
+      border: "1px dashed rgba(255,255,255,0.2)",
+      background: "transparent",
+      color: "rgba(255,255,255,0.7)",
+      cursor: "pointer",
+      fontSize: 14,
+      fontWeight: 700
+    }
+  }, "+ Add singer"), devices.length === 0 && /* @__PURE__ */ Spicetify.React.createElement("span", {
+    style: { fontSize: 12, color: "rgba(255,255,255,0.4)" }
+  }, "Grant mic access to see device names.")))));
 }
 function PlaceholderRow(props) {
   return /* @__PURE__ */ Spicetify.React.createElement("div", {
@@ -4263,6 +4341,8 @@ function patchSlot(i, patch) {
   const updated = roster.map((p, j) => j === i ? next : p);
   setActiveRoster(updated);
   saveMicSlots(updated);
+  if (!competitiveMode && setupRoster[i])
+    setupRoster = setupRoster.map((p, j) => j === i ? { ...p, ...patch } : p);
   return next;
 }
 function setPlayerGain(i, gain) {
@@ -4420,6 +4500,13 @@ function loadMicSlots() {
     return [];
   }
 }
+function saveRoster(roster) {
+  try {
+    localStorage.setItem(MIC_SLOTS_KEY, "[]");
+  } catch {}
+  saveMicSlots(roster);
+  soloRoster = [{ ...roster[0] }];
+}
 function saveMicSlots(roster) {
   const merged = loadMicSlots();
   roster.forEach((p, i) => {
@@ -4430,7 +4517,8 @@ function saveMicSlots(roster) {
       sensitivity: p.sensitivity,
       monitor: p.monitor,
       monitorGain: p.monitorGain,
-      outputDeviceId: p.outputDeviceId
+      outputDeviceId: p.outputDeviceId,
+      deviceLabel: p.deviceLabel
     };
   });
   try {
@@ -4513,7 +4601,8 @@ function newSlot(i, name) {
     sensitivity: typeof saved?.sensitivity === "number" ? saved.sensitivity : defaultSensitivityFor(i),
     monitor: !!saved?.monitor,
     monitorGain: typeof saved?.monitorGain === "number" ? saved.monitorGain : 0.05,
-    outputDeviceId: saved?.outputDeviceId
+    outputDeviceId: saved?.outputDeviceId,
+    deviceLabel: saved?.deviceLabel
   };
 }
 function migratePlayerNames() {
@@ -4533,9 +4622,13 @@ function migratePlayerNames() {
   mirrorSettings();
 }
 migratePlayerNames();
-var setupRoster = [newSlot(0, "P1"), newSlot(1, "P2")];
+function loadRoster() {
+  const n = Math.max(1, Math.min(4, loadMicSlots().length));
+  return Array.from({ length: n }, (_, i) => newSlot(i, `P${i + 1}`));
+}
+var setupRoster = loadRoster();
 var sessionRoster = [newSlot(0, "P1")];
-var soloRoster = [newSlot(0, "P1")];
+var soloRoster = [{ ...setupRoster[0] }];
 var audioInputs = [];
 var audioOutputs = [];
 var monitorRoutingSupported = outputRoutingSupported();
@@ -4699,7 +4792,9 @@ function renderOverlay() {
       },
       onStartSession: openSessionSetup,
       onCompetitive: openCompetitive,
-      onStats: openStats
+      onStats: openStats,
+      onMics: () => openMicSetup("home"),
+      micStatus: micStatusLine()
     }))), () => {
       if (session) {
         activeScreen = "sing";
@@ -4758,6 +4853,61 @@ function renderOverlay() {
     });
     return;
   }
+  if (activeScreen === "mic-setup") {
+    const update = (i, patch) => {
+      setupRoster = setupRoster.map((p, j) => j === i ? { ...p, ...patch } : p);
+      saveRoster(setupRoster);
+    };
+    renderScaled(React.createElement(MicSetup, {
+      players: setupRoster,
+      devices: audioInputs,
+      levelFor: previewLevel,
+      onName: (i, name) => {
+        update(i, { name });
+        renderOverlay();
+      },
+      onDevice: (i, deviceId) => {
+        const deviceLabel = audioInputs.find((d) => d.deviceId === deviceId)?.label;
+        update(i, { deviceId, deviceLabel });
+        startPreviewMic(i);
+        renderOverlay();
+      },
+      onGain: (i, gain) => {
+        update(i, { gain });
+        previewMics[i]?.setGain(gain);
+        renderOverlay();
+      },
+      onSensitivity: (i, n) => {
+        update(i, { sensitivity: n });
+        previewMics[i]?.setOptions({ rmsThreshold: sensitivityToThreshold(n) });
+        renderOverlay();
+      },
+      onAddPlayer: () => {
+        if (setupRoster.length >= 4)
+          return;
+        setupRoster = [...setupRoster, newSlot(setupRoster.length, `P${setupRoster.length + 1}`)];
+        saveRoster(setupRoster);
+        startPreviewMic(setupRoster.length - 1);
+        renderOverlay();
+      },
+      onRemovePlayer: (i) => {
+        if (setupRoster.length <= 1)
+          return;
+        previewMics[i]?.stop();
+        previewMics = previewMics.filter((_, j) => j !== i);
+        setupRoster = setupRoster.filter((_, j) => j !== i);
+        saveRoster(setupRoster);
+        renderOverlay();
+      }
+    }), () => {
+      stopPreviews();
+      activeScreen = micBackTo;
+      if (activeScreen === "session-setup")
+        loadDevices();
+      renderOverlay();
+    });
+    return;
+  }
   if (activeScreen === "session-setup") {
     renderScaled(React.createElement(SessionSetup, {
       playlists,
@@ -4772,50 +4922,8 @@ function renderOverlay() {
       difficulty,
       onDifficulty: setDifficulty,
       players: setupRoster,
-      onName: (i, name) => {
-        setupRoster = setupRoster.map((p, j) => j === i ? { ...p, name } : p);
-        saveMicSlots(setupRoster);
-        renderOverlay();
-      },
-      onDevice: (i, deviceId) => {
-        setupRoster = setupRoster.map((p, j) => j === i ? { ...p, deviceId } : p);
-        saveMicSlots(setupRoster);
-        startPreviewMic(i);
-        renderOverlay();
-      },
-      onGain: (i, gain) => {
-        setupRoster = setupRoster.map((p, j) => j === i ? { ...p, gain } : p);
-        saveMicSlots(setupRoster);
-        previewMics[i]?.setGain(gain);
-        renderOverlay();
-      },
-      onAddPlayer: () => {
-        if (setupRoster.length >= 4)
-          return;
-        setupRoster = [
-          ...setupRoster,
-          newSlot(setupRoster.length, `P${setupRoster.length + 1}`)
-        ];
-        saveMicSlots(setupRoster);
-        startPreviewMic(setupRoster.length - 1);
-        renderOverlay();
-      },
-      onRemovePlayer: (i) => {
-        if (setupRoster.length <= 1)
-          return;
-        previewMics[i]?.stop();
-        previewMics = previewMics.filter((_, j) => j !== i);
-        setupRoster = setupRoster.filter((_, j) => j !== i);
-        renderOverlay();
-      },
       devices: audioInputs,
-      levelFor: previewLevel,
-      onSensitivity: (i, n) => {
-        setupRoster = setupRoster.map((q, j) => j === i ? { ...q, sensitivity: n } : q);
-        previewMics[i]?.setOptions({ rmsThreshold: sensitivityToThreshold(n) });
-        saveMicSlots(setupRoster);
-        renderOverlay();
-      },
+      onEditMics: () => openMicSetup("session-setup"),
       onStart: startSession,
       micOn: micsActive()
     }), () => {
@@ -4958,7 +5066,7 @@ function openSing() {
   setVisible(true);
 }
 function startQuickSession() {
-  const p1 = soloRoster[0] ?? newSlot(0, "P1");
+  const p1 = setupRoster[0] ?? newSlot(0, "P1");
   session = createSession(Infinity, [p1.name]);
   sessionRoster = [{ ...p1 }];
   scoredTrackIds = new Set;
@@ -4998,7 +5106,24 @@ function openSessionSetup() {
   loadPlaylists();
   loadDevices();
 }
+var micBackTo = "home";
+function openMicSetup(from) {
+  micBackTo = from;
+  activeScreen = "mic-setup";
+  renderOverlay();
+  loadDevices();
+}
+function micStatusLine() {
+  const names = setupRoster.map((p) => p.name).join(" · ");
+  const missing = setupRoster.filter((p) => !micConnected(p, audioInputs)).length;
+  return missing ? `${names} — ⚠ ${missing} not connected` : names;
+}
 function openCompetitive() {
+  if (competitors.every((n, i) => n === `P${i + 1}`) && setupRoster.length > 1) {
+    competitors = setupRoster.map((p) => p.name);
+  }
+  if (competitiveDevice === undefined)
+    competitiveDevice = setupRoster[0]?.deviceId;
   activeScreen = "competitive-setup";
   renderOverlay();
   loadDevices();
@@ -5043,10 +5168,22 @@ async function loadDevices() {
   }
   audioInputs = await enumerateInputs();
   audioOutputs = await enumerateOutputs();
-  if (activeScreen === "session-setup") {
-    renderOverlay();
+  let refound = false;
+  setupRoster = setupRoster.map((p) => {
+    if (!p.deviceId || !p.deviceLabel || audioInputs.some((d) => d.deviceId === p.deviceId))
+      return p;
+    const byName = audioInputs.find((d) => d.label === p.deviceLabel);
+    if (!byName)
+      return p;
+    refound = true;
+    return { ...p, deviceId: byName.deviceId };
+  });
+  if (refound)
+    saveRoster(setupRoster);
+  if (activeScreen === "mic-setup")
     startPreviews();
-  }
+  if (activeScreen === "mic-setup" || activeScreen === "session-setup" || activeScreen === "home")
+    renderOverlay();
 }
 async function startPreviewMic(i) {
   const p = setupRoster[i];
@@ -5063,7 +5200,7 @@ async function startPreviewMic(i) {
     console.error(`[singify] preview mic for ${p.name} failed:`, err);
     previewMics[i] = null;
   }
-  if (activeScreen === "session-setup")
+  if (activeScreen === "mic-setup")
     renderOverlay();
 }
 async function startPreviews() {
