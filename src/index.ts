@@ -23,6 +23,8 @@ import { SongPicker } from "./song-picker";
 import { HomeMenu } from "./home-menu";
 import {
   SessionSetup,
+  MicSetup,
+  micConnected,
   CompetitiveSetup,
   SessionHud,
   MicOverlay,
@@ -724,6 +726,8 @@ function patchSlot(i: number, patch: Partial<PlayerSlot>): PlayerSlot | null {
   const updated = roster.map((p, j) => (j === i ? next : p));
   setActiveRoster(updated);
   saveMicSlots(updated); // in-game tweaks stick for next time
+  // Keep the master roster in step (competitive's lone mic is its own thing).
+  if (!competitiveMode && setupRoster[i]) setupRoster = setupRoster.map((p, j) => (j === i ? { ...p, ...patch } : p));
   return next;
 }
 
@@ -926,6 +930,17 @@ function loadMicSlots(): Partial<PlayerSlot>[] {
   }
 }
 
+/** The Mics screen's save: the roster IS the saved list (removing a player removes them). */
+function saveRoster(roster: PlayerSlot[]): void {
+  try {
+    localStorage.setItem(MIC_SLOTS_KEY, "[]");
+  } catch {
+    /* storage blocked */
+  }
+  saveMicSlots(roster);
+  soloRoster = [{ ...roster[0] }];
+}
+
 /** Write a roster's slots back, leaving any saved slots beyond it untouched. */
 function saveMicSlots(roster: PlayerSlot[]): void {
   const merged = loadMicSlots();
@@ -938,6 +953,7 @@ function saveMicSlots(roster: PlayerSlot[]): void {
       monitor: p.monitor,
       monitorGain: p.monitorGain,
       outputDeviceId: p.outputDeviceId,
+      deviceLabel: p.deviceLabel,
     };
   });
   try {
@@ -1027,6 +1043,7 @@ type Screen =
   | "sing"
   | "session-setup"
   | "competitive-setup"
+  | "mic-setup"
   | "round-end"
   | "session-result"
   | "stats";
@@ -1060,6 +1077,7 @@ function newSlot(i: number, name: string): PlayerSlot {
     monitor: !!saved?.monitor,
     monitorGain: typeof saved?.monitorGain === "number" ? saved.monitorGain : 0.05,
     outputDeviceId: saved?.outputDeviceId,
+    deviceLabel: saved?.deviceLabel,
   };
 }
 
@@ -1086,15 +1104,20 @@ function migratePlayerNames(): void {
 }
 migratePlayerNames();
 
-// Versus roster chosen on the setup screen: each player + their mic device + gain.
-// Defaults to TWO players — a session is usually versus; solo can remove one.
-let setupRoster: PlayerSlot[] = [newSlot(0, "P1"), newSlot(1, "P2")];
+// THE mic roster — every saved player slot, edited on the Mics screen and used
+// by every mode: Quick Sing = player 1, sessions = everyone, competitive = the
+// names on player 1's mic. Survives restarts via settings.json.
+function loadRoster(): PlayerSlot[] {
+  const n = Math.max(1, Math.min(4, loadMicSlots().length));
+  return Array.from({ length: n }, (_, i) => newSlot(i, `P${i + 1}`));
+}
+let setupRoster: PlayerSlot[] = loadRoster();
 // Snapshot of the roster taken when a session starts (the setup screen can keep
 // changing after). Solo/Quick-Sing uses a lone default-device "P1".
 let sessionRoster: PlayerSlot[] = [newSlot(0, "P1")];
 // Solo / Quick-Sing has a roster too, so its single mic gets the same live
 // controls (gate, gain, device) the versus banner gives every player.
-let soloRoster: PlayerSlot[] = [newSlot(0, "P1")];
+let soloRoster: PlayerSlot[] = [{ ...setupRoster[0] }];
 // Audio input devices for the setup mic picker (populated when it opens).
 let audioInputs: AudioInput[] = [];
 // Output devices for the per-player monitor picker, and whether this engine can
@@ -1359,6 +1382,8 @@ function renderOverlay(): void {
         onStartSession: openSessionSetup,
         onCompetitive: openCompetitive,
         onStats: openStats,
+        onMics: () => openMicSetup("home"),
+        micStatus: micStatusLine(),
       })
       )
       ),
@@ -1432,6 +1457,63 @@ function renderOverlay(): void {
     return;
   }
 
+  if (activeScreen === "mic-setup") {
+    const update = (i: number, patch: Partial<PlayerSlot>) => {
+      setupRoster = setupRoster.map((p, j) => (j === i ? { ...p, ...patch } : p));
+      saveRoster(setupRoster);
+    };
+    renderScaled(
+      React.createElement(MicSetup, {
+        players: setupRoster,
+        devices: audioInputs,
+        levelFor: previewLevel,
+        onName: (i: number, name: string) => {
+          update(i, { name });
+          renderOverlay();
+        },
+        onDevice: (i: number, deviceId: string | undefined) => {
+          // Remember the NAME too, so the mic is found again if its ID changes.
+          const deviceLabel = audioInputs.find((d) => d.deviceId === deviceId)?.label;
+          update(i, { deviceId, deviceLabel });
+          void startPreviewMic(i); // rebind this slot's preview to the new device
+          renderOverlay();
+        },
+        onGain: (i: number, gain: number) => {
+          update(i, { gain });
+          previewMics[i]?.setGain(gain); // live — no restart
+          renderOverlay();
+        },
+        onSensitivity: (i: number, n: number) => {
+          update(i, { sensitivity: n });
+          previewMics[i]?.setOptions({ rmsThreshold: sensitivityToThreshold(n) });
+          renderOverlay();
+        },
+        onAddPlayer: () => {
+          if (setupRoster.length >= 4) return;
+          setupRoster = [...setupRoster, newSlot(setupRoster.length, `P${setupRoster.length + 1}`)];
+          saveRoster(setupRoster);
+          void startPreviewMic(setupRoster.length - 1);
+          renderOverlay();
+        },
+        onRemovePlayer: (i: number) => {
+          if (setupRoster.length <= 1) return;
+          previewMics[i]?.stop();
+          previewMics = previewMics.filter((_, j) => j !== i);
+          setupRoster = setupRoster.filter((_, j) => j !== i);
+          saveRoster(setupRoster);
+          renderOverlay();
+        },
+      }),
+      () => {
+        stopPreviews();
+        activeScreen = micBackTo;
+        if (activeScreen === "session-setup") void loadDevices();
+        renderOverlay();
+      }
+    );
+    return;
+  }
+
   if (activeScreen === "session-setup") {
     renderScaled(
       React.createElement(SessionSetup, {
@@ -1447,48 +1529,8 @@ function renderOverlay(): void {
         difficulty,
         onDifficulty: setDifficulty,
         players: setupRoster,
-        onName: (i: number, name: string) => {
-          setupRoster = setupRoster.map((p, j) => (j === i ? { ...p, name } : p));
-          saveMicSlots(setupRoster);
-          renderOverlay();
-        },
-        onDevice: (i: number, deviceId: string | undefined) => {
-          setupRoster = setupRoster.map((p, j) => (j === i ? { ...p, deviceId } : p));
-          saveMicSlots(setupRoster);
-          void startPreviewMic(i); // rebind this slot's preview to the new device
-          renderOverlay();
-        },
-        onGain: (i: number, gain: number) => {
-          setupRoster = setupRoster.map((p, j) => (j === i ? { ...p, gain } : p));
-          saveMicSlots(setupRoster);
-          previewMics[i]?.setGain(gain); // live — no restart
-          renderOverlay();
-        },
-        onAddPlayer: () => {
-          if (setupRoster.length >= 4) return;
-          setupRoster = [
-            ...setupRoster,
-            newSlot(setupRoster.length, `P${setupRoster.length + 1}`),
-          ];
-          saveMicSlots(setupRoster);
-          void startPreviewMic(setupRoster.length - 1);
-          renderOverlay();
-        },
-        onRemovePlayer: (i: number) => {
-          if (setupRoster.length <= 1) return;
-          previewMics[i]?.stop();
-          previewMics = previewMics.filter((_, j) => j !== i);
-          setupRoster = setupRoster.filter((_, j) => j !== i);
-          renderOverlay();
-        },
         devices: audioInputs,
-        levelFor: previewLevel,
-        onSensitivity: (i: number, n: number) => {
-          setupRoster = setupRoster.map((q, j) => (j === i ? { ...q, sensitivity: n } : q));
-          previewMics[i]?.setOptions({ rmsThreshold: sensitivityToThreshold(n) });
-          saveMicSlots(setupRoster);
-          renderOverlay();
-        },
+        onEditMics: () => openMicSetup("session-setup"),
         onStart: startSession,
         micOn: micsActive(),
       }),
@@ -1735,7 +1777,7 @@ function openSing(): void {
  * it runs until End, which shows the results.
  */
 function startQuickSession(): void {
-  const p1 = soloRoster[0] ?? newSlot(0, "P1");
+  const p1 = setupRoster[0] ?? newSlot(0, "P1");
   session = createSession(Infinity, [p1.name]);
   sessionRoster = [{ ...p1 }];
   scoredTrackIds = new Set();
@@ -1791,8 +1833,30 @@ function openSessionSetup(): void {
   void loadDevices();
 }
 
+let micBackTo: Screen = "home";
+
+/** The Mics screen; Back returns to wherever it was opened from. */
+function openMicSetup(from: Screen): void {
+  micBackTo = from;
+  activeScreen = "mic-setup";
+  renderOverlay();
+  void loadDevices();
+}
+
+/** One line for the menu card: who sings on what, and whether anything's unplugged. */
+function micStatusLine(): string {
+  const names = setupRoster.map((p) => p.name).join(" · ");
+  const missing = setupRoster.filter((p) => !micConnected(p, audioInputs)).length;
+  return missing ? `${names} — ⚠ ${missing} not connected` : names;
+}
+
 /** Open the competitive lobby (one mic, same song, take turns). */
 function openCompetitive(): void {
+  // Default the singers and the shared mic from the roster, so a duel needs no setup.
+  if (competitors.every((n, i) => n === `P${i + 1}`) && setupRoster.length > 1) {
+    competitors = setupRoster.map((p) => p.name);
+  }
+  if (competitiveDevice === undefined) competitiveDevice = setupRoster[0]?.deviceId;
   activeScreen = "competitive-setup";
   renderOverlay();
   void loadDevices();
@@ -1844,10 +1908,19 @@ async function loadDevices(): Promise<void> {
   }
   audioInputs = await enumerateInputs();
   audioOutputs = await enumerateOutputs();
-  if (activeScreen === "session-setup") {
-    renderOverlay();
-    void startPreviews(); // live meters need a running mic per slot
-  }
+  // A saved mic whose ID changed (profile reset, re-plug on some systems) is
+  // found again by its name — and the new ID saved.
+  let refound = false;
+  setupRoster = setupRoster.map((p) => {
+    if (!p.deviceId || !p.deviceLabel || audioInputs.some((d) => d.deviceId === p.deviceId)) return p;
+    const byName = audioInputs.find((d) => d.label === p.deviceLabel);
+    if (!byName) return p;
+    refound = true;
+    return { ...p, deviceId: byName.deviceId };
+  });
+  if (refound) saveRoster(setupRoster);
+  if (activeScreen === "mic-setup") void startPreviews(); // live meters need a running mic per slot
+  if (activeScreen === "mic-setup" || activeScreen === "session-setup" || activeScreen === "home") renderOverlay();
 }
 
 // ── Setup-screen mic previews ────────────────────────────────────────────────
@@ -1869,7 +1942,7 @@ async function startPreviewMic(i: number): Promise<void> {
     console.error(`[singify] preview mic for ${p.name} failed:`, err);
     previewMics[i] = null;
   }
-  if (activeScreen === "session-setup") renderOverlay();
+  if (activeScreen === "mic-setup") renderOverlay();
 }
 
 /** Start a preview mic for every roster slot. */

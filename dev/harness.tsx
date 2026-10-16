@@ -26,6 +26,7 @@ import {
 import { SongPicker } from "../src/song-picker";
 import {
   SessionSetup,
+  MicSetup,
   SessionHud,
   MicOverlay,
   NowPlaying,
@@ -326,7 +327,7 @@ function App() {
   // ?screen=session|picker opens straight to that surface (for dev + screenshots).
   const screenParam = params.get("screen");
   const initialMode =
-    screenParam === "session" || screenParam === "nochart" || screenParam === "result"
+    screenParam === "session" || screenParam === "mics" || screenParam === "nochart" || screenParam === "result"
       ? "session"
       : screenParam === "picker"
         ? "picker"
@@ -348,7 +349,9 @@ function App() {
   const [setupRounds, setSetupRounds] = React.useState(5);
   const [difficulty, setDifficulty] = React.useState<Difficulty>("easy");
   const [setupRoster, setSetupRoster] = React.useState<PlayerSlot[]>([
-    { name: "P1", gain: 1, sensitivity: 70 },
+    { name: "P1", gain: 1, sensitivity: 70, deviceId: "usb", deviceLabel: "USB Podcast Mic" },
+    // An unplugged mic, to show the red "not connected" state.
+    { name: "P2", gain: 1, sensitivity: 70, deviceId: "gone", deviceLabel: "SingStar USB Mic" },
   ]);
   // Fullscreen in-game overlay (SessionHud + KaraokeView) — the exact Spotify
   // stage, so its layout can be tuned in-browser. ?screen=ingame opens straight in.
@@ -368,8 +371,10 @@ function App() {
     return summarize(s);
   }, []);
   // Toggle the session demo between setup, the no-chart card, and the result screen.
-  const [sessionScreen, setSessionScreen] = React.useState<"setup" | "nochart" | "result">(
-    params.get("screen") === "nochart"
+  const [sessionScreen, setSessionScreen] = React.useState<"setup" | "mics" | "nochart" | "result">(
+    params.get("screen") === "mics"
+      ? "mics"
+      : params.get("screen") === "nochart"
       ? "nochart"
       : params.get("screen") === "result"
         ? "result"
@@ -907,7 +912,7 @@ function App() {
             </div>
           )}
           <div style={{ marginBottom: 10, display: "flex", gap: 8 }}>
-            {(["setup", "nochart", "result"] as const).map((sc) => (
+            {(["setup", "mics", "nochart", "result"] as const).map((sc) => (
               <button
                 key={sc}
                 style={{
@@ -917,7 +922,7 @@ function App() {
                 }}
                 onClick={() => setSessionScreen(sc)}
               >
-                {sc === "setup" ? "Setup" : sc === "nochart" ? "No-chart" : "Result (2P)"}
+                {sc === "setup" ? "Setup" : sc === "mics" ? "Mics" : sc === "nochart" ? "No-chart" : "Result (2P)"}
               </button>
             ))}
             {sessionScreen === "setup" && (
@@ -943,24 +948,8 @@ function App() {
                 onSkip={() => setSessionMsg("⏭ Would skip to the next playlist track")}
                 onReChoose={() => setSessionMsg("🔎 Would re-search USDB for this track")}
               />
-            ) : sessionScreen === "result" ? (
-              <SessionResultScreen
-                summary={demoSummary}
-                onDone={() => setSessionMsg("✓ Done")}
-                onSave={() => setSessionMsg("💾 Would save as a Spotify playlist")}
-              />
-            ) : (
-              <SessionSetup
-                playlists={MOCK_PLAYLISTS}
-                loadingPlaylists={plLoading}
-                current={{ uri: "spotify:playlist:now", name: "Road Trip 2026", count: null }}
-                onStartPlaylist={(p) =>
-                  setSessionMsg(`▶ Would start session from “${p.name}” (${p.count ?? "?"} songs)`)
-                }
-                rounds={setupRounds}
-                onRounds={setSetupRounds}
-                difficulty={difficulty}
-                onDifficulty={setDifficulty}
+            ) : sessionScreen === "mics" ? (
+              <MicSetup
                 players={setupRoster}
                 onName={(i, name) =>
                   setSetupRoster((r) => r.map((p, j) => (j === i ? { ...p, name } : p)))
@@ -986,6 +975,28 @@ function App() {
                 onSensitivity={(i, n) =>
                   setSetupRoster((r) => r.map((q, j) => (j === i ? { ...q, sensitivity: n } : q)))
                 }
+              />
+            ) : sessionScreen === "result" ? (
+              <SessionResultScreen
+                summary={demoSummary}
+                onDone={() => setSessionMsg("✓ Done")}
+                onSave={() => setSessionMsg("💾 Would save as a Spotify playlist")}
+              />
+            ) : (
+              <SessionSetup
+                playlists={MOCK_PLAYLISTS}
+                loadingPlaylists={plLoading}
+                current={{ uri: "spotify:playlist:now", name: "Road Trip 2026", count: null }}
+                onStartPlaylist={(p) =>
+                  setSessionMsg(`▶ Would start session from “${p.name}” (${p.count ?? "?"} songs)`)
+                }
+                rounds={setupRounds}
+                onRounds={setSetupRounds}
+                difficulty={difficulty}
+                onDifficulty={setDifficulty}
+                players={setupRoster}
+                devices={MOCK_DEVICES}
+                onEditMics={() => setSessionScreen("mics")}
                 onStart={() => setSessionMsg(`▶ Would start free-play session: ${setupRounds} rounds`)}
                 onCancel={() => { setSessionMsg(null); setMode("karaoke"); }}
                 micOn={micOn}

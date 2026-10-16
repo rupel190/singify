@@ -165,6 +165,11 @@ to test against real charts — no USDB account needed. Free CC-licensed charts:
 | `Shift+P` | Mark "punched in proper" — ✓ in track lists, locks `P`, saved into the chart `.txt` | `Shift+R` | Re-search USDB (reopen the picker) |
 | `Ctrl+F` | FPS · ms overlay (debug; auto-shown while playing) | `Ctrl+0` | Reset every element's size |
 
+**Mics** (main menu) is set once and used everywhere: Quick Sing takes player 1,
+sessions take everyone, competitive takes the names on player 1's mic. It's saved
+in `~/.config/singify/settings.json`; an unplugged mic stays listed in red (the
+default mic stands in) and comes back on its own — matched by name if its ID changed.
+
 Every element (HUD, title, mic panel, highway, lyrics, menu) has a faint corner
 triangle: drag it to size that element, double-click to reset it. Sizes are saved
 per element, so an FHD and a 4K screen can each keep their own layout.

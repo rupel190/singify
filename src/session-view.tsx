@@ -40,6 +40,14 @@ export interface PlayerSlot {
   monitor?: boolean; // hear this mic out an output device while singing
   monitorGain?: number; // monitor loudness 0..1 (independent of `gain`)
   outputDeviceId?: string; // which output the monitor plays to (undefined = default)
+  /** The device's NAME when it was picked. Chromium can re-issue device IDs (e.g.
+   *  after a profile reset) while the name stays, so a lost ID is re-found by it. */
+  deviceLabel?: string;
+}
+
+/** Is this slot's saved mic plugged in? (No pick = the default mic, always "connected".) */
+export function micConnected(p: PlayerSlot, devices: AudioInput[]): boolean {
+  return !p.deviceId || devices.length === 0 || devices.some((d) => d.deviceId === p.deviceId);
 }
 
 function stars(n: number): string {
@@ -67,17 +75,10 @@ export function SessionSetup(props: {
   micOn: boolean;
   // Versus roster — every player sings at once on their OWN mic.
   players: PlayerSlot[];
-  onName: (i: number, name: string) => void;
-  onDevice: (i: number, deviceId: string | undefined) => void;
-  onGain: (i: number, gain: number) => void;
-  onAddPlayer: () => void;
-  onRemovePlayer: (i: number) => void;
-  /** Available audio input devices for the per-player mic picker. */
+  /** Connected input devices — to show each player's mic, or flag it unplugged. */
   devices: AudioInput[];
-  /** Live input level (0..~0.4) for player i's preview mic — drives the meter. */
-  levelFor: (i: number) => number;
-  /** Each player drags their OWN gate; the index says whose. */
-  onSensitivity: (i: number, n: number) => void;
+  /** Open the mic setup screen. */
+  onEditMics: () => void;
 }) {
   const React = Spicetify.React;
   const {
@@ -93,14 +94,8 @@ export function SessionSetup(props: {
     onCancel,
     micOn,
     players,
-    onName,
-    onDevice,
-    onGain,
-    onAddPlayer,
-    onRemovePlayer,
     devices,
-    levelFor,
-    onSensitivity,
+    onEditMics,
   } = props;
 
   const MAX_PLAYERS = 4; // versus: one lane + colour + mic per singer
@@ -159,156 +154,52 @@ export function SessionSetup(props: {
         <div style={sectionLabel}>
           Players{" "}
           {players.length > 1 && (
-            <span style={{ color: ACCENT }}>· versus — everyone sings at once</span>
+            <span style={{ color: ACCENT }} title="Everyone sings at once, each on their own mic">· versus</span>
           )}
         </div>
-        <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-          {players.map((p, i) => (
-            <div
-              key={i}
-              style={{
-                display: "flex",
-                flexDirection: "column",
-                gap: 8,
-                padding: "10px 12px",
-                borderRadius: 10,
-                background: "rgba(255,255,255,0.05)",
-                border: "1px solid rgba(255,255,255,0.1)",
-              }}
-            >
-              {/* line 1: colour dot · name · device · remove */}
-              <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-                <span
-                  style={{
-                    color: PLAYER_COLORS[i % PLAYER_COLORS.length],
-                    fontWeight: 800,
-                    fontSize: 16,
-                  }}
-                >
-                  ●
-                </span>
-                <input
-                  value={p.name}
-                  onChange={(e) => onName(i, (e.target as HTMLInputElement).value)}
-                  maxLength={16}
-                  style={{
-                    width: 96,
-                    background: "transparent",
-                    border: "none",
-                    borderBottom: "1px solid rgba(255,255,255,0.15)",
-                    color: "#fff",
-                    fontSize: 15,
-                    fontWeight: 600,
-                    outline: "none",
-                  }}
-                />
-                <select
-                  value={p.deviceId ?? ""}
-                  onChange={(e) =>
-                    onDevice(i, (e.target as HTMLSelectElement).value || undefined)
-                  }
-                  style={{
-                    flex: "1 1 auto",
-                    minWidth: 0,
-                    background: "rgba(0,0,0,0.3)",
-                    border: "1px solid rgba(255,255,255,0.12)",
-                    borderRadius: 8,
-                    color: "#fff",
-                    fontSize: 13,
-                    padding: "5px 8px",
-                  }}
-                >
-                  <option value="">Default mic</option>
-                  {devices.map((d) => (
-                    <option key={d.deviceId} value={d.deviceId}>
-                      {d.label}
-                    </option>
-                  ))}
-                </select>
-                {players.length > 1 && (
-                  <button
-                    onClick={() => onRemovePlayer(i)}
-                    title="Remove"
-                    style={{
-                      border: "none",
-                      background: "transparent",
-                      color: "rgba(255,255,255,0.5)",
-                      cursor: "pointer",
-                      fontSize: 18,
-                      lineHeight: 1,
-                      padding: "0 2px",
-                      flexShrink: 0,
-                    }}
-                  >
-                    ×
-                  </button>
-                )}
-              </div>
-
-              {/* line 2: live level meter (drag the gate) · input gain */}
-              <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-                <div style={{ flex: "1 1 auto", minWidth: 0 }}>
-                  <MicMeter
-                    getLevel={() => levelFor(i)}
-                    sensitivity={p.sensitivity}
-                    onSensitivity={(n) => onSensitivity(i, n)}
-                    color={PLAYER_COLORS[i % PLAYER_COLORS.length]}
-                    height={14}
-                  />
-                </div>
-                <div
-                  style={{ display: "flex", alignItems: "center", gap: 6, flexShrink: 0 }}
-                  title="Input gain — where this mic's level sits on the meter"
-                >
-                  <span style={{ fontSize: 12, color: "rgba(255,255,255,0.4)" }}>gain</span>
-                  <input
-                    type="range"
-                    min={25}
-                    max={300}
-                    value={Math.round(p.gain * 100)}
-                    onChange={(e) => onGain(i, Number((e.target as HTMLInputElement).value) / 100)}
-                    style={{ width: 84 }}
-                  />
-                  <span
-                    style={{
-                      fontSize: 12,
-                      color: "rgba(255,255,255,0.55)",
-                      width: 36,
-                      textAlign: "right",
-                      fontVariantNumeric: "tabular-nums",
-                    }}
-                  >
-                    {Math.round(p.gain * 100)}%
-                  </span>
-                </div>
-              </div>
-            </div>
-          ))}
-          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-            {players.length < MAX_PLAYERS && (
-              <button
-                onClick={onAddPlayer}
+        {/* The mic setup lives on its own screen now (and is saved); here it's a
+            glance at who sings on what, with any unplugged mic in red. */}
+        <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+          {players.map((p, i) => {
+            const ok = micConnected(p, devices);
+            const dev = p.deviceId
+              ? devices.find((d) => d.deviceId === p.deviceId)?.label ?? p.deviceLabel ?? "Saved mic"
+              : "Default mic";
+            return (
+              <div
+                key={i}
                 style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 10,
                   padding: "8px 12px",
                   borderRadius: 10,
-                  border: "1px dashed rgba(255,255,255,0.2)",
-                  background: "transparent",
-                  color: "rgba(255,255,255,0.7)",
-                  cursor: "pointer",
-                  fontSize: 14,
-                  fontWeight: 700,
+                  background: "rgba(255,255,255,0.05)",
+                  border: `1px solid ${ok ? "rgba(255,255,255,0.1)" : "#ff6b6b"}`,
+                  fontSize: 15,
                 }}
               >
-                + Add singer
-              </button>
-            )}
-            {devices.length === 0 && (
-              <span style={{ fontSize: 12, color: "rgba(255,255,255,0.4)" }}>
-                Grant mic access to see device names.
-              </span>
-            )}
-          </div>
+                <span style={{ color: PLAYER_COLORS[i % PLAYER_COLORS.length], fontWeight: 800 }}>●</span>
+                <span style={{ fontWeight: 700 }}>{p.name}</span>
+                <span
+                  style={{
+                    marginLeft: "auto",
+                    fontSize: 13,
+                    color: ok ? "rgba(255,255,255,0.55)" : "#ff6b6b",
+                    whiteSpace: "nowrap",
+                    overflow: "hidden",
+                    textOverflow: "ellipsis",
+                  }}
+                >
+                  {ok ? dev : `⚠ ${dev} — not connected`}
+                </span>
+              </div>
+            );
+          })}
         </div>
+        <button onClick={onEditMics} style={{ ...ghostBtn(), alignSelf: "flex-start", fontSize: 15, padding: "8px 16px" }}>
+          🎙 Edit mics
+        </button>
         </div>
 
         {/* Right: what to sing — the current playlist, or pick one. */}
@@ -445,6 +336,208 @@ export function SessionSetup(props: {
         </div>
       </div>
 
+    </Center>
+  );
+}
+
+
+// ── Mic setup ────────────────────────────────────────────────────────────────
+//
+// Who sings on which mic, with its gain and gate — set once, saved, and used by
+// every mode (Quick Sing = player 1, sessions = everyone, competitive = the
+// names on player 1's mic). An unplugged mic stays in the list in red, and comes
+// back by itself when it's plugged in again.
+
+export function MicSetup(props: {
+  players: PlayerSlot[];
+  devices: AudioInput[];
+  levelFor: (i: number) => number;
+  onName: (i: number, name: string) => void;
+  onDevice: (i: number, deviceId: string | undefined) => void;
+  onGain: (i: number, gain: number) => void;
+  onSensitivity: (i: number, n: number) => void;
+  onAddPlayer: () => void;
+  onRemovePlayer: (i: number) => void;
+}) {
+  const React = Spicetify.React;
+  const { players, devices, levelFor, onName, onDevice, onGain, onSensitivity, onAddPlayer, onRemovePlayer } = props;
+  const MAX_PLAYERS = 4;
+  const sectionLabel: React.CSSProperties = {
+    alignSelf: "flex-start",
+    fontSize: 13,
+    fontWeight: 700,
+    letterSpacing: 1,
+    textTransform: "uppercase",
+    color: "rgba(255,255,255,0.45)",
+  };
+  const missing = players.filter((p) => !micConnected(p, devices)).length;
+  return (
+    <Center zoom={1.5}>
+      <div style={{ fontSize: 34, fontWeight: 800 }}>🎙 Mics</div>
+      <div style={{ fontSize: 15, color: missing ? "#ff6b6b" : "rgba(255,255,255,0.55)", fontWeight: 600 }}>
+        {missing
+          ? `${missing} mic${missing > 1 ? "s" : ""} not connected — using the default mic until ${missing > 1 ? "they're" : "it's"} back`
+          : "Saved for every session — set it once"}
+      </div>
+      <div style={{ display: "flex", flexDirection: "column", gap: 12, width: "min(640px, 100%)", marginTop: 10 }}>
+        <div style={sectionLabel}>
+          Players{" "}
+          {players.length > 1 && (
+            <span style={{ color: ACCENT }}>· versus — everyone sings at once</span>
+          )}
+        </div>
+        <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+          {players.map((p, i) => (
+            <div
+              key={i}
+              style={{
+                display: "flex",
+                flexDirection: "column",
+                gap: 8,
+                padding: "10px 12px",
+                borderRadius: 10,
+                background: "rgba(255,255,255,0.05)",
+                border: `1px solid ${micConnected(p, devices) ? "rgba(255,255,255,0.1)" : "#ff6b6b"}`,
+              }}
+            >
+              {/* line 1: colour dot · name · device · remove */}
+              <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                <span
+                  style={{
+                    color: PLAYER_COLORS[i % PLAYER_COLORS.length],
+                    fontWeight: 800,
+                    fontSize: 16,
+                  }}
+                >
+                  ●
+                </span>
+                <input
+                  value={p.name}
+                  onChange={(e) => onName(i, (e.target as HTMLInputElement).value)}
+                  maxLength={16}
+                  style={{
+                    width: 96,
+                    background: "transparent",
+                    border: "none",
+                    borderBottom: "1px solid rgba(255,255,255,0.15)",
+                    color: "#fff",
+                    fontSize: 15,
+                    fontWeight: 600,
+                    outline: "none",
+                  }}
+                />
+                <select
+                  value={p.deviceId ?? ""}
+                  title={micConnected(p, devices) ? undefined : "This mic isn't connected — the default mic is used until it's back"}
+                  onChange={(e) =>
+                    onDevice(i, (e.target as HTMLSelectElement).value || undefined)
+                  }
+                  style={{
+                    flex: "1 1 auto",
+                    minWidth: 0,
+                    background: "rgba(0,0,0,0.3)",
+                    border: `1px solid ${micConnected(p, devices) ? "rgba(255,255,255,0.12)" : "#ff6b6b"}`,
+                    borderRadius: 8,
+                    color: "#fff",
+                    fontSize: 13,
+                    padding: "5px 8px",
+                  }}
+                >
+                  <option value="">Default mic</option>
+                  {!micConnected(p, devices) && p.deviceId && (
+                    <option value={p.deviceId}>⚠ {p.deviceLabel ?? "Saved mic"} — not connected</option>
+                  )}
+                  {devices.map((d) => (
+                    <option key={d.deviceId} value={d.deviceId}>
+                      {d.label}
+                    </option>
+                  ))}
+                </select>
+                {players.length > 1 && (
+                  <button
+                    onClick={() => onRemovePlayer(i)}
+                    title="Remove"
+                    style={{
+                      border: "none",
+                      background: "transparent",
+                      color: "rgba(255,255,255,0.5)",
+                      cursor: "pointer",
+                      fontSize: 18,
+                      lineHeight: 1,
+                      padding: "0 2px",
+                      flexShrink: 0,
+                    }}
+                  >
+                    ×
+                  </button>
+                )}
+              </div>
+
+              {/* line 2: live level meter (drag the gate) · input gain */}
+              <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+                <div style={{ flex: "1 1 auto", minWidth: 0 }}>
+                  <MicMeter
+                    getLevel={() => levelFor(i)}
+                    sensitivity={p.sensitivity}
+                    onSensitivity={(n) => onSensitivity(i, n)}
+                    color={PLAYER_COLORS[i % PLAYER_COLORS.length]}
+                    height={14}
+                  />
+                </div>
+                <div
+                  style={{ display: "flex", alignItems: "center", gap: 6, flexShrink: 0 }}
+                  title="Input gain — where this mic's level sits on the meter"
+                >
+                  <span style={{ fontSize: 12, color: "rgba(255,255,255,0.4)" }}>gain</span>
+                  <input
+                    type="range"
+                    min={25}
+                    max={300}
+                    value={Math.round(p.gain * 100)}
+                    onChange={(e) => onGain(i, Number((e.target as HTMLInputElement).value) / 100)}
+                    style={{ width: 84 }}
+                  />
+                  <span
+                    style={{
+                      fontSize: 12,
+                      color: "rgba(255,255,255,0.55)",
+                      width: 36,
+                      textAlign: "right",
+                      fontVariantNumeric: "tabular-nums",
+                    }}
+                  >
+                    {Math.round(p.gain * 100)}%
+                  </span>
+                </div>
+              </div>
+            </div>
+          ))}
+          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+            {players.length < MAX_PLAYERS && (
+              <button
+                onClick={onAddPlayer}
+                style={{
+                  padding: "8px 12px",
+                  borderRadius: 10,
+                  border: "1px dashed rgba(255,255,255,0.2)",
+                  background: "transparent",
+                  color: "rgba(255,255,255,0.7)",
+                  cursor: "pointer",
+                  fontSize: 14,
+                  fontWeight: 700,
+                }}
+              >
+                + Add singer
+              </button>
+            )}
+            {devices.length === 0 && (
+              <span style={{ fontSize: 12, color: "rgba(255,255,255,0.4)" }}>
+                Grant mic access to see device names.
+              </span>
+            )}
+          </div>
+        </div>
+      </div>
     </Center>
   );
 }

@@ -18,11 +18,15 @@ export interface HomeMenuProps {
   onStartSession: () => void;
   onCompetitive: () => void;
   onStats: () => void;
+  /** Open the mic setup screen. */
+  onMics: () => void;
+  /** One line about the saved mics (names, and how many are unplugged). */
+  micStatus: string;
 }
 
 export function HomeMenu(props: HomeMenuProps) {
   const React = Spicetify.React;
-  const { track, onQuickSing, onStartSession, onCompetitive, onStats } = props;
+  const { track, onQuickSing, onStartSession, onCompetitive, onStats, onMics, micStatus } = props;
 
   const card: React.CSSProperties = {
     display: "flex",
@@ -87,10 +91,28 @@ export function HomeMenu(props: HomeMenuProps) {
         <span style={sub}>one mic · same song · take turns · pure skill</span>
       </button>
 
-      <button onClick={onStats} style={card}>
-        <span style={title}>📊 Stats</span>
-        <span style={sub}>your scores over time · per singer · per mic</span>
-      </button>
+      {/* Two half-width cards, so the menu still fits a 1080p screen. */}
+      <div style={{ display: "flex", gap: 16, width: "min(640px, 88vw)" }}>
+        <button onClick={onMics} style={{ ...card, width: "auto", flex: "1 1 0", minWidth: 0 }}>
+          <span style={title}>🎙 Mics</span>
+          <span
+            style={{
+              ...sub,
+              color: micStatus.includes("⚠") ? "#ff6b6b" : sub.color,
+              whiteSpace: "nowrap",
+              overflow: "hidden",
+              textOverflow: "ellipsis",
+              maxWidth: "100%",
+            }}
+          >
+            {micStatus}
+          </span>
+        </button>
+        <button onClick={onStats} style={{ ...card, width: "auto", flex: "1 1 0", minWidth: 0 }}>
+          <span style={title}>📊 Stats</span>
+          <span style={sub}>scores over time</span>
+        </button>
+      </div>
 
       <div
         style={{
