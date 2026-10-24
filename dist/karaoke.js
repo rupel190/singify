@@ -18,6 +18,8 @@ var AUTOSYNCED_PREFIX = "singify:autosynced:";
 var NOCHART_PREFIX = "singify:nochart:";
 var UNRELIABLE_PREFIX = "singify:unreliable:";
 var UI_SIZE_PREFIX = "singify:uiSize:";
+var MANUAL_CHART_PREFIX = "singify:chart:";
+var MANUAL_CHART_INDEX_KEY = "singify:chartIndex";
 
 // src/resizable.tsx
 var LIMITS = { zoom: [0.4, 3], height: [20, 100] };
@@ -168,6 +170,41 @@ function isRapNote(t) {
 function isGoldenNote(t) {
   return t === "golden" || t === "golden-rap";
 }
+function findChartProblem(raw) {
+  const lines = raw.replace(/^\uFEFF/, "").replace(/\r\n?/g, `
+`).split(`
+`);
+  let sawBpm = false;
+  let notes = 0;
+  for (let i = 0;i < lines.length; i++) {
+    const line = lines[i];
+    const t = line.trim();
+    if (!t)
+      continue;
+    if (t.startsWith("#")) {
+      if (/^#BPM\s*:\s*\d/i.test(t))
+        sawBpm = true;
+      continue;
+    }
+    if (/^E\b/.test(t))
+      break;
+    if (/^-/.test(t) || /^P\s*\d/i.test(t))
+      continue;
+    if (/^[:*FRG]\s/.test(t)) {
+      if (!/^[:*FRG]\s+-?\d+\s+\d+\s+-?\d+/.test(t)) {
+        return { line: i + 1, text: t.slice(0, 60), why: "a note line needs beat, length and pitch numbers" };
+      }
+      notes++;
+      continue;
+    }
+    return { line: i + 1, text: t.slice(0, 60), why: "this isn't UltraStar chart syntax" };
+  }
+  if (!sawBpm)
+    return { line: 1, text: lines[0]?.slice(0, 60) ?? "", why: "no #BPM header — is this an UltraStar .txt?" };
+  if (notes === 0)
+    return { line: lines.length, text: "", why: "the file has no notes to sing" };
+  return null;
+}
 function parse(raw) {
   raw = raw.replace(/^﻿/, "");
   const lines = raw.replace(/\r\n/g, `
@@ -183,8 +220,8 @@ function parse(raw) {
   const songLines = [];
   let currentSyllables = [];
   let absoluteBeatOffset = 0;
-  for (const raw2 of lines) {
-    const line = raw2.replace(/^\s+/, "");
+  for (const raw of lines) {
+    const line = raw.replace(/^\s+/, "");
     if (!line || line.startsWith("#"))
       continue;
     const token = line[0];
@@ -192,10 +229,10 @@ function parse(raw) {
       break;
     if (token === "-") {
       if (currentSyllables.length > 0) {
-        const startMs2 = currentSyllables[0].startMs;
+        const startMs = currentSyllables[0].startMs;
         const last = currentSyllables[currentSyllables.length - 1];
         const endMs = last.startMs + last.durationMs;
-        songLines.push({ syllables: currentSyllables, startMs: startMs2, endMs });
+        songLines.push({ syllables: currentSyllables, startMs, endMs });
         currentSyllables = [];
       }
       if (relative) {
@@ -217,11 +254,11 @@ function parse(raw) {
     const text = match[4] ?? "";
     const absoluteBeat = relative ? absoluteBeatOffset + localBeat : localBeat;
     const startMs = beatToMs(absoluteBeat);
-    const durationMs2 = durationBeats * msPerBeat;
+    const durationMs = durationBeats * msPerBeat;
     currentSyllables.push({
       text,
       startMs,
-      durationMs: durationMs2,
+      durationMs,
       pitch,
       type: noteType,
       startBeat: absoluteBeat,
@@ -444,10 +481,10 @@ function thresholdToSensitivity(threshold) {
 }
 var METER_PEAK = 0.35;
 var METER_FLOOR = 0.002;
-function rmsToMeter(rms2) {
-  if (!(rms2 > METER_FLOOR))
+function rmsToMeter(rms) {
+  if (!(rms > METER_FLOOR))
     return 0;
-  return Math.min(1, Math.log(rms2 / METER_FLOOR) / Math.log(METER_PEAK / METER_FLOOR));
+  return Math.min(1, Math.log(rms / METER_FLOOR) / Math.log(METER_PEAK / METER_FLOOR));
 }
 function meterToRms(frac) {
   const f = Math.min(1, Math.max(0, frac));
@@ -2444,13 +2481,14 @@ function SessionHud(props) {
 }
 function NoChartInSession(props) {
   const React = Spicetify.React;
-  const { title, artist, onSkip, onReChoose, searched, helperDown } = props;
+  const { title, artist, onSkip, onReChoose, searched, helperDown, onLoadFile } = props;
   if (helperDown) {
     return /* @__PURE__ */ Spicetify.React.createElement(HelperDownNotice, {
       title,
       artist,
       onSkip,
-      onReChoose
+      onReChoose,
+      onLoadFile
     });
   }
   return /* @__PURE__ */ Spicetify.React.createElement(Center, {
@@ -2469,47 +2507,61 @@ function NoChartInSession(props) {
   }, "⏭ Skip to next song"), /* @__PURE__ */ Spicetify.React.createElement("button", {
     style: ghostBtn(),
     onClick: onReChoose
-  }, "\uD83D\uDD0E Re-choose (R)")));
+  }, "\uD83D\uDD0E Re-choose (Shift+R)"), onLoadFile && /* @__PURE__ */ Spicetify.React.createElement("button", {
+    style: ghostBtn(),
+    onClick: onLoadFile
+  }, "\uD83D\uDCC2 Load chart file")));
 }
 function HelperDownNotice(props) {
   const React = Spicetify.React;
-  const { title, artist, onSkip, onReChoose } = props;
+  const { title, artist, onSkip, onReChoose, onLoadFile } = props;
+  const muted = {
+    fontSize: 17,
+    color: "rgba(255,255,255,0.7)",
+    maxWidth: 580,
+    textAlign: "center",
+    lineHeight: 1.45
+  };
   return /* @__PURE__ */ Spicetify.React.createElement(Center, {
     zoom: 2.4
   }, /* @__PURE__ */ Spicetify.React.createElement("div", {
-    style: { fontSize: 48 }
-  }, "⚠️"), /* @__PURE__ */ Spicetify.React.createElement("div", {
-    style: { fontSize: 26, fontWeight: 800, color: GOLD }
-  }, "Karaoke helper isn't running"), /* @__PURE__ */ Spicetify.React.createElement("div", {
-    style: {
-      fontSize: 17,
-      color: "rgba(255,255,255,0.7)",
-      maxWidth: 560,
-      textAlign: "center",
-      lineHeight: 1.45
-    }
-  }, "Charts load through the local helper — even songs you've already sung and cached. Start it in a terminal, then it'll pick this track up:"), /* @__PURE__ */ Spicetify.React.createElement("code", {
-    style: {
-      marginTop: 4,
-      padding: "8px 16px",
-      borderRadius: 10,
-      background: "rgba(255,255,255,0.06)",
-      border: "1px solid rgba(255,255,255,0.12)",
-      fontFamily: "ui-monospace, SFMono-Regular, monospace",
-      fontSize: 18,
-      color: "#fff"
-    }
-  }, "bun run helper"), (title || artist) && /* @__PURE__ */ Spicetify.React.createElement("div", {
-    style: { fontSize: 15, color: "rgba(255,255,255,0.5)", marginTop: 4 }
-  }, [artist, title].filter(Boolean).join(" — ")), (onSkip || onReChoose) && /* @__PURE__ */ Spicetify.React.createElement("div", {
-    style: { display: "flex", gap: 12, marginTop: 18 }
-  }, onReChoose && /* @__PURE__ */ Spicetify.React.createElement("button", {
+    style: { fontSize: 44 }
+  }, "\uD83C\uDFA4"), /* @__PURE__ */ Spicetify.React.createElement("div", {
+    style: { fontSize: 26, fontWeight: 800 }
+  }, "No chart for this song yet"), (title || artist) && /* @__PURE__ */ Spicetify.React.createElement("div", {
+    style: { fontSize: 16, color: "rgba(255,255,255,0.5)" }
+  }, [artist, title].filter(Boolean).join(" — ")), /* @__PURE__ */ Spicetify.React.createElement("div", {
+    style: { ...muted, marginTop: 6 }
+  }, "Load its UltraStar chart (a ", /* @__PURE__ */ Spicetify.React.createElement("code", null, ".txt"), ") — it's remembered for this song and synced to Spotify automatically. Free charts:", " ", /* @__PURE__ */ Spicetify.React.createElement("a", {
+    href: "https://usdb.animux.de/",
+    target: "_blank",
+    rel: "noreferrer",
+    style: { color: ACCENT }
+  }, "usdb.animux.de"), " ", "(free account)."), /* @__PURE__ */ Spicetify.React.createElement("div", {
+    style: { display: "flex", gap: 12, marginTop: 14, flexWrap: "wrap", justifyContent: "center" }
+  }, onLoadFile && /* @__PURE__ */ Spicetify.React.createElement("button", {
     style: primaryBtn(),
-    onClick: onReChoose
-  }, "↻ Try again (R)"), onSkip && /* @__PURE__ */ Spicetify.React.createElement("button", {
+    onClick: onLoadFile
+  }, "\uD83D\uDCC2 Load chart file"), onSkip && /* @__PURE__ */ Spicetify.React.createElement("button", {
     style: ghostBtn(),
     onClick: onSkip
-  }, "⏭ Skip to next song")));
+  }, "⏭ Skip to next song")), /* @__PURE__ */ Spicetify.React.createElement("div", {
+    style: { ...muted, fontSize: 14, color: "rgba(255,255,255,0.45)", marginTop: 18 }
+  }, "Want charts to download by themselves? Run the singify helper (", /* @__PURE__ */ Spicetify.React.createElement("code", {
+    style: { color: "rgba(255,255,255,0.75)" }
+  }, "bun run helper"), ") —", " ", /* @__PURE__ */ Spicetify.React.createElement("a", {
+    href: "https://github.com/rupel190/singify#the-localhost-helper-serverhelperts",
+    target: "_blank",
+    rel: "noreferrer",
+    style: { color: ACCENT }
+  }, "setup"), onReChoose && /* @__PURE__ */ Spicetify.React.createElement(Spicetify.React.Fragment, null, " ", "·", " ", /* @__PURE__ */ Spicetify.React.createElement("a", {
+    href: "#",
+    onClick: (e) => {
+      e.preventDefault();
+      onReChoose();
+    },
+    style: { color: ACCENT }
+  }, "try again"))));
 }
 function RoundEnd(props) {
   const React = Spicetify.React;
@@ -3033,8 +3085,8 @@ async function startMicPitch(opts = {}) {
       analyser.getFloatTimeDomainData(buf);
       return rms(buf);
     },
-    setOptions(opts2) {
-      liveOpts = { ...liveOpts, ...opts2 };
+    setOptions(opts) {
+      liveOpts = { ...liveOpts, ...opts };
     },
     setGain(g) {
       gainNode.gain.value = Math.max(0, g);
@@ -3700,37 +3752,37 @@ function alignWords(a, b) {
   const score = (x, y) => x === y ? 2 : similarity(x, y) >= 0.75 ? 1 : -1;
   const H = new Float64Array((n + 1) * (m + 1));
   const T = new Uint8Array((n + 1) * (m + 1));
-  const at = (i2, j2) => i2 * (m + 1) + j2;
-  for (let i2 = 1;i2 <= n; i2++)
-    T[at(i2, 0)] = 2;
-  for (let j2 = 1;j2 <= m; j2++)
-    T[at(0, j2)] = 3;
-  for (let i2 = 1;i2 <= n; i2++) {
-    for (let j2 = 1;j2 <= m; j2++) {
-      const d = H[at(i2 - 1, j2 - 1)] + score(a[i2 - 1], b[j2 - 1]);
-      const u = H[at(i2 - 1, j2)] + GAP;
-      const l = H[at(i2, j2 - 1)] + GAP;
+  const at = (i, j) => i * (m + 1) + j;
+  for (let i = 1;i <= n; i++)
+    T[at(i, 0)] = 2;
+  for (let j = 1;j <= m; j++)
+    T[at(0, j)] = 3;
+  for (let i = 1;i <= n; i++) {
+    for (let j = 1;j <= m; j++) {
+      const d = H[at(i - 1, j - 1)] + score(a[i - 1], b[j - 1]);
+      const u = H[at(i - 1, j)] + GAP;
+      const l = H[at(i, j - 1)] + GAP;
       if (d >= u && d >= l) {
-        H[at(i2, j2)] = d;
-        T[at(i2, j2)] = 1;
+        H[at(i, j)] = d;
+        T[at(i, j)] = 1;
       } else if (u >= l) {
-        H[at(i2, j2)] = u;
-        T[at(i2, j2)] = 2;
+        H[at(i, j)] = u;
+        T[at(i, j)] = 2;
       } else {
-        H[at(i2, j2)] = l;
-        T[at(i2, j2)] = 3;
+        H[at(i, j)] = l;
+        T[at(i, j)] = 3;
       }
     }
   }
   let bi = n;
   let bj = m;
   let best = H[at(n, m)];
-  for (let i2 = 0;i2 <= n; i2++)
-    if (H[at(i2, m)] > best)
-      [best, bi, bj] = [H[at(i2, m)], i2, m];
-  for (let j2 = 0;j2 <= m; j2++)
-    if (H[at(n, j2)] > best)
-      [best, bi, bj] = [H[at(n, j2)], n, j2];
+  for (let i = 0;i <= n; i++)
+    if (H[at(i, m)] > best)
+      [best, bi, bj] = [H[at(i, m)], i, m];
+  for (let j = 0;j <= m; j++)
+    if (H[at(n, j)] > best)
+      [best, bi, bj] = [H[at(n, j)], n, j];
   const pairs = [];
   let i = bi;
   let j = bj;
@@ -4555,6 +4607,30 @@ function setSensitivity(next) {
   if (visible)
     renderOverlay();
 }
+var MANUAL_CHART_CAP = 30;
+function manualChartFor(uri) {
+  try {
+    return localStorage.getItem(MANUAL_CHART_PREFIX + uri);
+  } catch {
+    return null;
+  }
+}
+function rememberManualChart(uri, raw) {
+  try {
+    const index = JSON.parse(localStorage.getItem(MANUAL_CHART_INDEX_KEY) ?? "[]").filter((u) => u !== uri);
+    if (raw == null)
+      localStorage.removeItem(MANUAL_CHART_PREFIX + uri);
+    else {
+      index.push(uri);
+      localStorage.setItem(MANUAL_CHART_PREFIX + uri, raw);
+      while (index.length > MANUAL_CHART_CAP)
+        localStorage.removeItem(MANUAL_CHART_PREFIX + index.shift());
+    }
+    localStorage.setItem(MANUAL_CHART_INDEX_KEY, JSON.stringify(index));
+  } catch (err) {
+    console.error("[singify] couldn't store the chart:", err);
+  }
+}
 function loadLocalChart() {
   const input = document.createElement("input");
   input.type = "file";
@@ -4563,22 +4639,28 @@ function loadLocalChart() {
     const file = input.files?.[0];
     if (!file)
       return;
-    try {
-      const song = parse(await file.text());
-      if (song.lines.length === 0)
-        throw new Error("no singable notes found");
-      currentSong = song;
-      manualChart = true;
-      pickerCandidates = null;
-      pickError = null;
-      if (!visible)
-        setVisible(true);
-      else
-        renderOverlay();
-      Spicetify.showNotification?.(`\uD83C\uDFA4 ${song.headers.artist} – ${song.headers.title} loaded`);
-    } catch (err) {
-      Spicetify.showNotification?.(`Chart parse failed: ${err instanceof Error ? err.message : String(err)}`, true);
+    const raw = await file.text();
+    const problem = findChartProblem(raw);
+    if (problem) {
+      Spicetify.showNotification?.(`${file.name} isn't an UltraStar chart — line ${problem.line}: ${problem.why}` + (problem.text ? ` (“${problem.text}”)` : ""), true);
+      return;
     }
+    const song = parse(raw);
+    currentSong = song;
+    pickerCandidates = null;
+    pickError = null;
+    if (currentTrackId) {
+      rememberManualChart(currentTrackId, raw);
+      setFlag(NOCHART_PREFIX, currentTrackId, false);
+      runAutoSync(currentTrackId, song);
+    } else {
+      manualChart = true;
+    }
+    if (!visible)
+      setVisible(true);
+    else
+      renderOverlay();
+    Spicetify.showNotification?.(`\uD83C\uDFA4 ${song.headers.artist} – ${song.headers.title} loaded${currentTrackId ? " — remembered for this track" : ""}`);
   };
   input.click();
 }
@@ -4975,21 +5057,17 @@ function renderOverlay() {
     onSkip: skipRound,
     onReChoose: () => void reSearch(),
     searched: !resolving,
-    helperDown
-  }))) : helperDown ? React.createElement(HelperDownNotice, {
+    helperDown,
+    onLoadFile: loadLocalChart
+  }))) : React.createElement(NoChartInSession, {
     title: currentTitle(),
     artist: currentArtist(),
-    onReChoose: () => void reSearch()
-  }) : React.createElement("div", {
-    style: {
-      display: "flex",
-      height: "100%",
-      alignItems: "center",
-      justifyContent: "center",
-      color: "#c8c8c8",
-      fontSize: 20
-    }
-  }, "No karaoke chart for this track.");
+    onSkip: () => Spicetify.Player.next?.(),
+    onReChoose: () => void reSearch(),
+    searched: !resolving,
+    helperDown,
+    onLoadFile: loadLocalChart
+  });
   const hudMics = activeRoster().map((p, i) => ({ ...p, index: i, pitch: mics[i] })).filter((e) => e.pitch).map((e) => ({ ...e, getLevel: () => e.pitch?.level() ?? 0 }));
   const micBanner = hudMics.length ? React.createElement(MicOverlay, {
     mics: hudMics,
@@ -5430,6 +5508,7 @@ async function onPick(candidate) {
     saveCurve(null);
     setFlag(NOCHART_PREFIX, currentTrackId, false);
     setUnreliable(currentTrackId, null);
+    rememberManualChart(currentTrackId, null);
     runAutoSync(currentTrackId, song);
   } catch (err) {
     pickPending = null;
@@ -5466,6 +5545,24 @@ async function onSongChange() {
   let noChart = false;
   if (visible)
     renderOverlay();
+  const stored = manualChartFor(item.uri);
+  if (stored) {
+    try {
+      currentSong = parse(stored);
+      rememberManualChart(item.uri, stored);
+      resolving = false;
+      autoSkipStreak = 0;
+      runAutoSync(item.uri, currentSong);
+      if (session && activeScreen === "round-end")
+        activeScreen = "sing";
+      if (visible)
+        renderOverlay();
+      return;
+    } catch (err) {
+      console.error("[singify] stored chart unreadable, dropping it:", err);
+      rememberManualChart(item.uri, null);
+    }
+  }
   try {
     const res = await resolveForTrack(item.uri, artist, title);
     helperDown = false;

@@ -88,6 +88,47 @@ export interface ParsedSong {
 
 // ── Parser ─────────────────────────────────────────────────────────────────
 
+/** What's wrong with a file that doesn't read as an UltraStar chart — line is 1-based. */
+export interface ChartProblem {
+  line: number;
+  text: string;
+  why: string;
+}
+
+/**
+ * The first reason a file isn't a usable UltraStar chart, or null when it is.
+ * parse() is deliberately lenient (it skips lines it doesn't understand), which
+ * is right for real charts but turns a random .txt into a silent "no notes". This
+ * names the line, so someone who downloaded the wrong file can see why.
+ */
+export function findChartProblem(raw: string): ChartProblem | null {
+  const lines = raw.replace(/^\uFEFF/, "").replace(/\r\n?/g, "\n").split("\n");
+  let sawBpm = false;
+  let notes = 0;
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    const t = line.trim();
+    if (!t) continue;
+    if (t.startsWith("#")) {
+      if (/^#BPM\s*:\s*\d/i.test(t)) sawBpm = true;
+      continue;
+    }
+    if (/^E\b/.test(t)) break; // end of song — anything after is ignored
+    if (/^-/.test(t) || /^P\s*\d/i.test(t)) continue; // line break, duet player marker
+    if (/^[:*FRG]\s/.test(t)) {
+      if (!/^[:*FRG]\s+-?\d+\s+\d+\s+-?\d+/.test(t)) {
+        return { line: i + 1, text: t.slice(0, 60), why: "a note line needs beat, length and pitch numbers" };
+      }
+      notes++;
+      continue;
+    }
+    return { line: i + 1, text: t.slice(0, 60), why: "this isn't UltraStar chart syntax" };
+  }
+  if (!sawBpm) return { line: 1, text: lines[0]?.slice(0, 60) ?? "", why: "no #BPM header — is this an UltraStar .txt?" };
+  if (notes === 0) return { line: lines.length, text: "", why: "the file has no notes to sing" };
+  return null;
+}
+
 export function parse(raw: string): ParsedSong {
   // Strip a leading UTF-8 BOM — common in Windows-exported .txt. Without this the
   // first line reads "<BOM>#TITLE…", fails startsWith("#"), aborts header parsing,

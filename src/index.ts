@@ -32,7 +32,7 @@ import {
   RoundEnd,
   SessionResultScreen,
   NoChartInSession,
-  HelperDownNotice,
+
   type PlayerSlot,
 } from "./session-view";
 import {
@@ -84,6 +84,8 @@ import {
   UNRELIABLE_PREFIX,
   PLAYLIST_PLAYED_KEY,
   SEE_THROUGH_KEY,
+  MANUAL_CHART_PREFIX,
+  MANUAL_CHART_INDEX_KEY,
 } from "./storage-keys";
 import { startTrackBadges, type BadgeState } from "./track-badges";
 import { trackKey } from "./punch-header";
@@ -101,7 +103,7 @@ import {
 import { sensitivityToThreshold, thresholdToSensitivity } from "./pitch";
 import type { Difficulty } from "./scoring";
 import { UI_SCALE } from "./ui-scale";
-import { parse, type ParsedSong } from "./ultrastar-parser";
+import { parse, findChartProblem, type ParsedSong } from "./ultrastar-parser";
 import {
   autoSync,
   isConfident,
@@ -997,10 +999,39 @@ function setSensitivity(next: number): void {
   if (visible) renderOverlay(); // move the gate marker on every live meter
 }
 
-// ── Load a local chart (no USDB) ─────────────────────────────────────────────
+// ── Load a chart by hand (no helper, no USDB account in singify) ────────────
 //
-// Opens a file picker for an UltraStar .txt so you can sing along in Spotify
-// without a USDB account: play the matching track, press L, pick the file.
+// Pick an UltraStar .txt while a track plays: it's remembered FOR THAT TRACK in
+// localStorage, so it loads by itself next time — and auto-sync times it, since
+// that only needs Spotify's lyrics. This is the whole experience for an install
+// without the helper (e.g. from the Marketplace); with the helper it still wins
+// over a download, because you chose it. Nothing playing → a one-off load.
+
+const MANUAL_CHART_CAP = 30; // charts are a few KB; leave Spotify its storage
+
+function manualChartFor(uri: string): string | null {
+  try {
+    return localStorage.getItem(MANUAL_CHART_PREFIX + uri);
+  } catch {
+    return null;
+  }
+}
+
+function rememberManualChart(uri: string, raw: string | null): void {
+  try {
+    const index = (JSON.parse(localStorage.getItem(MANUAL_CHART_INDEX_KEY) ?? "[]") as string[]).filter((u) => u !== uri);
+    if (raw == null) localStorage.removeItem(MANUAL_CHART_PREFIX + uri);
+    else {
+      index.push(uri); // most recent last
+      localStorage.setItem(MANUAL_CHART_PREFIX + uri, raw);
+      while (index.length > MANUAL_CHART_CAP) localStorage.removeItem(MANUAL_CHART_PREFIX + index.shift()!);
+    }
+    localStorage.setItem(MANUAL_CHART_INDEX_KEY, JSON.stringify(index));
+  } catch (err) {
+    console.error("[singify] couldn't store the chart:", err); // full storage: still sings this time
+  }
+}
+
 function loadLocalChart(): void {
   const input = document.createElement("input");
   input.type = "file";
@@ -1008,24 +1039,32 @@ function loadLocalChart(): void {
   input.onchange = async () => {
     const file = input.files?.[0];
     if (!file) return;
-    try {
-      const song = parse(await file.text());
-      if (song.lines.length === 0) throw new Error("no singable notes found");
-      currentSong = song;
-      manualChart = true;
-      pickerCandidates = null;
-      pickError = null;
-      if (!visible) setVisible(true);
-      else renderOverlay();
+    const raw = await file.text();
+    const problem = findChartProblem(raw);
+    if (problem) {
       Spicetify.showNotification?.(
-        `🎤 ${song.headers.artist} – ${song.headers.title} loaded`
-      );
-    } catch (err) {
-      Spicetify.showNotification?.(
-        `Chart parse failed: ${err instanceof Error ? err.message : String(err)}`,
+        `${file.name} isn't an UltraStar chart — line ${problem.line}: ${problem.why}` +
+          (problem.text ? ` (“${problem.text}”)` : ""),
         true
       );
+      return;
     }
+    const song = parse(raw);
+    currentSong = song;
+    pickerCandidates = null;
+    pickError = null;
+    if (currentTrackId) {
+      rememberManualChart(currentTrackId, raw);
+      setFlag(NOCHART_PREFIX, currentTrackId, false);
+      void runAutoSync(currentTrackId, song);
+    } else {
+      manualChart = true; // nothing playing: keep it until a song starts
+    }
+    if (!visible) setVisible(true);
+    else renderOverlay();
+    Spicetify.showNotification?.(
+      `🎤 ${song.headers.artist} – ${song.headers.title} loaded${currentTrackId ? " — remembered for this track" : ""}`
+    );
   };
   input.click();
 }
@@ -1606,29 +1645,19 @@ function renderOverlay(): void {
               onReChoose: () => void reSearch(),
               searched: !resolving,
               helperDown,
+              onLoadFile: loadLocalChart,
             })
             )
           )
-        : helperDown
-          ? React.createElement(HelperDownNotice, {
-              title: currentTitle(),
-              artist: currentArtist(),
-              onReChoose: () => void reSearch(),
-            })
-          : React.createElement(
-              "div",
-              {
-                style: {
-                  display: "flex",
-                  height: "100%",
-                  alignItems: "center",
-                  justifyContent: "center",
-                  color: "#c8c8c8",
-                  fontSize: 20,
-                },
-              },
-              "No karaoke chart for this track."
-            );
+        : React.createElement(NoChartInSession, {
+            title: currentTitle(),
+            artist: currentArtist(),
+            onSkip: () => (Spicetify.Player as { next?: () => void }).next?.(),
+            onReChoose: () => void reSearch(),
+            searched: !resolving,
+            helperDown,
+            onLoadFile: loadLocalChart,
+          });
 
   // Live level meters ride over the karaoke surface in BOTH modes as one centred
   // banner, so a singer can watch their level against the gate mid-song. A
@@ -2238,6 +2267,7 @@ async function onPick(candidate: USDBSong): Promise<void> {
     saveCurve(null); // a different chart — any old curve was for the old one
     setFlag(NOCHART_PREFIX, currentTrackId, false);
     setUnreliable(currentTrackId, null); // the new chart gets its own verdict
+    rememberManualChart(currentTrackId, null); // a picked chart replaces a hand-loaded one
     void runAutoSync(currentTrackId, song);
   } catch (err) {
     // TODO(stage 2): on SessionExpiredError, re-login with stored credentials
@@ -2279,6 +2309,23 @@ async function onSongChange(): Promise<void> {
   resolving = true; // chart lookup in flight
   let noChart = false; // set when the lookup finds nothing at all (not a picker)
   if (visible) renderOverlay();
+
+  const stored = manualChartFor(item.uri);
+  if (stored) {
+    try {
+      currentSong = parse(stored);
+      rememberManualChart(item.uri, stored); // touch: most recently used
+      resolving = false;
+      autoSkipStreak = 0;
+      void runAutoSync(item.uri, currentSong);
+      if (session && activeScreen === "round-end") activeScreen = "sing";
+      if (visible) renderOverlay();
+      return;
+    } catch (err) {
+      console.error("[singify] stored chart unreadable, dropping it:", err);
+      rememberManualChart(item.uri, null);
+    }
+  }
 
   try {
     const res = await resolveForTrack(item.uri, artist, title);

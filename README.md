@@ -9,11 +9,11 @@ off the mic, solo or 1–4 players head-to-head.
 **Stack:** Bun · TypeScript · Spicetify (Electron/Chromium renderer) · Linux (NixOS)
 
 > [!IMPORTANT]
-> **The extension alone is not enough — it needs the helper.**
-> Chart download and the on-disk cache live in a small Bun server you run yourself
-> (`bun run helper`). The Spotify renderer has no filesystem, so **without the helper
-> running there is nothing to sing** — not even for songs you've already cached.
-> Installing from the Spicetify Marketplace gets you the overlay and none of that.
+> **On its own, the extension sings charts you load by hand; the helper adds automatic download.**
+> Without the helper, load an UltraStar `.txt` (free from [USDB](https://usdb.animux.de/))
+> while the song plays: it's remembered for that track and auto-synced to Spotify. Automatic
+> chart download and the on-disk cache live in a small Bun server you run yourself
+> (`bun run helper`) — the Spicetify Marketplace installs the extension, not the helper.
 
 > [!NOTE]
 > **Developed and tested on Linux only.** Nothing here is deliberately Linux-bound —

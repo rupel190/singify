@@ -1,5 +1,6 @@
 import { describe, test, expect } from "bun:test";
 import {
+  findChartProblem,
   parse,
   getPosition,
   getPitchRange,
@@ -325,5 +326,26 @@ describe("getPitchRange()", () => {
     // notes: 60 (normal), 65 (golden), 0 (freestyle), 55 (normal)
     // freestyle (pitch=0) should be excluded
     expect(getPitchRange(song)).toEqual([55, 65]);
+  });
+});
+
+describe("findChartProblem", () => {
+  const OK = "#TITLE:T\n#ARTIST:A\n#BPM:300\n#GAP:0\n: 0 4 0 Hel\n: 4 4 0 lo\n- 9\nP1\n* 10 2 3 world\nE\ntrailing junk\n";
+  test("a valid chart has no problem (duet markers, line breaks, trailing text after E)", () => {
+    expect(findChartProblem(OK)).toBeNull();
+  });
+  test("names the first line that isn't chart syntax", () => {
+    const p = findChartProblem(OK.replace(": 4 4 0 lo", "Lyrics: hello world"));
+    expect(p?.line).toBe(6);
+    expect(p?.text).toBe("Lyrics: hello world");
+  });
+  test("a note line missing its numbers is flagged", () => {
+    expect(findChartProblem(OK.replace(": 4 4 0 lo", ": 4 lo"))?.line).toBe(6);
+  });
+  test("a lyrics-only text file has no #BPM", () => {
+    expect(findChartProblem("Some song\nla la la")?.line).toBe(1);
+  });
+  test("headers but no notes", () => {
+    expect(findChartProblem("#TITLE:T\n#BPM:300\nE")?.why).toContain("no notes");
   });
 });

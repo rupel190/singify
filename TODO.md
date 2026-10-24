@@ -5,11 +5,14 @@
 - [x] Repo topics, `homepageUrl`, `manifest.json`
 - [x] Helper + platform caveats stated up front (README banner, manifest, landing page)
 - [x] `.gitignore` lets `dist/karaoke.js` through (`dist/*` + `!dist/karaoke.js`)
-- [ ] Manual `.txt` fallback so an install without the helper still works —
-      see [HANDOFF.md](HANDOFF.md)
-- [ ] Commit `dist/karaoke.js`
+- [x] Manual `.txt` fallback: load a chart for a song without the helper — remembered per
+      track, auto-synced; verified in a real client with the helper stopped
+- [x] Commit `dist/karaoke.js`
+- [x] Soften the helper warnings (README, manifest, landing page)
+- [ ] Decide what to do about the helper for Marketplace users (in-app onboarding, or
+      moving USDB download into the extension) — see [HANDOFF.md](HANDOFF.md)
 - [ ] Re-add the `spicetify-extensions` topic — it is the Marketplace's only discovery
-      mechanism, and it is deliberately off until the above lands
+      mechanism; deliberately off until the helper decision is made
 
 ## Shared offsets
 

@@ -43,3 +43,7 @@ export const NOCHART_PREFIX = "singify:nochart:";
 export const UNRELIABLE_PREFIX = "singify:unreliable:";
 /** Per-element UI size from the resize handles — `${UI_SIZE_PREFIX}<element id>`. */
 export const UI_SIZE_PREFIX = "singify:uiSize:";
+/** A chart loaded by hand for a track (no helper needed) — `${MANUAL_CHART_PREFIX}${trackUri}` = .txt. */
+export const MANUAL_CHART_PREFIX = "singify:chart:";
+/** Least-recently-used order of hand-loaded charts, for eviction — JSON [trackUri…]. */
+export const MANUAL_CHART_INDEX_KEY = "singify:chartIndex";

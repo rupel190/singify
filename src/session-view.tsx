@@ -1096,12 +1096,14 @@ export function NoChartInSession(props: {
   searched: boolean;
   /** The helper is unreachable — the real reason there's "no chart". */
   helperDown?: boolean;
+  /** Pick an UltraStar .txt for this track by hand. */
+  onLoadFile?: () => void;
 }) {
   const React = Spicetify.React;
-  const { title, artist, onSkip, onReChoose, searched, helperDown } = props;
+  const { title, artist, onSkip, onReChoose, searched, helperDown, onLoadFile } = props;
   // A down helper is the actual cause — say so instead of blaming the track.
   if (helperDown) {
-    return <HelperDownNotice title={title} artist={artist} onSkip={onSkip} onReChoose={onReChoose} />;
+    return <HelperDownNotice title={title} artist={artist} onSkip={onSkip} onReChoose={onReChoose} onLoadFile={onLoadFile} />;
   }
   return (
     <Center zoom={3}>
@@ -1118,8 +1120,13 @@ export function NoChartInSession(props: {
             ⏭ Skip to next song
           </button>
           <button style={ghostBtn()} onClick={onReChoose}>
-            🔎 Re-choose (R)
+            🔎 Re-choose (Shift+R)
           </button>
+          {onLoadFile && (
+            <button style={ghostBtn()} onClick={onLoadFile}>
+              📂 Load chart file
+            </button>
+          )}
         </div>
       )}
     </Center>
@@ -1141,60 +1148,65 @@ export function HelperDownNotice(props: {
   artist?: string;
   onSkip?: () => void;
   onReChoose?: () => void;
+  /** Pick an UltraStar .txt for this track by hand. */
+  onLoadFile?: () => void;
 }) {
   const React = Spicetify.React;
-  const { title, artist, onSkip, onReChoose } = props;
+  const { title, artist, onSkip, onReChoose, onLoadFile } = props;
+  const muted: React.CSSProperties = {
+    fontSize: 17,
+    color: "rgba(255,255,255,0.7)",
+    maxWidth: 580,
+    textAlign: "center",
+    lineHeight: 1.45,
+  };
+  // Without the helper there's no automatic download — but a chart loaded by
+  // hand works fully (and auto-sync still times it). Lead with that; the helper
+  // is the upgrade, not the requirement.
   return (
     <Center zoom={2.4}>
-      <div style={{ fontSize: 48 }}>⚠️</div>
-      <div style={{ fontSize: 26, fontWeight: 800, color: GOLD }}>
-        Karaoke helper isn't running
-      </div>
-      <div
-        style={{
-          fontSize: 17,
-          color: "rgba(255,255,255,0.7)",
-          maxWidth: 560,
-          textAlign: "center",
-          lineHeight: 1.45,
-        }}
-      >
-        Charts load through the local helper — even songs you've already sung and
-        cached. Start it in a terminal, then it'll pick this track up:
-      </div>
-      <code
-        style={{
-          marginTop: 4,
-          padding: "8px 16px",
-          borderRadius: 10,
-          background: "rgba(255,255,255,0.06)",
-          border: "1px solid rgba(255,255,255,0.12)",
-          fontFamily: "ui-monospace, SFMono-Regular, monospace",
-          fontSize: 18,
-          color: "#fff",
-        }}
-      >
-        bun run helper
-      </code>
+      <div style={{ fontSize: 44 }}>🎤</div>
+      <div style={{ fontSize: 26, fontWeight: 800 }}>No chart for this song yet</div>
       {(title || artist) && (
-        <div style={{ fontSize: 15, color: "rgba(255,255,255,0.5)", marginTop: 4 }}>
+        <div style={{ fontSize: 16, color: "rgba(255,255,255,0.5)" }}>
           {[artist, title].filter(Boolean).join(" — ")}
         </div>
       )}
-      {(onSkip || onReChoose) && (
-        <div style={{ display: "flex", gap: 12, marginTop: 18 }}>
-          {onReChoose && (
-            <button style={primaryBtn()} onClick={onReChoose}>
-              ↻ Try again (R)
-            </button>
-          )}
-          {onSkip && (
-            <button style={ghostBtn()} onClick={onSkip}>
-              ⏭ Skip to next song
-            </button>
-          )}
-        </div>
-      )}
+      <div style={{ ...muted, marginTop: 6 }}>
+        Load its UltraStar chart (a <code>.txt</code>) — it's remembered for this song and
+        synced to Spotify automatically. Free charts:{" "}
+        <a href="https://usdb.animux.de/" target="_blank" rel="noreferrer" style={{ color: ACCENT }}>
+          usdb.animux.de
+        </a>{" "}
+        (free account).
+      </div>
+      <div style={{ display: "flex", gap: 12, marginTop: 14, flexWrap: "wrap", justifyContent: "center" }}>
+        {onLoadFile && (
+          <button style={primaryBtn()} onClick={onLoadFile}>
+            📂 Load chart file
+          </button>
+        )}
+        {onSkip && (
+          <button style={ghostBtn()} onClick={onSkip}>
+            ⏭ Skip to next song
+          </button>
+        )}
+      </div>
+      <div style={{ ...muted, fontSize: 14, color: "rgba(255,255,255,0.45)", marginTop: 18 }}>
+        Want charts to download by themselves? Run the singify helper (
+        <code style={{ color: "rgba(255,255,255,0.75)" }}>bun run helper</code>) —{" "}
+        <a href="https://github.com/rupel190/singify#the-localhost-helper-serverhelperts" target="_blank" rel="noreferrer" style={{ color: ACCENT }}>
+          setup
+        </a>
+        {onReChoose && (
+          <>
+            {" "}·{" "}
+            <a href="#" onClick={(e) => { e.preventDefault(); onReChoose(); }} style={{ color: ACCENT }}>
+              try again
+            </a>
+          </>
+        )}
+      </div>
     </Center>
   );
 }
