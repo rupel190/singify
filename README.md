@@ -8,6 +8,8 @@ off the mic, solo or 1–4 players head-to-head.
 
 **Stack:** Bun · TypeScript · Spicetify (Electron/Chromium renderer) · Linux (NixOS)
 
+**Write-up with screenshots:** [rupel.xyz/music/singify](https://rupel.xyz/music/singify/)
+
 > [!IMPORTANT]
 > **On its own, the extension sings charts you load by hand; the helper adds automatic download.**
 > Without the helper, load an UltraStar `.txt` (free from [USDB](https://usdb.animux.de/))
